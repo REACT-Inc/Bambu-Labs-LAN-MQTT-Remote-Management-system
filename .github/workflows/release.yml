@@ -1,0 +1,52 @@
+name: Publish release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New stable tag, for example v1.0.1 (never reuse a tag)'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate version and branch
+        env:
+          RELEASE_TAG: ${{ inputs.version }}
+        run: |
+          test "$GITHUB_REF" = refs/heads/main
+          python -c 'import os,re; assert re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",os.environ["RELEASE_TAG"]), "Use vMAJOR.MINOR.PATCH"'
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'This tag already exists. Choose a new version.'
+            exit 1
+          fi
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -q
+      - run: bash -n install.sh update.sh install-web-updater.sh
+      - run: for file in static/*.js; do node --check "$file"; done
+      - name: Build release and checksum
+        env:
+          RELEASE_TAG: ${{ inputs.version }}
+        run: |
+          mkdir -p dist
+          python build_release.py "$RELEASE_TAG" dist/3d-printer-management.zip
+          cd dist
+          sha256sum 3d-printer-management.zip > 3d-printer-management.zip.sha256
+      - name: Upload assets to draft, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.version }}
+        run: |
+          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes --draft dist/3d-printer-management.zip dist/3d-printer-management.zip.sha256
+          gh release edit "$RELEASE_TAG" --draft=false --latest

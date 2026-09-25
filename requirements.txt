@@ -1,0 +1,4 @@
+discord.py==2.7.1
+paho-mqtt==2.1.0
+bambulabs-api==2.6.6
+aiohttp>=3.10,<4
