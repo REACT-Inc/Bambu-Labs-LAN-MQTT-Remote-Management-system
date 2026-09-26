@@ -1,10 +1,10 @@
 # 3D Printer Management
 
-A Raspberry Pi 4/5 application with a local web dashboard and a Discord interface sharing the same printer connections, job queues, files, and history. This is a self-hosted Python application, not a cloud-hosted website.
+Runs on a Raspberry Pi 4/5 **or any systemd-based Linux computer** (Ubuntu, Debian, Fedora, Arch, openSUSE and others), with a local web dashboard and a Discord interface sharing the same printer connections, job queues, files, and history. This is a self-hosted Python application, not a cloud-hosted website.
 
 ## Updates from the dashboard
 
-Install this release once with `sudo bash update.sh` from the extracted folder. Then use **Settings \& help → Software update** to upload and install future management ZIPs. Config, queues and print files are preserved. Active prints block updates; failed dashboard startup triggers rollback. See [WEB\_UPDATES.md](WEB_UPDATES.md) for recovery and release-building details.
+Install this release once with `sudo bash Updater/update.sh` from the extracted folder (it was `update.sh` in v1.0). Then use **Settings \& help → Software update** to upload and install future management ZIPs. Config, queues and print files are preserved. Active prints block updates; failed dashboard startup triggers rollback. See [WEB\_UPDATES.md](WEB_UPDATES.md) for recovery and release-building details.
 
 ### Release channels (stable, beta, alpha)
 
@@ -46,6 +46,45 @@ It binds to loopback and the Pi's Tailscale IPv4 address, rather than every netw
 
 For an existing bot at a different path: `sudo bash install.sh --old /path/to/printer\_discord\_bot.py`.
 For a fresh demo without a previous bot: `sudo bash install.sh --demo` (Tailscale or PM\_LISTEN\_IP is still required).
+
+## Install on Ubuntu or another Linux distribution (Pi alternative)
+
+The same installer works on a regular Linux PC, mini PC, VM or server instead of a Raspberry Pi. It detects the distribution and installs what it needs.
+
+| Distribution | Package manager | Notes |
+|---|---|---|
+| **Ubuntu 24.04+**, Linux Mint 22+, Pop!\_OS 24.04+ | apt | Ubuntu 22.04 is **not** supported (Python 3.10) |
+| **Debian 12+**, Raspberry Pi OS Bookworm | apt | |
+| **Fedora** 39+ | dnf | ffmpeg needs RPM Fusion for some cameras (see below) |
+| **Arch Linux**, Manjaro, EndeavourOS | pacman | The installer runs `pacman -Syu`, which upgrades the system |
+| **openSUSE Tumbleweed** | zypper | ffmpeg needs the Packman repository for some cameras |
+| Other systemd distributions | — | Install Python 3.11+ (with `venv`), `sudo` and optionally `ffmpeg` yourself; the installer skips package installation |
+
+Requirements:
+- **systemd**, which runs the service and web updater. WSL without systemd, Docker containers and Alpine/OpenRC aren't supported.
+- **Python 3.11 or newer**. The installer checks this before changing anything.
+- A **network connection to your printers' LAN**. The printers are reached over MQTT and FTPS on the local network, just like from a Pi.
+
+Steps:
+1. Download and extract `3d-printer-management.zip`.
+2. Pick the address the dashboard listens on, then run the installer:
+   ```bash
+   cd printer-management
+   sudo bash install.sh                            # uses the Tailscale address if Tailscale is connected
+   sudo PM_LISTEN_IP=192.168.1.50 bash install.sh  # or this computer's LAN address
+   sudo PM_LISTEN_IP=127.0.0.1 bash install.sh     # or only from this computer
+   ```
+   If Tailscale isn't connected and no address is given, the installer stops and suggests this computer's LAN address.
+3. Save the initial dashboard password it prints, open the printed address, and change the password under **Settings**.
+
+Notes:
+- **Firewall:** if `ufw` or `firewalld` is active, the installer prints the command that opens the dashboard port. It doesn't change your firewall. For example:
+  - `sudo ufw allow 8080/tcp`
+  - `sudo firewall-cmd --permanent --add-port=8080/tcp && sudo firewall-cmd --reload`
+- **ffmpeg** is only needed for camera snapshots from printers with an RTSP camera, such as the X1 series and H2D. If it can't be installed, the installer warns and carries on.
+- **Leave the computer on.** Laptops and desktops should not suspend while prints are queued or running.
+- **Everything else is the same as on the Pi:** file locations, `systemctl`/`journalctl` commands, updates from the dashboard, and `sudo bash Updater/update.sh`.
+- **Pi wording:** screens that say "Pi" (for example **Reboot Pi**, `/server`, `/reboot`) refer to this computer.
 
 ## What works in both interfaces
 
