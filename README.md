@@ -6,6 +6,26 @@ A Raspberry Pi 4/5 application with a local web dashboard and a Discord interfac
 
 Install this release once with `sudo bash update.sh` from the extracted folder. Then use **Settings \& help → Software update** to upload and install future management ZIPs. Config, queues and print files are preserved. Active prints block updates; failed dashboard startup triggers rollback. See [WEB\_UPDATES.md](WEB_UPDATES.md) for recovery and release-building details.
 
+### Release channels (stable, beta, alpha)
+
+Under **Settings → GitHub releases**, choose which releases this Pi follows:
+
+| Channel | Receives | Tags |
+|---|---|---|
+| **Stable** (default) | Tested releases only | `v1.2.0` |
+| **Beta** | Beta pre-releases and stable releases | `v1.2.0-beta.1` |
+| **Alpha** | Alpha and beta pre-releases and stable releases | `v1.2.0-alpha.1` |
+
+The Pi installs the newest release on its channel, where alpha < beta < stable for the same version (`1.2.0-alpha.3` < `1.2.0-beta.1` < `1.2.0`). With **Automatically install newer releases** turned on, new releases on the channel install when all printers are idle. Otherwise, use **Check now** and **Install release…**.
+
+Moving to a more stable channel never downgrades. For example, a Pi on `1.2.0-beta.2` that switches to Stable stays on `1.2.0-beta.2` until `1.2.0` (or newer) is released.
+
+**Publishing:** run the **Publish release** workflow with the new tag:
+* **Stable** tags (`v1.2.0`) must run from `main` and become GitHub's "Latest" release.
+* **Beta and alpha** tags (`v1.2.0-beta.1`, `v1.2.0-alpha.1`) can run from any branch, such as `beta-v1.1`. They are published as GitHub pre-releases, so stable installs never see them.
+
+Never reuse a tag.
+
 ## Install on the existing Pi
 
 1. Download and extract `3d-printer-management.zip` on the Pi.
