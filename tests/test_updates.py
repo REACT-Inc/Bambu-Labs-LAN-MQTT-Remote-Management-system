@@ -49,6 +49,8 @@ class WorkerTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
         for name in ['app','data','config','state','releases']:(self.root/name).mkdir()
         self.patches=[patch.object(worker,k,self.root/v) for k,v in [('APP','app'),('DATA','data'),('CONFIG','config'),('STATE','state'),('RELEASES','releases')]]
+        # The worker runs as root in production and hands files to root; CI runs unprivileged, so skip ownership changes there.
+        if os.geteuid()!=0:self.patches.append(patch.object(worker.os,'chown'))
         for p in self.patches:p.start()
         (worker.STATE/'backups').mkdir();(worker.DATA/'updates').mkdir();(worker.DATA/'uploads').mkdir()
         (worker.DATA/'uploads/part.3mf').write_text('keep');(worker.DATA/'settings.json').write_text('original')

@@ -8,7 +8,7 @@ from test_updates import package
 
 
 def release(version='v1.0.1',size=100):
-    return {'tag_name':version,'draft':False,'prerelease':False,'assets':[
+    return {'tag_name':version,'draft':False,'prerelease':'-' in version,'assets':[
         {'name':ASSET,'id':1,'state':'uploaded','size':size},
         {'name':ASSET+'.sha256','id':2,'state':'uploaded','size':93}]}
 
@@ -25,10 +25,12 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
         return package(change=lambda manifest,files:manifest.update(version=version))
     def setup_fetch(self,payload,checksum=None):
         checksum=checksum or (hashlib.sha256(payload).hexdigest()+'  '+ASSET+'\n').encode()
-        self.gh.fetch=AsyncMock(side_effect=[json.dumps(release(size=len(payload))).encode(),checksum,payload])
+        self.gh.fetch=AsyncMock(side_effect=[json.dumps([release(size=len(payload))]).encode(),checksum,payload])
     def test_version_rules_and_redirect_hosts(self):
         self.assertGreater(semver('v1.10.0'),semver('1.2.0'))
-        for value in ['v1.0.1-rc1','main','v1.0','v01.2.3','1.0.0;rm']:
+        self.assertLess(semver('v1.2.0-alpha.9'),semver('v1.2.0-beta.1'));self.assertLess(semver('v1.2.0-beta.10'),semver('v1.2.0'))
+        self.assertLess(semver('v1.2.0-beta.2'),semver('v1.2.0-beta.10'));self.assertGreater(semver('v1.2.1-alpha.1'),semver('v1.2.0'))
+        for value in ['v1.0.1-rc1','v1.0.1-beta','v1.0.1-beta.01','v1.0.1-BETA.1','main','v1.0','v01.2.3','1.0.0;rm']:
             with self.assertRaises(ValueError):semver(value)
         self.assertTrue(download_host('https://release-assets.githubusercontent.com/a?signature=secret'))
         for url in ['http://github.com/a','https://github.com.evil.test/a','https://user:secret@github.com/a','https://127.0.0.1/a']:
@@ -37,6 +39,9 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
         for field in ['draft','prerelease']:
             data=release();data[field]=True
             with self.assertRaises(ValueError):release_info(data,'test/printers')
+        data=release('v1.1.0-beta.1');data['prerelease']=False  # a beta must never look like the stable "Latest" release
+        with self.assertRaises(ValueError):release_info(data,'test/printers')
+        self.assertEqual(release_info(release('v1.1.0-beta.1'),'test/printers')['channel'],'beta')
         data=release();data['assets'].pop()
         with self.assertRaises(ValueError):release_info(data,'test/printers')
     async def test_verified_install_uses_existing_worker_and_persists_attempt(self):
@@ -58,7 +63,7 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError,'do not match'):await self.gh.install()
         self.updater.queue_package.assert_not_called();self.assertFalse(list(self.updater.inbox.glob('*.zip')))
     async def test_failed_release_is_not_automatically_retried(self):
-        self.gh.config['attempted']='1.0.1';self.gh.fetch=AsyncMock(return_value=json.dumps(release()).encode())
+        self.gh.config['attempted']='1.0.1';self.gh.fetch=AsyncMock(return_value=json.dumps([release()]).encode())
         await self.gh.install(automatic=True)
         self.assertEqual(self.gh.fetch.await_count,1);self.updater.queue_package.assert_not_called()
     async def test_manual_retry_allowed_but_new_latest_requires_review(self):
@@ -93,6 +98,36 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
         with patch('Updater.github_updates.aiohttp.ClientSession',Session):
             data=await self.gh.fetch('https://api.github.com/repos/test/printers/releases/assets/1',100,True)
         self.assertEqual(data,b'zip');self.assertIn('Authorization',calls[0][1]['headers']);self.assertNotIn('Authorization',calls[1][1]['headers'])
+    def listing(self,*tags):
+        self.gh.fetch=AsyncMock(return_value=json.dumps([release(t) for t in tags]+[{'tag_name':'nightly','draft':False}]).encode())
+    async def test_channels_pick_newest_allowed_release(self):
+        tags=('v1.0.1','v1.0.2-beta.1','v1.0.2-alpha.3','v1.0.3-alpha.1')
+        for channel,expected in [('stable','1.0.1'),('beta','1.0.2-beta.1'),('alpha','1.0.3-alpha.1')]:
+            self.gh.config['channel']=channel;self.listing(*tags)
+            self.assertEqual((await self.gh.check())['version'],expected)
+            self.assertIn('New',self.gh.message)
+        self.gh.config['channel']='stable';self.listing('v1.0.2-beta.1')
+        with self.assertRaisesRegex(ValueError,'No stable-channel release'):await self.gh.check()
+    async def test_newer_prerelease_installed_is_never_downgraded(self):
+        with patch('Updater.github_updates.VERSION','1.0.2-beta.1'):
+            self.gh.config['channel']='stable';self.listing('v1.0.1')
+            await self.gh.check();self.assertFalse(self.gh.public()['available']);self.assertIn('newer than',self.gh.message)
+            self.assertEqual(self.gh.public()['installed_channel'],'beta')
+            with self.assertRaisesRegex(ValueError,'No newer release'):
+                self.gh.fetch=AsyncMock(return_value=json.dumps([release('v1.0.1')]).encode());await self.gh.install()
+            self.listing('v1.0.2');await self.gh.check();self.assertTrue(self.gh.public()['available'])
+    async def test_channel_setting_is_validated_and_kept(self):
+        class Request:
+            def __init__(self,data):self.data=data
+            async def json(self):return self.data
+        self.gh.save=Mock()
+        await self.gh.settings(Request({'repository':'test/printers','channel':'beta','token':'secret-token'}))
+        self.assertEqual(self.gh.public()['channel'],'beta')
+        await self.gh.settings(Request({'repository':'test/printers'}));self.assertEqual(self.gh.channel,'beta')
+        with self.assertRaises(ValueError):await self.gh.settings(Request({'repository':'test/printers','channel':'nightly'}))
+        self.gh.config['channel']='bogus';self.assertEqual(self.gh.channel,'stable')
+        with patch('Updater.github_updates.VERSION','dev-build'):self.assertEqual(self.gh.public()['installed_channel'],'unknown')
+
 
 class AutomaticIdleTests(unittest.TestCase):
     def test_offline_stale_and_busy_printers_block_auto(self):
