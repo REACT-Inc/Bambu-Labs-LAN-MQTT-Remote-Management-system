@@ -784,7 +784,7 @@ def connect_printer(printer):
             if not isinstance(new, dict) or not new:
                 return
             listener=globals().get('control_response_listener')
-            if listener and bot_loop and new.get('command') in ('set_fan','set_ctt','gcode_line','print_speed'):
+            if listener and bot_loop and new.get('command') in ('set_fan','set_ctt','gcode_line','print_speed','xyz_ctrl'):
                 bot_loop.call_soon_threadsafe(listener,name,dict(new))
             with data_lock:
                 current = reports.setdefault(name, {})

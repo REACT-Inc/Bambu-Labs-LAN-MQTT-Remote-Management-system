@@ -21,8 +21,25 @@ class ControlsTests(unittest.TestCase):
     def test_payload(self):
         self.controls.apply('A1 Mini','move',-1,'Z',True,True)
         data=json.loads(self.client.publish.call_args.args[1])['print']
-        self.assertEqual(data['param'],'G91\nG1 Z-1 F300\nG90\nM400\n')
+        self.assertEqual(data['command'],'gcode_line')
+        self.assertEqual(data['param'],'M211 S\nM211 X1 Y1 Z1\nM1002 push_ref_mode\nG91\nG1 Z-1.0 F300\nM1002 pop_ref_mode\nM211 R\n')
         with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',-1,'Z',True,True)
+    def test_axis_ctrl_firmware_uses_xyz_ctrl(self):
+        # Bit 38 of "fun" marks firmware (e.g. H2D) that jogs via xyz_ctrl instead of G-code.
+        self.core.state_data=lambda n:('IDLE',0,{'fun':format(1<<38,'x')},True)
+        for value,axis,expected in [(10,'X',{'axis':'X','dir':1,'mode':1}),(-1,'Y',{'axis':'Y','dir':-1,'mode':0}),(-1,'Z',{'axis':'Z','dir':-1,'mode':0})]:
+            self.controls.moved.clear()
+            self.controls.apply('A1 Mini','move',value,axis,True,True)
+            data=json.loads(self.client.publish.call_args.args[1])['print']
+            self.assertEqual({k:data[k] for k in ('command','axis','dir','mode')},{'command':'xyz_ctrl',**expected})
+        self.client.publish.reset_mock();self.controls.moved.clear()
+        for value,axis in [(5,'X'),(0.5,'Y')]:
+            with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',value,axis,True,True)
+        self.client.publish.assert_not_called()
+    def test_axis_ctrl_flag_parsing(self):
+        from printer_controls import axis_ctrl_supported
+        self.assertFalse(axis_ctrl_supported({}));self.assertFalse(axis_ctrl_supported({'fun':'garbage'}))
+        self.assertFalse(axis_ctrl_supported({'fun':format((1<<38)-1,'X')}));self.assertTrue(axis_ctrl_supported({'fun':'4000000000'}))
     def test_move_rechecks(self):
         for state in ['RUNNING','PAUSE','PREPARE','FAILED','unknown']:
             self.core.state_data=lambda n,s=state:(s,0,{},True)
