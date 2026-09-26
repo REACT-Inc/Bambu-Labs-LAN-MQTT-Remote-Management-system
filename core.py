@@ -34,7 +34,7 @@ from pathlib import Path
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands # pyright: ignore[reportMissingImports]
 import paho.mqtt.client as mqtt
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')

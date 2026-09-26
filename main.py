@@ -1,7 +1,7 @@
 import asyncio
 import contextlib
 import signal
-from aiohttp import web
+from aiohttp import web # pyright: ignore[reportMissingImports]
 import core
 from queueing import Engine, Store
 from dashboard import Dashboard

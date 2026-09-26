@@ -35,7 +35,7 @@ fi
 if [ -f /etc/systemd/system/3d-printer-management.service ]; then cp -p /etc/systemd/system/3d-printer-management.service "$BACKUP_DIR/management.service"; fi
 if [ -f "$CONFIG_DIR/config.json" ]; then cp -p "$CONFIG_DIR/config.json" "$BACKUP_DIR/config.json"; fi
 install -d -m 755 "$APP_DIR"
-for file in github_updates.py version.py GITHUB_SETUP.md thermal_controls.py web_updates.py update_package.py WEB_UPDATES.md meshcentral_client.py plate_swap.py plate_swap_discord.py printer_controls.py controls_discord.py live_camera.py core.py extra_discord.py printer_files.py printer_errors.py bambu_error_catalog.json BAMBU_RESOURCE_LICENSE.txt ERROR_SOURCES.md camera_capture.py progress_notifications.py queueing.py dashboard.py discord_queue.py main.py configure.py team.py team_discord.py requirements.txt README.md LAPTOPS.md; do
+for file in github_updates.py version.py thermal_controls.py web_updates.py update_package.py WEB_UPDATES.md meshcentral_client.py plate_swap.py plate_swap_discord.py printer_controls.py controls_discord.py live_camera.py core.py extra_discord.py printer_files.py printer_errors.py bambu_error_catalog.json BAMBU_RESOURCE_LICENSE.txt ERROR_SOURCES.md camera_capture.py progress_notifications.py queueing.py dashboard.py discord_queue.py main.py configure.py team.py team_discord.py requirements.txt README.md LAPTOPS.md; do
   install -m 644 "$SOURCE_DIR/$file" "$APP_DIR/$file"
 done
 install -d "$APP_DIR/static"
