@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'New stable tag, for example v1.0.1 (never reuse a tag)'
+        description: 'New tag (never reuse one): v1.2.0 for stable, v1.2.0-beta.1 for beta, v1.2.0-alpha.1 for alpha'
         required: true
         type: string
 permissions:
@@ -25,8 +25,12 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.version }}
         run: |
-          test "$GITHUB_REF" = refs/heads/main
-          python -c 'import os,re; assert re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)",os.environ["RELEASE_TAG"]), "Use vMAJOR.MINOR.PATCH"'
+          python -c 'import os,re; assert re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta)\.(0|[1-9][0-9]*))?",os.environ["RELEASE_TAG"]), "Use vMAJOR.MINOR.PATCH, optionally with -beta.N or -alpha.N"'
+          # Stable releases only from main; alpha/beta pre-releases may come from any branch (e.g. beta-v1.1).
+          case "$RELEASE_TAG" in
+            *-alpha.*|*-beta.*) ;;
+            *) test "$GITHUB_REF" = refs/heads/main || { echo 'Stable releases must be published from main.'; exit 1; } ;;
+          esac
           if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
             echo 'This tag already exists. Choose a new version.'
             exit 1
@@ -49,4 +53,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.version }}
         run: |
           gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes --draft dist/3d-printer-management.zip dist/3d-printer-management.zip.sha256
-          gh release edit "$RELEASE_TAG" --draft=false --latest
+          case "$RELEASE_TAG" in
+            *-alpha.*|*-beta.*) gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false ;;
+            *) gh release edit "$RELEASE_TAG" --draft=false --latest ;;
+          esac
