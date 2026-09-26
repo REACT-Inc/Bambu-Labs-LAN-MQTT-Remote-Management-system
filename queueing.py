@@ -192,7 +192,7 @@ class Engine:
         self.core, self.store = core, store
         self.locks = {}
         self.tasks = set()
-        from plate_swap import PlateSwap
+        from swapMod.plate_swap import PlateSwap
         self.plate_swap = PlateSwap(core,store)
 
     def spawn(self, coro):

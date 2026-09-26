@@ -8,8 +8,8 @@ import tempfile
 import time
 from pathlib import Path
 from aiohttp import web
-from web_updates import WebUpdates
-from github_updates import GitHubUpdates
+from Updater.web_updates import WebUpdates
+from Updater.github_updates import GitHubUpdates
 from printer_errors import describe as describe_error
 from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits

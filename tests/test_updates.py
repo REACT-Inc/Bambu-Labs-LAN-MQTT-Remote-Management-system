@@ -2,8 +2,8 @@ import hashlib,io,json,logging,os,tempfile,unittest,zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch,Mock
-from update_package import inspect_package,REQUIRED
-import update_worker as worker
+from Updater.update_package import inspect_package,REQUIRED
+from Updater import update_worker as worker
 
 
 def package(extra=None,change=None):
@@ -41,7 +41,7 @@ class PackageTests(unittest.TestCase):
             with self.subTest(change=change),self.assertRaises(ValueError):inspect_package(io.BytesIO(package(change=change)))
         with self.assertRaises(ValueError):inspect_package(io.BytesIO(b'not a zip'))
     def test_size_limit(self):
-        with patch('update_package.MAX_EXPANDED',1),self.assertRaises(ValueError):inspect_package(io.BytesIO(package()))
+        with patch('Updater.update_package.MAX_EXPANDED',1),self.assertRaises(ValueError):inspect_package(io.BytesIO(package()))
 
 
 class WorkerTests(unittest.TestCase):
@@ -107,7 +107,7 @@ class UpdateHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.dashboard=Dashboard(self.core,self.store,Engine(self.core,self.store))
         (d/'auth.json').write_text(json.dumps(password_hash('test-password-123')))
         self.client=TestClient(TestServer(self.dashboard.app));await self.client.start_server()
-        self.statuspatch=patch('web_updates.STATUS',d/'updater-status.json');self.statuspatch.start()
+        self.statuspatch=patch('Updater.web_updates.STATUS',d/'updater-status.json');self.statuspatch.start()
     async def asyncTearDown(self):
         await self.client.close();self.store.db.close();self.statuspatch.stop();self.tmp.cleanup()
     async def login(self):
