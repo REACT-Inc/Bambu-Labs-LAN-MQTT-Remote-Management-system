@@ -59,9 +59,11 @@ For a fresh demo without a previous bot: `sudo bash install.sh --demo` (Tailscal
 * Notification-channel and public-command-channel settings.
 * Approved Discord user IDs alongside the server Administrator permission.
 
-The web dashboard uses a shared administrator password. Anyone with this password has management access. Discord settings, queue starts, queue reordering/removal, and manual resolution require a server administrator or approved user ID. All members in an allowed server can view printers, pause/resume/stop (as before), and submit queue jobs. Neither knowing the IP address nor being on Tailscale bypasses the dashboard login.
+The web dashboard uses a shared administrator password. Anyone with this password has management access. Discord settings, queue starts, queue reordering/removal, and manual resolution require a server administrator or approved user ID. All members in an allowed server can view printers and submit queue jobs; pause/resume/stop, lights and all printer controls are Admin-only (see [COMMANDS.md](COMMANDS.md)). Neither knowing the IP address nor being on Tailscale bypasses the dashboard login.
 
 ## Discord commands
+
+The full list of commands, their options, and who can run each one (Everyone or Admin) is in [COMMANDS.md](COMMANDS.md), along with the Discord permissions the bot needs.
 
 * `/status`, `/printer`, `/filaments`, `/pause`, `/resume`, `/stop`, `/help`
 * `/queueadd name:BOB file:<sliced .3mf>` or `/queueadd name:BOB remote:cache/model.gcode.3mf`
