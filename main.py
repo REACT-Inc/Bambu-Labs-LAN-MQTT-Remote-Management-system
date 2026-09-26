@@ -3,6 +3,8 @@ import contextlib
 import signal
 from aiohttp import web # pyright: ignore[reportMissingImports]
 import core
+import diagnostics
+import issue_reports
 from queueing import Engine, Store
 from dashboard import Dashboard
 from discord_Intergration.discord_queue import install
@@ -14,6 +16,8 @@ from discord_Intergration.team_discord import install as install_team
 
 
 async def main():
+    diagnostics.setup(core.DATA_DIR,core.log)
+    diagnostics.install_loop_handler(asyncio.get_running_loop(),core.log)
     store=Store(core.DATA_DIR/'management.sqlite3')
     engine=Engine(core,store)
     dashboard=Dashboard(core,store,engine)
@@ -27,6 +31,8 @@ async def main():
     install_extras(core,store)
     install_controls(core,dashboard.controls)
     install_plate_swap(core,engine)
+    diagnostics.install_discord(core,store)
+    issue_reports.install_discord(core,dashboard.issue_reports)
     # Printer monitoring and web UI do not depend on Discord being connected.
     if not core.EXAMPLE_MODE:
         for printer in core.PRINTERS:

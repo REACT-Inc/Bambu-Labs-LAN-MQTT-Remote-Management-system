@@ -106,6 +106,8 @@ The dashboard refreshes every five seconds; it is not a live video stream. Camer
 * Uploaded files: `uploads/`
 * Channel settings: `settings.json`
 * Hashed dashboard password: `auth.json`
+* Error and service logs: `logs/management.log` (rotates at 2 MB, keeps 5 older files)
+* Problem report destination and token: `issue-reports.json`
 
 ```bash
 sudo systemctl status 3d-printer-management --no-pager
@@ -138,6 +140,43 @@ sudo systemctl enable --now printer-discord-bot
 ```
 
 The installer retains a backup under `/var/backups/3d-printer-management/`. The previous `/tmp` source may disappear on reboot; use that backup if restoring later. No bot token or printer access code is included in this download.
+
+## Error logs and diagnostic reports
+
+Everything the service logs (warnings, errors, crashes in background threads and tasks) is written to `/var/lib/3d-printer-management/logs/management.log` as well as the systemd journal. Passwords, tokens and printer access codes are removed before anything is written.
+
+**Error IDs.** When a Discord command, button or dashboard request fails, the user sees a short error ID such as `3f9a1c2e`. The same ID is in the log next to the full error, so a report of "it failed with ID 3f9a1c2e" can be matched exactly.
+
+**Diagnostic report.** A ZIP containing the recent logs, the last 100 errors, printer connection status and latest telemetry, recent activity, version information and the configuration. Passwords, tokens and access codes are replaced with `[redacted]` and printer serial numbers are shortened; printer names and IP addresses are included. Get it from:
+
+* Dashboard → **Settings → Diagnostics & error logs → Download diagnostic report**. The same panel lists recent errors with their IDs.
+* Discord → `/diagnostics` (administrators and approved user IDs). The report is sent privately.
+
+When filing a GitHub issue, attach the report and include the error ID if there was one.
+
+### Sending a problem report to the developers
+
+Users can send a report straight to the developers from **Settings → Send a problem report** in the dashboard, or with `/reportissue` in Discord (administrators and approved user IDs). By default this opens a GitHub issue in `REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system` containing:
+
+* the title and description the user typed
+* the version, Python and OS versions, and uptime
+* a printer status table: name, model, connection, state, print error, time since the last report, and the number of HMS alerts
+* the last 10 errors with their error IDs, and the last 80 log lines
+
+Passwords, tokens, access codes, IP addresses and serial numbers are removed because the issue may be public. If more detail is needed, ask the user for the full diagnostic ZIP. Only one report can be sent every 2 minutes.
+
+**Setup:** create a fine-grained GitHub token with **Issues: Read and write** access to the repository. Save it under **Settings → Send a problem report → Report destination**, which is also where the repository can be changed. The token stays on the Pi (`issue-reports.json`, mode 600) and is never shown again. To preset it for every install, add it to `config.json`:
+
+```json
+"issue_reports": {"destination": "github", "repository": "REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system", "token": "github_pat_..."}
+```
+
+Settings saved in the dashboard override `config.json`. Other destinations, such as a Discord webhook or email, can be added in `issue_reports.py` by writing one sender function and registering it in `SENDERS`.
+
+```bash
+sudo tail -n 100 /var/lib/3d-printer-management/logs/management.log
+sudo grep 3f9a1c2e /var/lib/3d-printer-management/logs/management.log*
+```
 
 ## Validation and implementation notes
 
