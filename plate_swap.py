@@ -1,3 +1,4 @@
+"""Per-printer Swapmod A1m workflow for vendor-generated Swaplist batch files."""
 import json
 import time
 

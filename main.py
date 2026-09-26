@@ -1,16 +1,16 @@
 import asyncio
 import contextlib
 import signal
-from aiohttp import web # pyright: ignore[reportMissingImports]
+from aiohttp import web
 import core
 from queueing import Engine, Store
 from dashboard import Dashboard
-from discord_Intergration.discord_queue import install
-from discord_Intergration.extra_discord import install as install_extras
-from discord_Intergration.controls_discord import install as install_controls
-from swapMod.plate_swap_discord import install as install_plate_swap
+from discord_queue import install
+from extra_discord import install as install_extras
+from controls_discord import install as install_controls
+from plate_swap_discord import install as install_plate_swap
 from team import Team
-from discord_Intergration.team_discord import install as install_team
+from team_discord import install as install_team
 
 
 async def main():

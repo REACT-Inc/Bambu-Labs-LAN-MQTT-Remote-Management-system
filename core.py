@@ -34,7 +34,7 @@ from pathlib import Path
 
 import discord
 from discord import app_commands
-from discord.ext import commands # pyright: ignore[reportMissingImports]
+from discord.ext import commands
 import paho.mqtt.client as mqtt
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
@@ -418,28 +418,14 @@ def tray_text(tray):
     return f"{safe(tray['tray_type'])} • #{safe(tray.get('tray_color', '?'))} • {remaining} remaining"
 
 
-def tray_present(exist_bits, unit, tray):
-    # tray_exist_bits is a hex mask with bit (unit * 4 + slot) set for each loaded 4-slot AMS tray.
-    # Merged reports keep the last known tray data, so this is what tells us a spool was removed.
-    try:
-        unit_id, tray_id = int(unit.get('id')), int(tray.get('id'))
-        if exist_bits is None or unit_id >= 32:
-            return True
-        return bool(int(str(exist_bits), 16) >> (unit_id * 4 + tray_id) & 1)
-    except (TypeError, ValueError):
-        return True
-
-
 def filament_embed(name):
     _, _, data, connected = state_data(name)
     embed = card('🧵 ' + display_name(name) + ' • Filaments', '' if connected else '🔴 Offline • Last reported data', BLUE if connected else RED)
     ams = data.get('ams', {})
     units = ams if isinstance(ams, list) else ams.get('ams', [])
-    exist_bits = None if isinstance(ams, list) else ams.get('tray_exist_bits')
     for unit in units[:24]:
         text = f"Humidity: {unit.get('humidity', '?')} • Temperature: {unit.get('temp', '?')}°C\n"
-        text += '\n'.join(f"**Slot {tray.get('id', '?')}** — {tray_text(tray if tray_present(exist_bits, unit, tray) else None)}"
-                          for tray in unit.get('tray', []))
+        text += '\n'.join(f"**Slot {tray.get('id', '?')}** — {tray_text(tray)}" for tray in unit.get('tray', []))
         field(embed, 'AMS ' + str(unit.get('id', '?')), text, False)
     external = data.get('vt_tray')
     if external:
@@ -721,24 +707,10 @@ def report_progress(name, data):
         queue_notification(name, f'🖨️ Print progress • {milestone}%', progress_description(data), BLUE, True)
 
 
-def keyed_by_id(items):
-    return isinstance(items, list) and all(isinstance(x, dict) and 'id' in x for x in items)
-
-
 def merge_report(old, new):
     for key, value in new.items():
         if isinstance(value, dict) and isinstance(old.get(key), dict):
             merge_report(old[key], value)
-        elif keyed_by_id(value) and keyed_by_id(old.get(key)):
-            # Incremental reports (e.g. ams.ams, ams.ams[].tray) only list the units/slots that
-            # changed; replacing the whole list would drop the others, such as AMS 0 on the H2D.
-            existing = {str(item['id']): item for item in old[key]}
-            for item in value:
-                current = existing.get(str(item['id']))
-                if current is None:
-                    old[key].append(item)
-                else:
-                    merge_report(current, item)
         else:
             old[key] = value
 

@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from discord_Intergration.extra_discord import permitted
+from extra_discord import permitted
 from printer_controls import prepare
 from thermal_controls import fans
 

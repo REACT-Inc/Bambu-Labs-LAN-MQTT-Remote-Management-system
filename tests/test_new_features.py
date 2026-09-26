@@ -58,7 +58,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             spec=importlib.util.spec_from_file_location('test_core_features',Path(__file__).parents[1]/'core.py')
             self.core=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.core)
         self.store=SimpleNamespace(event=MagicMock())
-        from discord_Intergration.extra_discord import install
+        from extra_discord import install
         install(self.core,self.store)
         self.i=MagicMock(spec=discord.Interaction)
         self.i.guild_id=123;self.i.channel_id=789;self.i.guild=SimpleNamespace(name='Team')
@@ -72,10 +72,10 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         from queueing import Store, Engine
         from dashboard import Dashboard
         from team import Team
-        from discord_Intergration.discord_queue import install as install_queue
-        from discord_Intergration.team_discord import install as install_team
-        from discord_Intergration.controls_discord import install as install_controls
-        from swapMod.plate_swap_discord import install as install_swap
+        from discord_queue import install as install_queue
+        from team_discord import install as install_team
+        from controls_discord import install as install_controls
+        from plate_swap_discord import install as install_swap
         store=Store(Path(self.tmp.name)/'help.sqlite')
         try:
             engine=Engine(self.core,store)
@@ -124,7 +124,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         finally:store.db.close()
 
     async def test_plate_swap_permission_and_registration(self):
-        from swapMod.plate_swap_discord import install
+        from plate_swap_discord import install
         engine=SimpleNamespace(plate_swap=MagicMock())
         install(self.core,engine)
         for command in self.core.bot.tree.get_commands():command.to_dict(self.core.bot.tree)
@@ -138,7 +138,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.i.followup.send.call_args.kwargs['ephemeral'])
 
     async def test_controls_permission_and_registration(self):
-        from discord_Intergration.controls_discord import install
+        from controls_discord import install
         controls=SimpleNamespace(apply=MagicMock())
         install(self.core,controls)
         for command in self.core.bot.tree.get_commands():command.to_dict(self.core.bot.tree)
@@ -246,7 +246,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.core.display_name(name),'New Name')
 
     async def test_meeting_specific_assignment_private_during_override(self):
-        from discord_Intergration.team_discord import install
+        from team_discord import install
         team=SimpleNamespace(assign=AsyncMock(return_value={'id':'abc','member':'88','status':'assigned_private'}))
         install(self.core,team)
         self.core.public_channels[(123,789)]=float('inf')
