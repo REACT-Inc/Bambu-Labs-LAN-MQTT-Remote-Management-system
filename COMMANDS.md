@@ -1,19 +1,31 @@
 # Discord commands and permissions
 
-Every slash command the bot registers, who can run it, and what else it needs. This list reflects the code on the `beta-v1.1` branch. `tests/test_commands_doc.py` fails if a command is added, removed, or changes permission level without this file being updated.
+Every slash command the bot registers, who can run it **by default**, and what else it needs. Administrators can change who can run each command in the dashboard under **Settings → Discord command permissions**. This list reflects the code on the `beta-v1.1` branch. `tests/test_commands_doc.py` fails if a command is added, removed, or changes permission level without this file being updated.
 
 ## Who can run what
 
-All commands work only in servers listed in `guild_ids` in `config.json`. They never work in DMs. Beyond that there are two permission levels:
+All commands work only in servers listed in `guild_ids` in `config.json`. They never work in DMs. Each command has one of four permission levels:
 
-| Level | Who |
+| Level | Who can run it |
 |---|---|
 | **Everyone** | Any member of an authorized server. |
-| **Admin** | A member with the Discord **Administrator** permission in that server, **or** a user whose ID is in the approved list (`admin_user_ids` in `config.json`, or **Settings → Approved user IDs** in the dashboard). |
+| **Allowed roles + admins** | Admins, plus members with one of the **Allowed role IDs** set in the dashboard. |
+| **Admins only** (Admin) | A member with the Discord **Administrator** permission in that server, **or** a user whose ID is in the approved list (`admin_user_ids` in `config.json`, or **Settings → Approved user IDs** in the dashboard). |
+| **Off** | Nobody, not even admins. The command is also hidden from `/help` and `/adminhelp`. |
 
-**How the Admin check works:**
-- It's enforced centrally by `PrinterTree.interaction_check` in `core.py`, using the `ADMIN_COMMANDS` set. For groups such as `/plateswap`, the top-level name counts.
-- Most admin commands check again inside the command.
+The tables below show the **default** level of each command.
+
+**Changing permissions:** open the dashboard, go to **Settings → Discord command permissions**, pick a level for each command and save.
+- Opening an admin command to everyone asks for confirmation first.
+- **Reset all to defaults** puts every command back to the levels in this file.
+- Changes apply immediately. They're saved in `settings.json` as `command_permissions` (only the commands that differ from their default) and `member_role_ids`.
+- Each change is recorded in the Activity feed and the service log.
+
+**Locked commands (🔒):** `/reboot`, `/laptop`, `/laptops`, `/dm`, `/setnotificationchannel`, `/setcommandschannel`, `/archive` and `/unarchive`. These restart the Pi, run commands on laptops, message people as the server, or change channels, so they can only be **Admins only** or **Off**, never opened to everyone or to a role.
+
+**How the check works:**
+- Every command goes through one function, `core.command_allowed`. The default levels come from `ADMIN_COMMANDS` in `core.py`, and dashboard settings override them. For groups such as `/plateswap`, the top-level name counts.
+- The check runs when the command starts. Most commands run it again when their confirmation button is pressed.
 - Confirmation buttons can only be pressed by the person who ran the command, and they expire after 60 seconds. For admin commands, admin access is checked again when the button is pressed.
 
 **Logging:**
@@ -23,7 +35,7 @@ All commands work only in servers listed in `guild_ids` in `config.json`. They n
 
 **Other rules for every command:**
 - Commands are refused while a management software update is being installed.
-- Replies are **public** in the channel where the command was run. `/dm`, `/publiccommands`, `/assign report` and `/meeting report assign` always reply privately. Admin-only error messages are also private.
+- Replies are **public** in the channel where the command was run. `/dm`, `/publiccommands`, `/assign report` and `/meeting report assign` always reply privately. "Not allowed" replies follow the same rule.
 
 Parameters marked `?` are optional. `name?` is a printer name, with autocomplete. When it's left out, the bot shows printer selection buttons.
 
@@ -127,4 +139,5 @@ The bot doesn't need the Administrator permission. `/dm` and `/remindme` only wo
 
 * Discord server **Administrators** always count.
 * To let someone run admin commands without making them a Discord administrator, add their user ID under **Settings → Approved user IDs** in the dashboard, or to `admin_user_ids` in `config.json`.
-* To change which commands need Admin, edit `ADMIN_COMMANDS` in `core.py`, then update this file. The test will remind you.
+* To give a group of members access to certain commands without making them admins, put their Discord role ID in **Allowed role IDs**, then set those commands to **Allowed roles + admins**.
+* To change a command's permission on one install, use the dashboard (see above). To change the **default** for every install, edit `ADMIN_COMMANDS` in `core.py`, then update this file. The test will remind you.

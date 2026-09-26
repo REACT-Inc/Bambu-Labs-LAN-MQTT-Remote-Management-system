@@ -106,6 +106,64 @@ class MemberCommandTests(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs('printer-bot','WARNING') as logs:await self.core.bot.tree.interaction_check(i)
         self.assertIn('Denied /dm user=555 message=[text]',logs.output[0]);self.assertNotIn('top secret',logs.output[0])
 
+    async def test_dashboard_overrides_change_who_can_run_commands(self):
+        tree=self.core.bot.tree
+        async def allowed(name,i=None):
+            i=i or interaction();i.command=tree.get_command(name);return await tree.interaction_check(i)
+        self.core.settings['command_permissions']={'pause':'admin','temperature':'everyone','stop':'disabled','queuestart':'role'}
+        self.assertFalse(await allowed('pause'));self.assertTrue(await allowed('temperature'))
+        admin=interaction(42);admin.command=tree.get_command('stop')
+        self.assertFalse(await tree.interaction_check(admin))  # "off" applies to admins too
+        self.assertIn('turned off',admin.response.send_message.call_args.args[0])
+        self.assertFalse(await allowed('queuestart'))
+        self.core.settings['member_role_ids']=[555]
+        member=interaction();member.user.roles=[SimpleNamespace(id=555)]
+        self.assertTrue(await allowed('queuestart',member));self.assertTrue(await allowed('queuestart',interaction(42)))
+        # Buttons and inner checks follow the same setting: an opened /temperature reaches its confirmation.
+        from discord_Intergration.controls_discord import install
+        controls=SimpleNamespace(apply=MagicMock(return_value='Bed → 60 °C • Submitted'));install(self.core,controls)
+        i=interaction();await tree.get_command('temperature').callback(i,'bed',60,self.printers[0])
+        await i.followup.send.call_args.kwargs['view'].children[0].callback(interaction())
+        self.assertEqual(controls.apply.call_args.kwargs['author'],'Discord Alex (7)')
+        i=interaction();await tree.get_command('temperature').callback(i,'chamber',50,self.printers[0])
+        self.assertIn('Administrators',i.response.send_message.call_args.args[0])  # /temperature chamber follows /chamber
+
+    async def test_locked_commands_never_open_and_help_hides_off_commands(self):
+        self.core.settings['command_permissions']={'reboot':'everyone','dm':'role','laptop':'disabled','ftc':'disabled'}
+        self.assertEqual((self.core.command_level('reboot'),self.core.command_level('dm'),self.core.command_level('laptop')),('admin','admin','disabled'))
+        self.assertFalse(self.core.command_allowed(interaction(),'reboot'))
+        everyday=' '.join(f.value for f in self.core.help_embed().fields)
+        self.assertNotIn('/ftc',everyday);self.assertIn('/pause',everyday)
+
+    async def test_dashboard_permission_api(self):
+        from dashboard import Dashboard
+        from queueing import Store,Engine
+        store=Store(Path(self.tmp.name)/'perm.sqlite')
+        try:
+            dash=Dashboard(self.core,store,Engine(self.core,store))
+            from discord_Intergration.controls_discord import install
+            from swapMod.plate_swap_discord import install as install_swap
+            from discord_Intergration.team_discord import install as install_team
+            from team import Team
+            install(self.core,dash.controls);install_swap(self.core,SimpleNamespace(plate_swap=MagicMock()));install_team(self.core,Team(self.core,store,dash))
+            class Request:
+                def __init__(self,data):self.data=data
+                async def json(self):return self.data
+            state=dash.permission_state();rows={r['command']:r for r in state['commands']}
+            self.assertEqual((rows['pause']['level'],rows['move']['level'],rows['reboot']['locked']),('everyone','admin',True))
+            self.assertIn('plateswap check',rows['plateswap']['subcommands'])
+            for bad in [{'levels':{'nope':'admin'}},{'levels':{'pause':'sometimes'}},{'levels':{'reboot':'everyone'}},{'levels':{},'member_role_ids':'-5'}]:
+                with self.assertRaises(ValueError):await dash.save_permissions(Request(bad))
+            response=await dash.save_permissions(Request({'levels':{'move':'role','pause':'everyone','fan':'admin'},'member_role_ids':'555\n777'}))
+            saved=json.loads(Path(self.core.SETTINGS_FILE).read_text())
+            self.assertEqual(saved['command_permissions'],{'move':'role','fan':'admin'})  # defaults are not stored
+            self.assertEqual(saved['member_role_ids'],[555,777])
+            events=store.events();self.assertEqual(events[0]['title'],'Discord permissions changed')
+            self.assertIn('/move: Admins only → Allowed roles + admins',events[0]['detail']);self.assertIn('web administrator',events[0]['detail'])
+            await dash.save_permissions(Request({'levels':{'move':'admin','fan':'everyone'},'member_role_ids':'555\n777'}))
+            self.assertEqual(json.loads(Path(self.core.SETTINGS_FILE).read_text())['command_permissions'],{})
+        finally:store.db.close()
+
 
 if __name__=='__main__':
     unittest.main()

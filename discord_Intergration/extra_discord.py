@@ -8,23 +8,17 @@ from printer_files import Browser, render, normalize
 
 
 def permitted(core,i):
+    # Administrator or approved user ID. Command access goes through core.require/command_allowed instead.
     return i.guild_id in core.ALLOWED_GUILD_IDS and (i.user.id in core.SETTINGS_USER_IDS or isinstance(i.user,discord.Member) and i.user.guild_permissions.administrator)
 
 
 def install(core,store):
     bot=core.bot;browser=Browser(core);original=core.run_action
-    async def admin(i):
-        if permitted(core,i):return True
-        text='Administrators and approved user IDs only.'
-        if i.response.is_done():await i.followup.send(text,ephemeral=core.ephemeral(i))
-        else:await i.response.send_message(text,ephemeral=core.ephemeral(i))
-        return False
-
     @bot.tree.command(name='dm',description='Preview and send a bot DM (admins/approved users)')
     @app_commands.guild_only()
     @app_commands.describe(user='User ID or @mention',message='Message to send privately')
     async def dm(i:discord.Interaction,user:str,message:str):
-        if not await admin(i):return
+        if not await core.require(i,'dm'):return
         await i.response.defer(ephemeral=True)
         match=re.fullmatch(r'(?:<@!?)?([0-9]{15,22})>?',user.strip())
         if not match or not 1<=len(message)<=3500:
@@ -38,7 +32,7 @@ def install(core,store):
             def __init__(self):
                 super().__init__(i.user.id);self.button('Send DM',self.send,discord.ButtonStyle.primary);self.button('Cancel',self.cancel)
             async def send(self,click):
-                if not await admin(click):return
+                if not await core.require(click,'dm'):return
                 if self.used:return
                 self.used=True;self.stop()
                 await click.response.defer()
@@ -58,7 +52,7 @@ def install(core,store):
     @app_commands.guild_only()
     @app_commands.describe(name='Current name or partial match',new_name='New management display name')
     async def rename(i:discord.Interaction,new_name:str,name:str=None):
-        if not await admin(i):return
+        if not await core.require(i,'rename'):return
         await i.response.defer(ephemeral=core.ephemeral(i))
         async def confirm_for(click,printer):
             class Rename(core.OwnedView):
@@ -67,7 +61,7 @@ def install(core,store):
                     self.button('Rename in management',self.confirm,discord.ButtonStyle.primary)
                     self.button('Cancel',self.cancel)
                 async def confirm(self,event):
-                    if not await admin(event):return
+                    if not await core.require(event,'rename'):return
                     if self.used:return
                     self.used=True;self.stop()
                     await event.response.defer()
@@ -86,7 +80,7 @@ def install(core,store):
             class Picker(core.PrinterPicker):
                 def choose(self,printer):
                     async def picked(click):
-                        if not await admin(click):return
+                        if not await core.require(click,'rename'):return
                         if await self.finish(click,core.card('Printer selected',core.safe(printer))):
                             await confirm_for(click,printer)
                     return picked
@@ -96,7 +90,7 @@ def install(core,store):
     @bot.tree.command(name='publiccommands',description='Show the server-wide reply policy privately (admins/approved users)')
     @app_commands.guild_only()
     async def publiccommands(i:discord.Interaction,minutes:app_commands.Range[int,0,60]=2):
-        if not await admin(i):return
+        if not await core.require(i,'publiccommands'):return
         await i.response.send_message('Commands now reply publicly in every server channel. This command, report assignment and DM workflows remain private; a temporary override is no longer needed.',ephemeral=True)
 
     async def run_action(i,action,name):

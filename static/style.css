@@ -6,3 +6,11 @@
 #liveImage[hidden] {display:none;}
 
 #updatePreview { overflow-wrap: anywhere; }
+.permissions-panel{grid-column:1/-1}
+.permissions-table-wrap{max-height:520px;overflow:auto;margin:12px 0 16px;border:1px solid var(--line);border-radius:10px}
+.permissions-table{width:100%;border-collapse:collapse;font-size:14px}
+.permissions-table th{position:sticky;top:0;background:var(--panel);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+.permissions-table td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.permissions-table td small{display:block;color:var(--muted)}
+.permissions-table select{width:100%;min-width:180px}
+.permissions-table tr.changed td{background:rgba(190,242,100,.06)}

@@ -198,13 +198,20 @@ def resolve_name(query):
     return None, None
 
 
-# Commands only server administrators and approved user IDs may run. Everything else is open to
+# Default: commands only server administrators and approved user IDs may run. Everything else is open to
 # every member of an authorized server; state-changing commands ask for confirmation and are logged.
+# The dashboard can override the level per command (settings.json "command_permissions").
 ADMIN_COMMANDS = {
     'adminhelp','temperature','chamber','move','plateswap','rename','dm',
     'laptops','laptop','server','reboot','setnotificationchannel','setcommandschannel',
     'publiccommands','archive','unarchive','assign','meeting',
 }
+# Permission levels, most to least open.
+LEVELS = ('everyone', 'role', 'admin', 'disabled')
+LEVEL_LABELS = {'everyone': 'Everyone', 'role': 'Allowed roles + admins', 'admin': 'Admins only', 'disabled': 'Off'}
+# Commands that can control the Pi or laptops, message people as the server, or change channels:
+# these can be admin-only or turned off, never opened to everyone.
+LOCKED_COMMANDS = {'reboot', 'laptop', 'laptops', 'dm', 'setnotificationchannel', 'setcommandschannel', 'archive', 'unarchive'}
 # Free-text options are not copied into the service log.
 PRIVATE_OPTIONS = {'message','text','title','description','command'}
 
@@ -231,6 +238,59 @@ def admin_allowed(interaction):
         isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator)
 
 
+def default_level(root):
+    return 'admin' if root in ADMIN_COMMANDS else 'everyone'
+
+
+def command_level(root):
+    """Effective permission level for a top-level command name (e.g. 'plateswap' for /plateswap check)."""
+    level = (settings.get('command_permissions') or {}).get(root, default_level(root))
+    if level not in LEVELS:
+        level = default_level(root)
+    if root in LOCKED_COMMANDS and level in ('everyone', 'role'):
+        level = 'admin'
+    return level
+
+
+def has_allowed_role(interaction):
+    allowed = {int(r) for r in settings.get('member_role_ids') or []}
+    return bool(allowed) and any(getattr(role, 'id', None) in allowed for role in (getattr(interaction.user, 'roles', None) or []))
+
+
+def command_allowed(interaction, root):
+    """The single permission check for every command, its buttons and its autocomplete."""
+    if interaction.guild_id not in ALLOWED_GUILD_IDS:
+        return False
+    level = command_level(root)
+    if level == 'everyone':
+        return True
+    if level == 'disabled':
+        return False
+    return admin_allowed(interaction) or (level == 'role' and has_allowed_role(interaction))
+
+
+def denial_text(root):
+    level = command_level(root)
+    if level == 'disabled':
+        return f'/{root} is turned off. An administrator can turn it on in the dashboard under Settings → Discord command permissions.'
+    if level == 'role':
+        return 'Only members with an allowed role, administrators and approved user IDs can use this.'
+    return 'Administrators and approved user IDs only.'
+
+
+async def require(interaction, root):
+    """Check permission for a command (or one of its buttons) and tell the user if denied."""
+    if command_allowed(interaction, root):
+        return True
+    log.warning('Denied %s for %s (%s)', command_summary(interaction) if getattr(interaction, 'data', None) else '/' + root, who(interaction), command_level(root))
+    text = denial_text(root)
+    if interaction.response.is_done():
+        await interaction.followup.send(text, ephemeral=ephemeral(interaction))
+    else:
+        await interaction.response.send_message(text, ephemeral=ephemeral(interaction))
+    return False
+
+
 update_pending = lambda: False
 
 
@@ -244,9 +304,7 @@ class PrinterTree(app_commands.CommandTree):
                 embed=card('Unavailable', 'Use this bot in an authorized server.', RED), ephemeral=ephemeral(interaction))
             return False
         command = interaction.command
-        if command and command.qualified_name.split()[0] in ADMIN_COMMANDS and not admin_allowed(interaction):
-            log.warning('Denied %s for %s: administrators and approved user IDs only', command_summary(interaction), who(interaction))
-            await interaction.response.send_message('Administrators and approved user IDs only.', ephemeral=ephemeral(interaction))
+        if command and not await require(interaction, command.qualified_name.split()[0]):
             return False
         log.info('%s ran %s in channel %s', who(interaction), command_summary(interaction), interaction.channel_id)
         return True
@@ -577,19 +635,10 @@ async def run_action(interaction, action, name):
         await send_action(interaction, name, action)
 
 
-async def settings_allowed(interaction):
-    permitted = interaction.guild_id in ALLOWED_GUILD_IDS and (
-        interaction.user.id in SETTINGS_USER_IDS or
-        isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator)
-    if not permitted:
-        await interaction.response.send_message(embed=card('Settings restricted', 'Only server administrators and approved users can change settings.', RED), ephemeral=ephemeral(interaction))
-    return permitted
-
-
 @bot.tree.command(name='setnotificationchannel', description='Set notifications here (admins or approved users)')
 @app_commands.guild_only()
 async def set_notification_channel(interaction: discord.Interaction):
-    if await settings_allowed(interaction):
+    if await require(interaction, 'setnotificationchannel'):
         store_channel('notification_channel_id', interaction)
         await respond(interaction, card('🔔 Notifications configured', 'Automatic printer updates will appear in this channel.', GREEN))
 
@@ -597,7 +646,7 @@ async def set_notification_channel(interaction: discord.Interaction):
 @bot.tree.command(name='setcommandschannel', description='Set the main commands channel (admins or approved users)')
 @app_commands.guild_only()
 async def set_commands_channel(interaction: discord.Interaction):
-    if await settings_allowed(interaction):
+    if await require(interaction, 'setcommandschannel'):
         store_channel('commands_channel_id', interaction)
         await respond(interaction, card('💬 Commands channel configured', 'Main commands channel saved. Replies are public in every server channel except publiccommands, report assignment and dm.', GREEN))
 
@@ -664,7 +713,9 @@ def help_embed(admin=False):
             for child in command.commands:
                 collect(child, root)
         else:
-            if (root in ADMIN_COMMANDS) == admin:
+            # /help lists what everyone (or allowed roles) can use; /adminhelp lists admin-only commands. Off commands are hidden.
+            level = command_level(root)
+            if level != 'disabled' and (level == 'admin') == admin:
                 commands.append((root, command.qualified_name))
     for command in bot.tree.get_commands():
         collect(command)
@@ -676,7 +727,8 @@ def help_embed(admin=False):
         if entries:
             field(embed, title, description + '\n' + ' · '.join(sorted(entries)), False)
     field(embed, 'Selection, permissions & privacy',
-          'Use printer-name autocomplete or the selection buttons when available. Admin commands require a server administrator or an approved user ID. '
+          'Use printer-name autocomplete or the selection buttons when available. Admin commands require a server administrator or an approved user ID; '
+          'administrators can change who may use each command in the dashboard. '
           'Replies are public in the current server channel, except publiccommands, report assignment and dm.', False)
     return embed
 
@@ -690,8 +742,7 @@ async def help_command(interaction: discord.Interaction):
 @bot.tree.command(name='adminhelp', description='Command guide for administrators and approved IDs')
 @app_commands.guild_only()
 async def admin_help_command(interaction: discord.Interaction):
-    if not admin_allowed(interaction):
-        await interaction.response.send_message('Administrators and approved user IDs only.', ephemeral=ephemeral(interaction))
+    if not await require(interaction, 'adminhelp'):
         return
     await interaction.response.send_message(embed=help_embed(admin=True), ephemeral=ephemeral(interaction))
 

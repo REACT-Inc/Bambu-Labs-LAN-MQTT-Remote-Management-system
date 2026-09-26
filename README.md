@@ -59,7 +59,7 @@ For a fresh demo without a previous bot: `sudo bash install.sh --demo` (Tailscal
 * Notification-channel and public-command-channel settings.
 * Approved Discord user IDs alongside the server Administrator permission.
 
-The web dashboard uses a shared administrator password. Anyone with this password has management access. In Discord, every member of an allowed server can view printers, queue jobs, start and manage the queue, pause/resume/stop, reprint, switch lights, and set fans and print speed. Each of those actions asks for confirmation and is logged with who ran it. Temperatures, chamber heating, axis moves, Discord settings, Swapmod, DMs, channel archiving, laptops and the Pi require a server administrator or approved user ID. See [COMMANDS.md](COMMANDS.md) for the full list. Neither knowing the IP address nor being on Tailscale bypasses the dashboard login.
+The web dashboard uses a shared administrator password. Anyone with this password has management access. In Discord, every member of an allowed server can view printers, queue jobs, start and manage the queue, pause/resume/stop, reprint, switch lights, and set fans and print speed. Each of those actions asks for confirmation and is logged with who ran it. Temperatures, chamber heating, axis moves, Discord settings, Swapmod, DMs, channel archiving, laptops and the Pi require a server administrator or approved user ID. These are the defaults: administrators can change who may use each command (Everyone, allowed roles, admins only, or off) in the dashboard under **Settings → Discord command permissions**. See [COMMANDS.md](COMMANDS.md) for the full list. Neither knowing the IP address nor being on Tailscale bypasses the dashboard login.
 
 ## Discord commands
 
