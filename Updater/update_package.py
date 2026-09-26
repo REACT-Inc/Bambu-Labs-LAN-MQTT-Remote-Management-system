@@ -11,11 +11,15 @@ MAX_ZIP=32*1024*1024
 MAX_EXPANDED=128*1024*1024
 REQUIRED={'main.py','core.py','dashboard.py','queueing.py','requirements.txt','static/index.html','static/app.js'}
 
+PACKAGE_DIRS={'swapMod','Updater','discord_Intergration','laptopManagement_Intergration'}
+
 
 def runtime_path(name):
     p=PurePosixPath(name)
     if len(p.parts)==1:
         return p.suffix in ('.py','.md') or name in ('requirements.txt','bambu_error_catalog.json','BAMBU_RESOURCE_LICENSE.txt')
+    if p.parts[0] in PACKAGE_DIRS and p.suffix in ('.py','.md'):
+        return all(part.replace('_','').isalnum() for part in p.parts[:-1])
     return p.parts[0]=='static' and p.suffix.lower() in ('.js','.css','.html','.svg','.png','.jpg','.ico','.woff','.woff2')
 
 

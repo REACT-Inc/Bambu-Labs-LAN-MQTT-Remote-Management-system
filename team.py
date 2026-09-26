@@ -39,7 +39,7 @@ class Team:
         self.db.execute("UPDATE assignments SET status='needs_review',error='Service restarted during delivery; check channel.' WHERE status='sending'")
         self.db.execute("UPDATE device_tasks SET status='unknown',result='Server restarted after delivery; command will not be resent.' WHERE status='delivered'")
         self.db.commit()
-        from meshcentral_client import MeshCentral
+        from laptopManagement_Intergration.meshCentral.meshcentral_client import MeshCentral
         self.mesh = MeshCentral(core,store)
         dashboard.app.on_shutdown.append(self.mesh.close)
         self.inflight=set()

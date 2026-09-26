@@ -4,8 +4,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 import aiohttp
 from aiohttp import web
-from update_package import inspect_package,MAX_ZIP
-from version import VERSION
+from Updater.update_package import inspect_package,MAX_ZIP
+from Updater.version import VERSION
 
 ASSET='3d-printer-management.zip'
 

@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from extra_discord import permitted
+from discord_Intergration.extra_discord import permitted
 
 
 def install(core,engine):
