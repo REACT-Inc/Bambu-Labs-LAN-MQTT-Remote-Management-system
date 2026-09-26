@@ -4,6 +4,7 @@ import signal
 from aiohttp import web # pyright: ignore[reportMissingImports]
 import core
 import diagnostics
+import issue_reports
 from queueing import Engine, Store
 from dashboard import Dashboard
 from discord_Intergration.discord_queue import install
@@ -31,6 +32,7 @@ async def main():
     install_controls(core,dashboard.controls)
     install_plate_swap(core,engine)
     diagnostics.install_discord(core,store)
+    issue_reports.install_discord(core,dashboard.issue_reports)
     # Printer monitoring and web UI do not depend on Discord being connected.
     if not core.EXAMPLE_MODE:
         for printer in core.PRINTERS:

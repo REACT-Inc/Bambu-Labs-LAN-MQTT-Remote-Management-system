@@ -200,7 +200,7 @@ def resolve_name(query):
 
 
 ADMIN_COMMANDS = {
-    'adminhelp','diagnostics','temperature','chamber','speed','fan','fanall','move','plateswap','rename','dm',
+    'adminhelp','diagnostics','reportissue','temperature','chamber','speed','fan','fanall','move','plateswap','rename','dm',
     'laptops','laptop','server','reboot','setnotificationchannel','setcommandschannel',
     'publiccommands','archive','unarchive','assign','meeting','queuestart','queueforce',
     'queuemanage','reprint','pause','resume','stop','lighton','lightoff',
@@ -616,7 +616,7 @@ def help_embed(admin=False):
         ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move'}, 'Pause/resume/cancel, lights, temperatures, speed, fan and axis jogging.'),
         ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'Manage jobs and confirm starts.' if admin else 'View the queue and add files for an administrator to start.'),
         ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
-        ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics'}, 'Channel settings, temporary public replies, printer names, DMs, archives and diagnostic reports.'),
+        ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),
         ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes and personal reminders.'),
         ('💻 Laptops & server', {'laptops','laptop','server','reboot'}, 'MeshCentral laptops and commands, Pi status and reboot.'),
     ]

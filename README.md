@@ -87,6 +87,7 @@ The dashboard refreshes every five seconds; it is not a live video stream. Camer
 * Channel settings: `settings.json`
 * Hashed dashboard password: `auth.json`
 * Error and service logs: `logs/management.log` (rotates at 2 MB, keeps 5 older files)
+* Problem report destination and token: `issue-reports.json`
 
 ```bash
 sudo systemctl status 3d-printer-management --no-pager
@@ -132,6 +133,25 @@ Everything the service logs (warnings, errors, crashes in background threads and
 * Discord → `/diagnostics` (administrators and approved user IDs). The report is sent privately.
 
 When filing a GitHub issue, attach the report and include the error ID if there was one.
+
+### Sending a problem report to the developers
+
+Users can send a report straight to the developers from **Settings → Send a problem report** in the dashboard, or with `/reportissue` in Discord (administrators and approved user IDs). By default this opens a GitHub issue in `REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system` containing:
+
+* the title and description the user typed
+* the version, Python and OS versions, and uptime
+* a printer status table: name, model, connection, state, print error, time since the last report, and the number of HMS alerts
+* the last 10 errors with their error IDs, and the last 80 log lines
+
+Passwords, tokens, access codes, IP addresses and serial numbers are removed because the issue may be public. If more detail is needed, ask the user for the full diagnostic ZIP. Only one report can be sent every 2 minutes.
+
+**Setup:** create a fine-grained GitHub token with **Issues: Read and write** access to the repository. Save it under **Settings → Send a problem report → Report destination**, which is also where the repository can be changed. The token stays on the Pi (`issue-reports.json`, mode 600) and is never shown again. To preset it for every install, add it to `config.json`:
+
+```json
+"issue_reports": {"destination": "github", "repository": "REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system", "token": "github_pat_..."}
+```
+
+Settings saved in the dashboard override `config.json`. Other destinations, such as a Discord webhook or email, can be added in `issue_reports.py` by writing one sender function and registering it in `SENDERS`.
 
 ```bash
 sudo tail -n 100 /var/lib/3d-printer-management/logs/management.log

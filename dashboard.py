@@ -16,6 +16,7 @@ from printer_controls import Controls, limits
 from live_camera import Cameras
 from queueing import MAX_UPLOAD, options, validate_archive
 import diagnostics
+from issue_reports import IssueReports
 
 
 def password_hash(password, salt=None):
@@ -51,6 +52,7 @@ class Dashboard:
         self.app['dashboard']=self
         self.updater = WebUpdates(self)
         self.github_updater = GitHubUpdates(self)
+        self.issue_reports = IssueReports(core, store, self.app)
         try:self.release=json.loads((Path(__file__).parent/'release.json').read_text()).get('id','')
         except (OSError,ValueError):self.release=''
         self.app.on_shutdown.append(self.cameras.close)
