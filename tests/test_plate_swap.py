@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from queueing import Store,Engine,options
-from swapMod.plate_swap import PlateSwap
+from plate_swap import PlateSwap
 
 
 class SwapTests(unittest.IsolatedAsyncioTestCase):

@@ -8,7 +8,7 @@ import shutil
 import time
 from pathlib import Path
 from aiohttp import web
-from Updater.update_package import inspect_package,MAX_ZIP
+from update_package import inspect_package,MAX_ZIP
 
 STATUS=Path('/var/lib/pm-updater/status.json')
 BUSY={'queued','validating','preparing','backing_up','installing','checking','rolling_back','recovery_required'}

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
 import aiohttp
 from queueing import Store
-from laptopManagement_Intergration.meshCentral.meshcentral_client import MeshCentral
+from meshcentral_client import MeshCentral
 
 
 class MeshTests(unittest.IsolatedAsyncioTestCase):
@@ -66,7 +66,7 @@ class MeshTests(unittest.IsolatedAsyncioTestCase):
             async def __aenter__(self):return self
             async def __aexit__(self,*args):pass
             def ws_connect(self,url,**kwargs):recorded.update(url=url,kwargs=kwargs);return WS()
-        with patch('laptopManagement_Intergration.meshCentral.meshcentral_client.aiohttp.ClientSession',Session):
+        with patch('meshcentral_client.aiohttp.ClientSession',Session):
             result=await self.mesh.request('runcommands',{'nodeids':['node//one'],'cmds':'hostname'})
         self.assertEqual(result['result'],'output')
         self.assertEqual(recorded['url'],'wss://mesh.example.test/customer/control.ashx')

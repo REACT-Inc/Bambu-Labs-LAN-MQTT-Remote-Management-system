@@ -35,8 +35,8 @@ fi
 if [ -f /etc/systemd/system/3d-printer-management.service ]; then cp -p /etc/systemd/system/3d-printer-management.service "$BACKUP_DIR/management.service"; fi
 if [ -f "$CONFIG_DIR/config.json" ]; then cp -p "$CONFIG_DIR/config.json" "$BACKUP_DIR/config.json"; fi
 install -d -m 755 "$APP_DIR"
-for file in Updater/github_updates.py Updater/version.py thermal_controls.py Updater/web_updates.py Updater/update_package.py Updater/WEB_UPDATES.md laptopManagement_Intergration/meshCentral/meshcentral_client.py swapMod/plate_swap.py swapMod/plate_swap_discord.py printer_controls.py discord_Intergration/controls_discord.py live_camera.py core.py discord_Intergration/extra_discord.py printer_files.py printer_errors.py bambu_error_catalog.json BAMBU_RESOURCE_LICENSE.txt ERROR_SOURCES.md camera_capture.py progress_notifications.py queueing.py dashboard.py discord_Intergration/discord_queue.py main.py team.py discord_Intergration/team_discord.py requirements.txt README.md laptopManagement_Intergration/LAPTOPS.md swapMod/__init__.py Updater/__init__.py discord_Intergration/__init__.py laptopManagement_Intergration/__init__.py laptopManagement_Intergration/meshCentral/__init__.py; do
-  install -D -m 644 "$SOURCE_DIR/$file" "$APP_DIR/$file"
+for file in github_updates.py version.py GITHUB_SETUP.md thermal_controls.py web_updates.py update_package.py WEB_UPDATES.md meshcentral_client.py plate_swap.py plate_swap_discord.py printer_controls.py controls_discord.py live_camera.py core.py extra_discord.py printer_files.py printer_errors.py bambu_error_catalog.json BAMBU_RESOURCE_LICENSE.txt ERROR_SOURCES.md camera_capture.py progress_notifications.py queueing.py dashboard.py discord_queue.py main.py configure.py team.py team_discord.py requirements.txt README.md LAPTOPS.md; do
+  install -m 644 "$SOURCE_DIR/$file" "$APP_DIR/$file"
 done
 install -d "$APP_DIR/static"
 cp -a "$SOURCE_DIR/static/." "$APP_DIR/static/"
@@ -48,7 +48,7 @@ chmod 640 "$CONFIG_DIR/config.json"
 chown -R printermanager:printermanager "$DATA_DIR"
 find "$DATA_DIR" -type f -exec chmod 600 {} +
 # Validate command definitions and configuration before stopping the old bot.
-runuser -u printermanager -- "$APP_DIR/venv/bin/python" -c "import sys; sys.path.insert(0, '$APP_DIR'); import core; from discord_Intergration.discord_queue import install; from queueing import Store, Engine; from dashboard import Dashboard; s=Store(':memory:'); e=Engine(core,s); d=Dashboard(core,s,e); install(core,s,e,d); from team import Team; from discord_Intergration.team_discord import install as it; t=Team(core,s,d); it(core,t); print('Application validation passed.')"
+runuser -u printermanager -- "$APP_DIR/venv/bin/python" -c "import sys; sys.path.insert(0, '$APP_DIR'); import core; from discord_queue import install; from queueing import Store, Engine; from dashboard import Dashboard; s=Store(':memory:'); e=Engine(core,s); d=Dashboard(core,s,e); install(core,s,e,d); from team import Team; from team_discord import install as it; t=Team(core,s,d); it(core,t); print('Application validation passed.')"
 cat > /etc/systemd/system/3d-printer-management.service <<'UNIT'
 [Unit]
 Description=3D Printer Management - web dashboard, Discord and shared print queues
@@ -110,7 +110,7 @@ if [ "$HEALTHY" -ne 1 ]; then
   journalctl -u 3d-printer-management -n 30 --no-pager
   exit 1
 fi
-bash "$SOURCE_DIR/Updater/install-web-updater.sh"
+bash "$SOURCE_DIR/install-web-updater.sh"
 systemctl enable 3d-printer-management
 systemctl disable printer-discord-bot 2>/dev/null || true
 # Print actual configured addresses, including on subsequent installs.

@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,Mock,patch
 from aiohttp import web
-from Updater.github_updates import GitHubUpdates,semver,release_info,download_host,ASSET
+from github_updates import GitHubUpdates,semver,release_info,download_host,ASSET
 from test_updates import package
 
 
@@ -14,8 +14,6 @@ def release(version='v1.0.1',size=100):
 
 class GitHubTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        # Fake releases are v1.0.x; pin the installed version so real version bumps don't break these tests.
-        version_patch=patch('Updater.github_updates.VERSION','1.0.0');version_patch.start();self.addCleanup(version_patch.stop)
         self.tmp=tempfile.TemporaryDirectory();root=Path(self.tmp.name)
         self.updater=SimpleNamespace(inbox=root,lock=asyncio.Lock(),busy=lambda:False,idle_check=Mock(),queue_package=Mock())
         self.gh=GitHubUpdates(SimpleNamespace(app=web.Application(),core=SimpleNamespace(DATA_DIR=root),updater=self.updater))
@@ -90,18 +88,18 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
             async def __aenter__(self):return self
             async def __aexit__(self,*args):pass
             def get(self,url,**kwargs):calls.append((url,kwargs));return Response(len(calls))
-        with patch('Updater.github_updates.aiohttp.ClientSession',Session):
+        with patch('github_updates.aiohttp.ClientSession',Session):
             data=await self.gh.fetch('https://api.github.com/repos/test/printers/releases/assets/1',100,True)
         self.assertEqual(data,b'zip');self.assertIn('Authorization',calls[0][1]['headers']);self.assertNotIn('Authorization',calls[1][1]['headers'])
 
 class AutomaticIdleTests(unittest.TestCase):
     def test_offline_stale_and_busy_printers_block_auto(self):
-        from Updater.web_updates import WebUpdates
+        from web_updates import WebUpdates
         with tempfile.TemporaryDirectory() as root:
             core=SimpleNamespace(DATA_DIR=Path(root),EXAMPLE_MODE=False,names=lambda:['A'],last_seen={'A':time.time()},state_data=lambda n:('IDLE',0,{},True))
             dashboard=SimpleNamespace(core=core,store=SimpleNamespace(jobs=lambda:[]),app=web.Application())
             updater=WebUpdates(dashboard);updater.busy=lambda:False
-            with patch('Updater.web_updates.Path.exists',return_value=True):
+            with patch('web_updates.Path.exists',return_value=True):
                 updater.idle_check(True)
                 core.last_seen['A']=0
                 with self.assertRaises(ValueError):updater.idle_check(True)
