@@ -88,3 +88,7 @@ $('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings'
 $('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';showLogin();}catch(e){notice(e.message);}};
 $('testNotification').onclick=async()=>{try{await api('testnotification',{});notice('Test requested. Check Discord and the activity feed.');}catch(e){notice(e.message);}};
 refresh();setInterval(()=>{if(state&&!document.hidden)refresh();},5000);
+async function loadErrors(){const box=$('recentErrors');try{const r=await api('errors',undefined,'GET');box.innerHTML=r.errors.length?r.errors.map(e=>`<div class="event"><strong>${esc(new Date(e.time*1000).toLocaleString())} · ${esc(e.level)}${e.error_id?' · ID '+esc(e.error_id):''}</strong><pre>${esc(e.text)}</pre></div>`).join(''):'<p class="muted">No errors since the service started.</p>';}catch(e){box.innerHTML='<p class="error">'+esc(e.message)+'</p>';}}
+$('downloadDiagnostics').onclick=()=>{location.href='/api/diagnostics';};
+$('refreshErrors').onclick=loadErrors;
+const originalTab=tab;tab=function(name){originalTab(name);if(name==='settings')loadErrors();};

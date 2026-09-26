@@ -86,6 +86,7 @@ The dashboard refreshes every five seconds; it is not a live video stream. Camer
 * Uploaded files: `uploads/`
 * Channel settings: `settings.json`
 * Hashed dashboard password: `auth.json`
+* Error and service logs: `logs/management.log` (rotates at 2 MB, keeps 5 older files)
 
 ```bash
 sudo systemctl status 3d-printer-management --no-pager
@@ -118,6 +119,24 @@ sudo systemctl enable --now printer-discord-bot
 ```
 
 The installer retains a backup under `/var/backups/3d-printer-management/`. The previous `/tmp` source may disappear on reboot; use that backup if restoring later. No bot token or printer access code is included in this download.
+
+## Error logs and diagnostic reports
+
+Everything the service logs (warnings, errors, crashes in background threads and tasks) is written to `/var/lib/3d-printer-management/logs/management.log` as well as the systemd journal. Passwords, tokens and printer access codes are removed before anything is written.
+
+**Error IDs.** When a Discord command, button or dashboard request fails, the user sees a short error ID such as `3f9a1c2e`. The same ID is in the log next to the full error, so a report of "it failed with ID 3f9a1c2e" can be matched exactly.
+
+**Diagnostic report.** A ZIP containing the recent logs, the last 100 errors, printer connection status and latest telemetry, recent activity, version information and the configuration. Passwords, tokens and access codes are replaced with `[redacted]` and printer serial numbers are shortened; printer names and IP addresses are included. Get it from:
+
+* Dashboard → **Settings → Diagnostics & error logs → Download diagnostic report**. The same panel lists recent errors with their IDs.
+* Discord → `/diagnostics` (administrators and approved user IDs). The report is sent privately.
+
+When filing a GitHub issue, attach the report and include the error ID if there was one.
+
+```bash
+sudo tail -n 100 /var/lib/3d-printer-management/logs/management.log
+sudo grep 3f9a1c2e /var/lib/3d-printer-management/logs/management.log*
+```
 
 ## Validation and implementation notes
 
