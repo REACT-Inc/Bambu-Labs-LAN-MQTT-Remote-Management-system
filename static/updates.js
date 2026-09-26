@@ -40,16 +40,16 @@ async function pollGitHub(force=false){
  githubPollBusy=true;
  try{
   const r=await api('github/status',undefined,'GET');githubState=r;
-  if(!githubLoaded||force){$('githubRepo').value=r.repository;$('githubAuto').checked=r.automatic;$('githubToken').placeholder=r.has_token?'Token saved; blank keeps it':'Optional for public repositories';githubLoaded=true;}
-  $('githubStatus').textContent=`Installed ${r.installed} · Latest ${r.latest||'not checked'} · ${r.message}`;
+  if(!githubLoaded||force){$('githubRepo').value=r.repository;$('githubAuto').checked=r.automatic;$('githubChannel').value=r.channel;$('githubToken').placeholder=r.has_token?'Token saved; blank keeps it':'Optional for public repositories';githubLoaded=true;}
+  $('githubStatus').textContent=`Installed ${r.installed} (${r.installed_channel}) · ${r.channel} channel latest: ${r.latest||'not checked'} · ${r.message}`;
   $('githubInstall').hidden=!r.available;
  }catch(e){$('githubStatus').textContent=e.message;}finally{githubPollBusy=false;}
 }
 $('githubUpdateForm').onsubmit=e=>{
  e.preventDefault();
- const data={repository:$('githubRepo').value.trim(),automatic:$('githubAuto').checked,token:$('githubToken').value,clear_token:$('githubClearToken').checked,confirmed:true};
+ const data={repository:$('githubRepo').value.trim(),automatic:$('githubAuto').checked,channel:$('githubChannel').value,token:$('githubToken').value,clear_token:$('githubClearToken').checked,confirmed:true};
  const save=async()=>{await api('github/settings',data);$('githubToken').value='';$('githubClearToken').checked=false;await pollGitHub(true);notice('GitHub settings saved.');};
- if(data.automatic)confirmAction('Enable automatic software updates?',`New stable releases from ${data.repository} will be installed when printers are idle. The service will restart. Only enable this for a repository you trust.`,'I authorize automatic installation from this repository.',save);
+ if(data.automatic)confirmAction('Enable automatic software updates?',`New ${data.channel}-channel releases from ${data.repository} will be installed when printers are idle. The service will restart. Only enable this for a repository you trust.`,'I authorize automatic installation from this repository.',save);
  else save().catch(e=>notice(e.message));
 };
 $('githubCheck').onclick=async()=>{
