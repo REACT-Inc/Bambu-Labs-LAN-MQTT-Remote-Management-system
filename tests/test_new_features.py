@@ -185,6 +185,12 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         click=self.i;click.edit_original_response=AsyncMock()
         await kw['view'].children[0].callback(click)
         recipient.send.assert_awaited_once()
+        sent=recipient.send.call_args.kwargs['embed'].to_dict()
+        self.assertEqual(sent['title'],'Message from Team');self.assertEqual(sent['description'],'hello')
+        # The recipient sees only the server name, never the sending administrator (user ID 42).
+        self.assertNotIn('author',sent);self.assertNotIn('fields',sent)
+        self.assertEqual(sent['footer']['text'].split(' • ')[0],'3D Printer Management')
+        for text in (sent['title'],sent['description'],sent['footer']['text']):self.assertNotIn('42',text);self.assertNotIn('Requested by',text)
         await kw['view'].children[0].callback(click)
         recipient.send.assert_awaited_once()
     async def test_dm_rechecks_permission(self):
