@@ -198,12 +198,31 @@ def resolve_name(query):
     return None, None
 
 
+# Commands only server administrators and approved user IDs may run. Everything else is open to
+# every member of an authorized server; state-changing commands ask for confirmation and are logged.
 ADMIN_COMMANDS = {
-    'adminhelp','temperature','chamber','speed','fan','fanall','move','plateswap','rename','dm',
+    'adminhelp','temperature','chamber','move','plateswap','rename','dm',
     'laptops','laptop','server','reboot','setnotificationchannel','setcommandschannel',
-    'publiccommands','archive','unarchive','assign','meeting','queuestart','queueforce',
-    'queuemanage','reprint','pause','resume','stop','lighton','lightoff',
+    'publiccommands','archive','unarchive','assign','meeting',
 }
+# Free-text options are not copied into the service log.
+PRIVATE_OPTIONS = {'message','text','title','description','command'}
+
+
+def who(interaction):
+    """Who ran a Discord action, for the activity log: display name plus the stable user ID."""
+    user = interaction.user
+    return f'Discord {getattr(user, "display_name", None) or user} ({user.id})'
+
+
+def command_summary(interaction):
+    data = getattr(interaction, 'data', None) or {}
+    parts, options = [data.get('name', '?')], data.get('options') or []
+    while options and options[0].get('type') in (1, 2):  # subcommand / subcommand group
+        parts.append(options[0].get('name', '?'))
+        options = options[0].get('options') or []
+    values = ' '.join(f"{o.get('name')}={'[text]' if o.get('name') in PRIVATE_OPTIONS else str(o.get('value'))[:80]}" for o in options)
+    return '/' + ' '.join(parts) + (' ' + values if values else '')
 
 
 def admin_allowed(interaction):
@@ -226,8 +245,10 @@ class PrinterTree(app_commands.CommandTree):
             return False
         command = interaction.command
         if command and command.qualified_name.split()[0] in ADMIN_COMMANDS and not admin_allowed(interaction):
+            log.warning('Denied %s for %s: administrators and approved user IDs only', command_summary(interaction), who(interaction))
             await interaction.response.send_message('Administrators and approved user IDs only.', ephemeral=ephemeral(interaction))
             return False
+        log.info('%s ran %s in channel %s', who(interaction), command_summary(interaction), interaction.channel_id)
         return True
 
 
@@ -487,6 +508,8 @@ def publish_light(name, on):
 async def send_action(interaction, name, action, filename=None):
     try:
         publish_action(name, action, filename)
+        if event_listener:
+            event_listener(name, 'Control submitted', f'{action} • {who(interaction)}')
         description = f'**{safe(name)}**\n'
         description += 'Demo only — no printer was controlled.' if EXAMPLE_MODE else 'Command queued. Check printer status to confirm the result.'
         if filename:
@@ -497,11 +520,22 @@ async def send_action(interaction, name, action, filename=None):
     await respond(interaction, embed)
 
 
+# Printer actions anyone may run; each asks for confirmation first.
+CONFIRMED_ACTIONS = {
+    'pause': ('Pause print', 'Pause the current print on **{}**?'),
+    'resume': ('Resume print', 'Resume the paused print on **{}**?\nCheck the printer and build plate are ready first.'),
+    'stop': ('Stop print', 'Cancel the current print on **{}**?\nThis cannot be undone.'),
+    'lighton': ('Turn light on', 'Turn the chamber light **on** on **{}**?'),
+    'lightoff': ('Turn light off', 'Turn the chamber light **off** on **{}**?'),
+}
+
+
 class ActionConfirm(OwnedView):
     def __init__(self, owner, name, action, filename=None):
         super().__init__(owner)
         self.name, self.action, self.filename = name, action, filename
-        self.button('Stop print' if action == 'stop' else 'Reprint', self.confirm, discord.ButtonStyle.danger)
+        label = CONFIRMED_ACTIONS[action][0] if action in CONFIRMED_ACTIONS else 'Reprint'
+        self.button(label, self.confirm, discord.ButtonStyle.primary if action in ('lighton', 'lightoff', 'resume') else discord.ButtonStyle.danger)
         self.button('Cancel', self.cancel)
 
     async def confirm(self, interaction):
@@ -524,12 +558,15 @@ async def run_action(interaction, action, name):
         await interaction.followup.send(**kwargs)
     elif action == 'filaments':
         await respond(interaction, filament_embed(name))
-    elif action in ('stop', 'reprint'):
-        filename = state_data(name)[2].get('subtask_name') if action == 'reprint' else None
-        if action == 'reprint' and not filename:
+    elif action in CONFIRMED_ACTIONS:
+        await respond(interaction, card('⚠️ Confirm ' + CONFIRMED_ACTIONS[action][0].lower(), CONFIRMED_ACTIONS[action][1].format(safe(name)), YELLOW),
+                      ActionConfirm(interaction.user.id, name, action))
+    elif action == 'reprint':
+        filename = state_data(name)[2].get('subtask_name')
+        if not filename:
             await respond(interaction, card('No file available', 'No previous filename has been reported.', YELLOW))
             return
-        description = f'Cancel the current print on **{safe(name)}**?' if action == 'stop' else (
+        description = (
             f'Reprint **{safe(filename)}** on **{safe(name)}**?\n'
             'Clear the build plate before confirming.\n'
             'Experimental: the reported job name may not be a printable file on storage. '
@@ -614,7 +651,7 @@ def help_embed(admin=False):
     groups = [
         ('📊 Printers & files', {'status','printer','filaments','file','help','adminhelp'}, 'Printer status, camera snapshots, filament and stored files.'),
         ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move'}, 'Pause/resume/cancel, lights, temperatures, speed, fan and axis jogging.'),
-        ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'Manage jobs and confirm starts.' if admin else 'View the queue and add files for an administrator to start.'),
+        ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'View, add, start and manage jobs. Starts and changes ask for confirmation and are logged.'),
         ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
         ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive'}, 'Channel settings, temporary public replies, printer names, DMs and archives.'),
         ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes and personal reminders.'),

@@ -207,10 +207,10 @@ class Dashboard:
         name=request.match_info['name'];action=request.match_info['action'];data=await request.json()
         if name not in self.core.names(): raise ValueError('Unknown printer.')
         if action in ('nozzle','bed','chamber','speed','fan','fanall','move') or action.startswith('fan_'):
-            message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'))
+            message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'),author='web administrator')
             return web.json_response({'ok':True,'message':message})
         if action=='stop' and data.get('confirmed') is not True: raise ValueError('Confirm stopping the print.')
-        await self.engine.control(name,action)
+        await self.engine.control(name,action,'web administrator')
         return web.json_response({'ok':True,'message':'Command submitted; wait for printer telemetry.'})
 
     async def plate_swap(self,request):

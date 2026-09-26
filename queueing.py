@@ -313,10 +313,10 @@ class Engine:
             await self.core.notify(name, '🧪 Print complete • 100%', self.core.progress_description(data), self.core.GREEN, True)
         await self.telemetry(name, dict(data, gcode_state='FINISH'))
 
-    async def control(self, printer, action):
+    async def control(self, printer, action, author='unknown'):
         if action in ('lighton', 'lightoff'):
             self.core.publish_light(printer, action == 'lighton')
-            self.store.event(printer, 'Light command submitted', action)
+            self.store.event(printer, 'Light command submitted', f'{action} • {author}')
             return
         if action not in ('pause','resume','stop'):
             raise ValueError('Unknown control.')
@@ -331,7 +331,7 @@ class Engine:
             data = self.core.EXAMPLE_DATA[printer]
             data['state'] = {'pause':'PAUSE','resume':'RUNNING','stop':'IDLE'}[action]
             await self.telemetry(printer, dict(data,gcode_state=data['state']))
-        self.store.event(printer, 'Control submitted', action)
+        self.store.event(printer, 'Control submitted', f'{action} • {author}')
 
     def resolve(self, job_id, outcome, confirmed, author):
         job = self.store.get(job_id)

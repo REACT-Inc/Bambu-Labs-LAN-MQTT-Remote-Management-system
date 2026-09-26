@@ -59,7 +59,7 @@ For a fresh demo without a previous bot: `sudo bash install.sh --demo` (Tailscal
 * Notification-channel and public-command-channel settings.
 * Approved Discord user IDs alongside the server Administrator permission.
 
-The web dashboard uses a shared administrator password. Anyone with this password has management access. Discord settings, queue starts, queue reordering/removal, and manual resolution require a server administrator or approved user ID. All members in an allowed server can view printers and submit queue jobs; pause/resume/stop, lights and all printer controls are Admin-only (see [COMMANDS.md](COMMANDS.md)). Neither knowing the IP address nor being on Tailscale bypasses the dashboard login.
+The web dashboard uses a shared administrator password. Anyone with this password has management access. In Discord, every member of an allowed server can view printers, queue jobs, start and manage the queue, pause/resume/stop, reprint, switch lights, and set fans and print speed. Each of those actions asks for confirmation and is logged with who ran it. Temperatures, chamber heating, axis moves, Discord settings, Swapmod, DMs, channel archiving, laptops and the Pi require a server administrator or approved user ID. See [COMMANDS.md](COMMANDS.md) for the full list. Neither knowing the IP address nor being on Tailscale bypasses the dashboard login.
 
 ## Discord commands
 
@@ -197,7 +197,7 @@ are in that dialog. Controls use the existing dashboard password. Discord:
 * `/move axis:X millimeters:1 name:Andrew`
 * `/move axis:Z millimeters:-1 name:Andrew`
 
-Discord controls require a server administrator or approved user ID. Responses
+`/temperature`, `/chamber` and `/move` require a server administrator or approved user ID; `/speed`, `/fan` and `/fanall` are open to every member. Responses
 and confirmations are visible in the server channel. Partial names use the existing printer picker.
 Commands require confirmation and are revalidated when confirmed.
 
@@ -313,11 +313,11 @@ configured. Do not run the old Python laptop agent alongside this workflow.
 ## Fans, heated chamber and reply visibility (latest release)
 
 * `/fan percent:50 name:BOB target:part` selects one fan. Choose the printer first to get fan autocomplete from its reported capabilities.
-* `/fanall percent:80 name:BOB` changes all manually controllable fans **on that printer**, with confirmation. It does not target the whole printer fleet.
+* `/fanall percent:80` changes all manually controllable fans **on every printer**, with confirmation, and reports the result per printer. `/fan` changes one fan on one printer.
 * `/chamber degrees:60 name:BOB` or `/temperature target:chamber degrees:60 name:BOB` sets the H2D chamber target; 0 turns heating off, otherwise use 40–65 °C. Firmware can reject heating for the loaded material.
-* These controls require an administrator or an approved user ID and are also available in the dashboard printer details. They stay off the everyday `/help` menu.
+* `/fan` and `/fanall` are open to every member (confirmation required, logged with who ran them). `/chamber` requires an administrator or an approved user ID. All are also available in the dashboard printer details.
 * New-protocol fans use reported airduct IDs, allowed ranges and manual-control flags with `set\_fan`. Legacy reports use the supported part/auxiliary/chamber `M106` channels. Hotend heatbreak and electronics fans remain firmware-managed; automatic/off fans are not forced. Change the airflow mode on the printer if needed. A fanall result lists skipped automatic fans.
-* Replies now appear publicly in the channel where invoked, regardless of the commands-channel setting. `/publiccommands`, `/dm`, `/assign report` and `/meeting report assign` stay private. Confirmation buttons still belong to their initiator and recheck administrative access. `/publiccommands` now explains the policy; temporary overrides are unnecessary. Public does not mean broadcasting to every channel.
+* Replies now appear publicly in the channel where invoked, regardless of the commands-channel setting. `/publiccommands`, `/dm`, `/assign report` and `/meeting report assign` stay private. Confirmation buttons still belong to their initiator; admin commands recheck administrative access. `/publiccommands` now explains the policy; temporary overrides are unnecessary. Public does not mean broadcasting to every channel.
 
 Printer acknowledgements that report failure appear in Activity and trigger a notification when configured. A submitted MQTT command is not a verified physical result. The original H2D fan error has not been reproduced without its traceback/firmware response. Current mappings were checked against Bambu Studio source; hardware operation still needs verification on the Pi.
 

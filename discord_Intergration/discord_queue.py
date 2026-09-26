@@ -11,20 +11,6 @@ def install(core, store, engine, dashboard):
     bot = core.bot
     original_action = core.run_action
 
-    def is_admin(interaction):
-        return interaction.guild_id in core.ALLOWED_GUILD_IDS and (
-            interaction.user.id in core.SETTINGS_USER_IDS or
-            isinstance(interaction.user,discord.Member) and interaction.user.guild_permissions.administrator)
-
-    async def admin(interaction):
-        if not is_admin(interaction):
-            if interaction.response.is_done():
-                await interaction.followup.send('Only administrators and approved user IDs can manage the queue.',ephemeral=core.ephemeral(interaction))
-            else:
-                await interaction.response.send_message('Only administrators and approved user IDs can manage the queue.',ephemeral=core.ephemeral(interaction))
-            return False
-        return True
-
     async def show_queue(interaction, name):
         jobs=store.jobs(name)
         waiting=[j for j in jobs if j['status'] not in TERMINAL]
@@ -41,23 +27,21 @@ def install(core, store, engine, dashboard):
             self.button('Plate clear • Override error' if override_error else 'Plate clear • Start job',self.start,discord.ButtonStyle.danger)
             self.button('Cancel',self.cancel)
         async def start(self,interaction):
-            if not await admin(interaction): return
             if self.used:
                 await interaction.response.send_message('Already used.',ephemeral=core.ephemeral(interaction));return
             self.used=True;self.stop()
             await interaction.response.defer(ephemeral=core.ephemeral(interaction))
             try:
-                await engine.start(self.job['id'],True,f'Discord {interaction.user.id}',self.override_error)
+                await engine.start(self.job['id'],True,core.who(interaction),self.override_error)
                 await interaction.edit_original_response(embed=core.card('📡 Job accepted',self.job['label']+' • check the queue for printer confirmation.'),view=None)
             except (ValueError,RuntimeError) as exc:
                 await interaction.edit_original_response(embed=core.card('Could not start',str(exc),core.RED),view=None)
 
     async def run_action(interaction,action,name):
-        if action in core.ADMIN_COMMANDS and not await admin(interaction):return
+        # Queue starts, changes and printer actions are open to every member; each asks for confirmation and is logged.
         if action=='queue':
             await show_queue(interaction,name)
         elif action in ('queuestart','queueforce'):
-            if not await admin(interaction): return
             job=next((j for j in store.jobs(name) if j['status']=='queued'),None)
             if not job:
                 await core.respond(interaction,core.card('Queue empty','Add a job with /queueadd.'));return
@@ -67,7 +51,6 @@ def install(core, store, engine, dashboard):
                 'Confirm the build plate is clear, the correct material is loaded, and this file was sliced for this printer.'
                 + ('\n**Override:** ignore the reported error and allow FAILED state for this attempt. This does not clear printer errors or bypass firmware protections.' if action=='queueforce' else ''),core.YELLOW),StartView(interaction.user.id,job,action=='queueforce'))
         elif action=='reprint':
-            if not await admin(interaction): return
             previous=next((j for j in reversed(store.jobs(name)) if j['status']=='finished'),None)
             if not previous:
                 await core.respond(interaction,core.card('No managed print history','Reprint uses previously completed queue jobs. Add the exact sliced file with /queueadd.',core.YELLOW));return
@@ -77,9 +60,8 @@ def install(core, store, engine, dashboard):
                     self.button('Add reprint to queue',self.confirm,discord.ButtonStyle.primary)
                     self.button('Cancel',self.cancel)
                 async def confirm(self,click):
-                    if not await admin(click): return
                     if await self.finish(click,core.card('Reprint queued',core.safe(previous['label']),core.GREEN)):
-                        dashboard.copy_job(previous['id'],f'Discord {click.user.id}')
+                        dashboard.copy_job(previous['id'],core.who(click))
             await core.respond(interaction,core.card('Reprint this job?',core.safe(previous['label'])+'\nThis adds a new queue entry. Use /queuestart after clearing the plate.'),Requeue())
         else:
             await original_action(interaction,action,name)
@@ -87,16 +69,15 @@ def install(core, store, engine, dashboard):
     core.run_action=run_action
     # Existing pause/resume/stop confirmations now call the shared engine.
     async def send_action(interaction,name,action,filename=None):
-        if not await admin(interaction):return
         try:
-            await engine.control(name,action)
+            await engine.control(name,action,core.who(interaction))
             await core.respond(interaction,core.card('📡 '+action.title(),core.safe(name)+' • command submitted; wait for printer status.',core.GREEN))
         except (ValueError,RuntimeError) as exc:
             await core.respond(interaction,core.card('Command not sent',str(exc),core.RED))
     core.send_action=send_action
     core.register_printer_command('queue','View the shared queue for a printer')
-    core.register_printer_command('queuestart','Confirm plate clearance and start the first queued job')
-    core.register_printer_command('queueforce','Start next job ignoring reported error (admins/approved users)')
+    core.register_printer_command('queuestart','Confirm the plate is clear and start the first queued job')
+    core.register_printer_command('queueforce','Start the next job even though the printer reports an error, with confirmation')
     core.register_printer_command('lighton','Turn the printer light on')
     core.register_printer_command('lightoff','Turn the printer light off')
 
@@ -125,7 +106,7 @@ def install(core, store, engine, dashboard):
                   plate=plate,use_ams=use_ams,mapping=mapping,bed=bed)
         async def add(click,printer):
             try:
-                job=dashboard.add(dict(data,printer=printer),f'Discord {interaction.user.id}')
+                job=dashboard.add(dict(data,printer=printer),core.who(interaction))
                 await core.respond(click,core.card('📋 Job queued',f"**{core.safe(printer)}**\n{core.safe(job['label'])}\nID: `{job['id']}`",core.GREEN))
                 await core.notify(printer,'📋 Job queued',job['label'],core.BLUE)
             except ValueError as exc:
@@ -143,24 +124,24 @@ def install(core, store, engine, dashboard):
             await core.respond(interaction,core.card('Choose printer',f'Did you mean **{core.safe(suggestion)}**?' if suggestion else 'Select the printer this file was sliced for.'),
                                AddPicker(interaction.user.id,'queueadd',suggestion))
 
-    @bot.tree.command(name='queuemanage',description='Remove, reorder or resolve a queued job (admins/approved users)')
+    @bot.tree.command(name='queuemanage',description='Remove, reorder or resolve a queued job, with confirmation')
     @app_commands.guild_only()
     @app_commands.choices(action=[app_commands.Choice(name=x,value=x) for x in ('up','down','remove','resolve_finished','resolve_failed','resolve_cancelled')])
     async def queuemanage(interaction:discord.Interaction,job_id:str,action:str):
-        if not await admin(interaction): return
-        job=store.get(job_id)
+        try:job=store.get(job_id)
+        except ValueError:
+            await core.respond(interaction,core.card('Job not found',f'No job with ID `{core.safe(job_id)}`. Use /queue to see job IDs.',core.RED));return
         class Confirm(core.OwnedView):
             def __init__(self):
                 super().__init__(interaction.user.id)
                 self.button('Confirm',self.confirm,discord.ButtonStyle.danger)
                 self.button('Cancel',self.cancel)
             async def confirm(self,click):
-                if not await admin(click):return
                 if not await self.finish(click,core.card('Processing queue change',job_id)):return
                 try:
                     if action.startswith('resolve_'):
-                        engine.resolve(job_id,action[8:],True,f'Discord {click.user.id}')
-                    else: store.edit(job_id,action,f'Discord {click.user.id}')
+                        engine.resolve(job_id,action[8:],True,core.who(click))
+                    else: store.edit(job_id,action,core.who(click))
                     await core.respond(click,core.card('Queue updated',job_id,core.GREEN))
                 except ValueError as exc:
                     await core.respond(click,core.card('Queue unchanged',str(exc),core.RED))

@@ -72,7 +72,7 @@ class Controls:
             asyncio.create_task(self.core.notify(name,'Control rejected',detail,self.core.RED))
 
 
-    def apply(self,name,kind,value,axis=None,confirmed=False,homed=False):
+    def apply(self,name,kind,value,axis=None,confirmed=False,homed=False,author='unknown'):
         if getattr(self.core,'update_pending',lambda:False)():raise ValueError('Management update in progress.')
         command,param,label=prepare(self.core,name,kind,value,axis)
         if confirmed is not True:raise ValueError('Confirm this control change.')
@@ -106,5 +106,5 @@ class Controls:
                 if result.rc!=0:raise ValueError(f'MQTT submission failed after {submitted}/{len(commands)} commands. Inspect actual fan/settings state before retrying.')
                 submitted+=1
         if kind=='move':self.moved[name]=time.monotonic()
-        self.store.event(name,'Demo control' if self.core.EXAMPLE_MODE else 'Control submitted',label)
+        self.store.event(name,'Demo control' if self.core.EXAMPLE_MODE else 'Control submitted',f'{label} • {author}')
         return label+(' • Demo only.' if self.core.EXAMPLE_MODE else ' • Submitted; verify the result on the printer.')
