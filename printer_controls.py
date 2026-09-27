@@ -45,9 +45,26 @@ def prepare(core,name,kind,value,axis=None):
     if kind=='move':
         if axis not in ('X','Y','Z'):raise ValueError('Choose X, Y or Z.')
         value=number(value,-(1 if axis=='Z' else 10),1 if axis=='Z' else 10)
-        if not value or abs(value)<0.1:raise ValueError('Move at least 0.1 mm.')
-        return 'gcode_line',f'G91\nG1 {axis}{value:g} F{300 if axis=="Z" else 1200}\nG90\nM400\n',f'Move {axis} by {value:+g} mm'
+        value=round(value,1)
+        if abs(value)<0.1:raise ValueError('Move at least 0.1 mm.')
+        # Same wrapper Bambu Studio uses (DevAxis::Ctrl_Axis): soft endstops on, relative mode saved and restored.
+        gcode=(f'M211 S\nM211 X1 Y1 Z1\nM1002 push_ref_mode\nG91\nG1 {axis}{value:.1f} F{300 if axis=="Z" else 1200}\n'
+               'M1002 pop_ref_mode\nM211 R\n')
+        return 'gcode_line',gcode,f'Move {axis} by {value:+g} mm'
     raise ValueError('Unknown control.')
+
+
+def axis_ctrl_supported(data):
+    # Bambu Studio (DevAxis::Ctrl_Axis) jogs printers with bit 38 of the hex "fun" flags set via xyz_ctrl, not G-code.
+    try:return bool(int(str(data.get('fun') or '0'),16)>>38&1)
+    except ValueError:return False
+
+
+def xyz_ctrl(axis,value):
+    step=abs(value)
+    if step not in ((1,) if axis=='Z' else (1,10)):
+        raise ValueError('This printer only jogs in fixed steps: ±1 mm on Z, ±1 or ±10 mm on X/Y.')
+    return [{'command':'xyz_ctrl','axis':axis,'dir':1 if value>0 else -1,'mode':1 if step==10 else 0}]
 
 
 class Controls:
@@ -86,6 +103,7 @@ class Controls:
             if any(j['printer']==name and j['status'] in ('staging','awaiting_start','printing','paused','needs_review') for j in self.store.jobs()):
                 raise ValueError('Resolve the active queue job before jogging.')
             if time.monotonic()-self.moved.get(name,-100)<3:raise ValueError('Wait three seconds between moves.')
+            if axis_ctrl_supported(data):command,param=('batch',xyz_ctrl(axis,round(float(value),1)))
         if self.core.EXAMPLE_MODE:
             d=self.core.EXAMPLE_DATA[name]
             if kind in ('nozzle','bed'):d[kind+'_target_temper']=int(value)
