@@ -110,7 +110,7 @@ Details: [Swapmod](swapmod.md).
 | `/assign report member? announce?` | A | Assign a practice report writer (chosen, or picked from the roster) |
 | `/meeting report assign member? announce?` | A | Same as `/assign report` |
 | `/archive channel` · `/unarchive channel` | A | Make a text channel read-only and move it to Archive, or restore it |
-| `/dm user message` | A | Send a DM from the bot after a private preview |
+| `/dm user message` | A | Send a DM from the bot after a private preview. The recipient isn't told who sent it. |
 
 Details: [Team tools](team-tools.md).
 

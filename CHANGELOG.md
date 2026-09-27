@@ -2,7 +2,10 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.2.0, in progress on `beta-v1.2.0`)
+## 1.2.0-beta.1
+
+### Changed
+- **`/dm` is anonymous (#20).** Messages no longer name the sender: the recipient sees only "Message from \<server\>". The admin-only Activity feed still records who sent each DM.
 
 ### Documentation
 - **Guides:** the documentation is split into focused guides under `docs/`, and the README is now an overview with links.

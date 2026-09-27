@@ -74,8 +74,8 @@ The dashboard can view, add and delete notes for every allowed server.
 
 `/dm user message` (admins) sends a DM from the bot:
 - **Preview first:** it shows a private preview with **Send DM**, and access is checked again when you press it.
-- **What the recipient sees:** the message is titled "Message from \<server\>", and the footer names the sender.
-- **Logging:** Activity records who sent a DM to whom, but not the text.
+- **What the recipient sees:** only "Message from \<server\>" and the message. **The sender isn't shown.** The preview reminds you of this.
+- **Logging:** the admin-only Activity feed still records who sent a DM to whom (but not the text), so misuse can be traced.
 - **Refusals:** Discord can refuse a DM because of the recipient's privacy settings or a block. The reply says so.
 
 ## Server status and reboot
