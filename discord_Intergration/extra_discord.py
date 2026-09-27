@@ -43,8 +43,8 @@ def install(core,store):
                 self.used=True;self.stop()
                 await click.response.defer()
                 try:
+                    # Sent in the server's name only; the recipient is not told which administrator sent it.
                     embed=core.card('Message from '+i.guild.name,message)
-                    embed.set_footer(text=f'Requested by {i.user} • User ID {i.user.id}')
                     await recipient.send(embed=embed,allowed_mentions=discord.AllowedMentions.none())
                     store.event('Team','DM sent',f'From {i.user.id} to {recipient.id}; message body not logged.')
                     result=f'DM delivered to {recipient} ({recipient.id}).'
@@ -52,7 +52,7 @@ def install(core,store):
                 except discord.HTTPException:result='Discord did not confirm delivery. Check with the recipient before retrying.'
                 await click.edit_original_response(content=result,embed=None,view=None)
         view=Send()
-        view.message=await i.followup.send(embed=core.card('Confirm private message',f'To: **{core.safe(recipient)}** (`{recipient.id}`)\n\n{message}'),view=view,ephemeral=True,wait=True)
+        view.message=await i.followup.send(embed=core.card('Confirm private message',f'To: **{core.safe(recipient)}** (`{recipient.id}`)\n\n{message}\n\n*Sent as "Message from {core.safe(i.guild.name)}". Your name is not shown to the recipient.*'),view=view,ephemeral=True,wait=True)
 
     @bot.tree.command(name='rename',description='Rename a printer in management only (admins/approved users)')
     @app_commands.guild_only()
