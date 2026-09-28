@@ -87,6 +87,7 @@ Details: [Print queue](print-queue.md).
 | `/speed mode name?` | E | `silent`, `standard`, `sport` or `ludicrous` |
 | `/fan percent name? target?` | E | One fan, 0–100 % (autocomplete lists the printer's fans) |
 | `/fanall percent` | E | All manually controllable fans on **every printer** (reports the result per printer) |
+| `/home name?` | A | Home all axes (idle printer only) |
 | `/move axis millimeters name?` | A | Jog X, Y or Z. Needs an idle, homed printer. |
 
 Limits and safety rules: [Printer controls](printer-controls.md).

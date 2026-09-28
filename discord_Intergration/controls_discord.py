@@ -18,7 +18,7 @@ def install(core,controls):
             class Confirm(core.OwnedView):
                 def __init__(self):
                     super().__init__(i.user.id)
-                    self.button('Confirm move' if kind=='move' else 'Apply setting',self.apply,discord.ButtonStyle.danger)
+                    self.button('Confirm move' if kind=='move' else 'Home printer' if kind=='home' else 'Apply setting',self.apply,discord.ButtonStyle.danger)
                     self.button('Cancel',self.cancel)
                 async def apply(self,event):
                     if not await core.require(event,command):return
@@ -29,6 +29,7 @@ def install(core,controls):
                     await event.edit_original_response(content=message,embed=None,view=None)
             detail=f'{core.safe(printer)}\n{label}'
             if kind=='move':detail+='\nConfirm only after homing on the printer and checking the nozzle, bed and travel path are clear. Direction follows printer coordinates, not necessarily bed travel. Never jog during a print.'
+            elif kind=='home':detail+='\nHomes X, Y and Z. Check the nozzle, bed and travel path are clear first. Only while the printer is idle.'
             elif kind=='nozzle':detail+='\nTargets the active nozzle; does not switch H2D tools.'
             view=Confirm();view.message=await click.followup.send(embed=core.card('Confirm printer control',detail),view=view,ephemeral=core.ephemeral(click),wait=True)
         exact,suggestion=core.resolve_name(name)
@@ -102,3 +103,7 @@ def install(core,controls):
     @app_commands.guild_only()
     @app_commands.choices(axis=[app_commands.Choice(name=x,value=x) for x in ('X','Y','Z')])
     async def move(i:discord.Interaction,axis:str,millimeters:float,name:str=None):await choose(i,name,'move',millimeters,axis)
+
+    @core.bot.tree.command(name='home',description='Home all axes of an idle printer (admins/approved IDs)')
+    @app_commands.guild_only()
+    async def home(i:discord.Interaction,name:str=None):await choose(i,name,'home',None)

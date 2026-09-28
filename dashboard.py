@@ -155,7 +155,7 @@ class Dashboard:
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=not getattr(self.core,'EXAMPLE_MODE',False) and (getattr(self.core,'printer_config',lambda n:None)(name) or {}).get('camera_type') in ('rtsp','jpeg_tcp'),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j.pop('asset',None)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
@@ -218,7 +218,7 @@ class Dashboard:
     async def control(self,request):
         name=request.match_info['name'];action=request.match_info['action'];data=await request.json()
         if name not in self.core.names(): raise ValueError('Unknown printer.')
-        if action in ('nozzle','bed','chamber','speed','fan','fanall','move') or action.startswith('fan_'):
+        if action in ('nozzle','bed','chamber','speed','fan','fanall','move','home','filament','nozzle_size') or action.startswith('fan_'):
             message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'),author='web administrator')
             return web.json_response({'ok':True,'message':message})
         if action=='stop' and data.get('confirmed') is not True: raise ValueError('Confirm stopping the print.')

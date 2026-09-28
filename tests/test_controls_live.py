@@ -48,6 +48,52 @@ class ControlsTests(unittest.TestCase):
         self.core.last_seen['A1 Mini']=time.time()-60
         with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',1,'X',True,True)
         self.client.publish.assert_not_called()
+    def test_home_uses_g28_or_back_to_center(self):
+        # No "already homed" confirmation is needed to home.
+        self.controls.apply('A1 Mini','home',None,None,True,False)
+        data=json.loads(self.client.publish.call_args.args[1])['print']
+        self.assertEqual((data['command'],data['param']),('gcode_line','G28 \n'))
+        with self.assertRaisesRegex(ValueError,'three seconds'):self.controls.apply('A1 Mini','home',None,None,True)
+        # Bit 32 of "fun": Bambu Studio homes these printers with back_to_center.
+        self.controls.moved.clear();self.core.state_data=lambda n:('IDLE',0,{'fun':format(1<<32,'x')},True)
+        self.controls.apply('A1 Mini','home',None,None,True)
+        self.assertEqual(json.loads(self.client.publish.call_args.args[1])['print']['command'],'back_to_center')
+    def test_home_blocked_while_printing_or_unconfirmed(self):
+        with self.assertRaises(ValueError):self.controls.apply('A1 Mini','home',None,None,False)
+        for state in ['RUNNING','PAUSE','PREPARE','FAILED']:
+            self.core.state_data=lambda n,s=state:(s,0,{},True)
+            with self.assertRaisesRegex(ValueError,'Homing requires'):self.controls.apply('A1 Mini','home',None,None,True)
+        self.core.state_data=lambda n:('IDLE',0,{},True);self.store.jobs=lambda:[{'printer':'A1 Mini','status':'printing'}]
+        with self.assertRaisesRegex(ValueError,'before homing'):self.controls.apply('A1 Mini','home',None,None,True)
+        self.client.publish.assert_not_called()
+    def test_filament_setting_payload(self):
+        self.controls.apply('A1 Mini','filament',{'ams':0,'slot':2,'type':'petg','color':'#ff8800'},confirmed=True)
+        data=json.loads(self.client.publish.call_args.args[1])['print']
+        self.assertEqual({k:data[k] for k in ('command','ams_id','tray_id','slot_id','tray_info_idx','tray_color','tray_type','nozzle_temp_min','nozzle_temp_max')},
+            {'command':'ams_filament_setting','ams_id':0,'tray_id':2,'slot_id':2,'tray_info_idx':'GFG99','tray_color':'FF8800FF','tray_type':'PETG','nozzle_temp_min':220,'nozzle_temp_max':260})
+        self.controls.apply('A1 Mini','filament',{'ams':'external','type':'PLA','color':'FFFFFF'},confirmed=True)
+        data=json.loads(self.client.publish.call_args.args[1])['print']
+        self.assertEqual((data['ams_id'],data['tray_id']),(255,254))
+        for bad in [{'ams':0,'slot':4,'type':'PLA','color':'FFFFFF'},{'ams':0,'slot':0,'type':'WOOD','color':'FFFFFF'},
+                    {'ams':0,'slot':0,'type':'PLA','color':'red'},{'ams':9,'slot':0,'type':'PLA','color':'FFFFFF'},'PLA']:
+            with self.assertRaises(ValueError):prepare(self.core,'A1 Mini','filament',bad)
+    def test_filament_in_use_is_locked_during_a_print(self):
+        self.core.state_data=lambda n:('RUNNING',0,{'ams':{'tray_now':'2'}},True)
+        with self.assertRaisesRegex(ValueError,'feeding the current print'):
+            self.controls.apply('A1 Mini','filament',{'ams':0,'slot':2,'type':'PLA','color':'FFFFFF'},confirmed=True)
+        self.controls.apply('A1 Mini','filament',{'ams':0,'slot':1,'type':'PLA','color':'FFFFFF'},confirmed=True)
+        self.client.publish.assert_called_once()
+    def test_nozzle_setting_uses_system_command(self):
+        self.controls.apply('A1 Mini','nozzle_size',{'diameter':0.6,'type':'hardened_steel'},confirmed=True)
+        payload=json.loads(self.client.publish.call_args.args[1])
+        self.assertNotIn('print',payload)
+        self.assertEqual({k:payload['system'][k] for k in ('command','accessory_type','nozzle_diameter','nozzle_type')},
+            {'command':'set_accessories','accessory_type':'nozzle','nozzle_diameter':0.6,'nozzle_type':'hardened_steel'})
+        for bad in [{'diameter':0.5,'type':'hardened_steel'},{'diameter':0.4,'type':'brass'},None]:
+            with self.assertRaises(ValueError):prepare(self.core,'A1 Mini','nozzle_size',bad)
+        self.core.state_data=lambda n:('RUNNING',0,{},True)
+        with self.assertRaisesRegex(ValueError,'no print is running'):
+            self.controls.apply('A1 Mini','nozzle_size',{'diameter':0.4,'type':'stainless_steel'},confirmed=True)
     def test_queue_blocks_move(self):
         self.store.jobs=lambda:[{'printer':'A1 Mini','status':'staging'}]
         with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',1,'X',True,True)

@@ -2,7 +2,7 @@
 
 You can change temperatures, speed, fans and lights, and jog the axes, from the dashboard (click a printer card to open its panel) or from Discord. In Discord, `/speed`, `/fan`, `/fanall` and the light commands are open to everyone (with confirmation and logging), while `/temperature`, `/chamber` and `/move` are admin-only by default. See [Commands and permissions](commands.md).
 
-**Every change asks for confirmation.** A change is **sent** over MQTT, which doesn't mean it was **applied**: the firmware can still reject it. If the printer rejects a command, it's shown in Activity and posted to the notification channel. Otherwise, check the printer's telemetry or screen to confirm.
+**Confirmations:** in the dashboard, only **Pause** and **Stop** ask first. Everything else applies straight away, and the limits below are still enforced by the server. In Discord, every change still shows a confirmation card. A change is **sent** over MQTT, which doesn't mean it was **applied**: the firmware can still reject it. If the printer rejects a command, it's shown in Activity and posted to the notification channel. Otherwise, check the printer's telemetry or screen to confirm.
 
 In demo mode, controls only change the simulated data.
 
@@ -12,15 +12,18 @@ In demo mode, controls only change the simulated data.
 - [Print speed](#print-speed)
 - [Fans](#fans)
 - [Moving the axes](#moving-the-axes)
+- [Filament: material and colour per slot](#filament-material-and-colour-per-slot)
+- [Nozzle diameter and type](#nozzle-diameter-and-type)
 - [Camera](#camera)
 
 ## Pause, resume, stop and light
 
 | Action | Dashboard | Discord |
 |---|---|---|
-| Pause / resume | **Pause** / **Resume** on the printer card | `/pause`, `/resume` |
+| Pause | **Pause**, then confirm | `/pause` |
+| Resume | **Resume** (no confirmation) | `/resume` |
 | Stop (cancel the print) | **Stop**, then confirm | `/stop`, then confirm |
-| Chamber light | **Light on** / **Light off** | `/lighton`, `/lightoff` |
+| Chamber light | 💡 button (pulses purple until the printer reports the change, then amber when on) | `/lighton`, `/lightoff` |
 
 **Stop and the queue:**
 - **Before the file was sent** (the job is still staging): stopping cancels the job.
@@ -63,7 +66,7 @@ Light control uses the standard `chamber_light` command. Whether it works depend
 
 ## Fans
 
-- **One fan:** `/fan percent:50 target:part`, or the dashboard control *Select fan*. Autocomplete and the dashboard list the fans **this printer reports**.
+- **One fan:** `/fan percent:50 target:part`, or drag that fan's slider in the dashboard (it's set when you let go). Autocomplete and the dashboard list the fans **this printer reports**.
 - **All fans on one printer:** `/fanall percent:80` or *All manual fans*. The result lists any automatic fans it skipped.
 
 How fans are controlled:
@@ -72,6 +75,12 @@ How fans are controlled:
 - **Firmware-managed fans:** the hotend heatbreak and electronics fans are never changed. Fans in automatic mode aren't forced either. Change the airflow mode on the printer if you need manual control.
 
 ## Moving the axes
+
+**Homing:** **⌂ Home** in the dashboard's printer panel, or Discord `/home` (admins, with confirmation), homes X, Y and Z.
+- **When it's allowed:** only while the printer is idle, connected and error-free, with no active queue job.
+- **Command used:** printers that report MQTT homing support (bit 32 of the `fun` flags) get Bambu Studio's `back_to_center` command. Others get `G28`.
+- **Hardware check needed:** this command choice follows Bambu Studio and still needs checking on each model.
+- **Before moving:** let homing finish before you move any axis.
 
 Discord `/move axis:X millimeters:1`, or the **Move axes** pad in the dashboard's printer panel.
 
@@ -99,6 +108,26 @@ The app refuses to move unless all of these hold:
 - **What it never does:** extrude, home automatically, change motor current, or bypass endstops.
 - **Not yet tested on physical hardware:** the movement fix. Try a 1 mm move first on each model.
 
+## Filament: material and colour per slot
+
+In the dashboard's printer panel, **click an AMS slot** (or the external spool) under **Filament**. Choose the **material** and **colour** (or one of the preset colours) and **Save filament**.
+
+- **What it changes:** what the printer *thinks* is loaded. This is the same as Bambu Studio's *Edit filament*, and it's what Studio and the queue's AMS mapping see. It doesn't move or unload the spool.
+- **Materials:** PLA, PETG, ABS, ASA, TPU, PC, PA and PVA, sent as Bambu's generic presets with their usual nozzle temperature range.
+  - PLA 190–230 °C, PETG 220–260, ABS/ASA 240–270, TPU 200–250, PC/PA 260–290, PVA 190–230.
+- **During a print:** you can edit any slot except the one feeding the current print.
+- **Waiting feedback:** the slot pulses purple until the printer reports the new material and colour.
+- **Hardware check needed:** the `ams_filament_setting` fields (including the external spool's `ams_id 255` / `tray_id 254`) follow Bambu Studio and still need checking on each model.
+
+## Nozzle diameter and type
+
+Under **Nozzle** in the printer panel, pick the **diameter** (0.2, 0.4, 0.6 or 0.8 mm) and **type** (stainless steel, hardened steel or tungsten carbide), then **Save**.
+
+- **When to use it:** after you've physically swapped the nozzle, so the printer, and Bambu Studio when slicing, know what's fitted. It doesn't change anything mechanically.
+- **Not while printing:** it's refused while a print is running or paused.
+- **Command used:** Bambu Studio's printer-parts setting, `{"system": {"command": "set_accessories", "accessory_type": "nozzle", ...}}`.
+- **Hardware check needed:** this command still needs checking on each model. The H2D has two nozzles, and this sets the printer's nozzle setting without choosing left or right. Check it on the H2D before relying on it.
+
 ## Camera
 
 Set `camera_type` on each printer in [config.json](configuration.md#printer-entries):
@@ -109,9 +138,9 @@ Set `camera_type` on each printer in [config.json](configuration.md#printer-entr
 | `rtsp` | H2D and other RTSP cameras | RTSP on port 322, decoded by **ffmpeg** (limited to 5 fps at 960 px wide to spare the Pi) |
 
 - **Snapshots:** `/printer`, notifications, and **Snapshot → Refresh camera snapshot** in the dashboard.
-- **Live view:** **Printer panel → ▶ Start live view** shows about one frame per second. It isn't full-motion video, and nothing is recorded.
+- **Live view:** starts automatically when you open a printer's panel, and shows about one frame per second. The Overview cards also show a camera image that refreshes every few seconds. It isn't full-motion video, and nothing is recorded.
   - **One shared connection:** all viewers and snapshots share one camera connection per printer. It reconnects automatically after errors, and closes when nobody is watching.
-  - **When it stops:** closing the dialog, hiding the browser tab or signing out stops your live view.
+  - **When it stops:** closing the panel, hiding the browser tab or signing out stops your live view. Card images only refresh while the Overview tab is on screen.
 - **Login required:** camera access needs a dashboard login, and the session is re-checked while streaming.
 - **Other clients:** if the printer won't accept another camera connection, close other camera clients (Bambu Studio, Handy).
 - **Printer settings:** firmware LAN settings and the access code still decide whether the camera is available. Camera errors are logged with the access code removed.

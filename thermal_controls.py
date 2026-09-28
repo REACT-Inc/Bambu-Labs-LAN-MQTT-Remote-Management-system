@@ -1,6 +1,13 @@
 """Fan capability mapping from Bambu Studio DevFan, and chamber target control."""
 FAN_NAMES={1:'Part cooling',2:'Auxiliary cooling',3:'Chamber / exhaust',6:'Internal circulation',10:'Auxiliary cooling 2'}
 FAN_KEYS={1:'part',2:'auxiliary',3:'chamber',6:'circulation',10:'auxiliary2'}
+# Older reports give fan speeds as 0-15 strings. Bambu Studio shows floor(value / 1.5) * 10 percent.
+LEGACY_FAN_FIELDS={1:'cooling_fan_speed',2:'big_fan1_speed',3:'big_fan2_speed'}
+
+
+def legacy_percent(data,index):
+    try:return max(0,min(100,int(int(data[LEGACY_FAN_FIELDS[index]])/1.5)*10))
+    except (KeyError,TypeError,ValueError):return None
 
 
 def model_name(core,name):
@@ -29,7 +36,8 @@ def fans(core,name):
     model=model_name(core,name);indices=[1]
     if data.get('support_aux_fan') is True or any(m in model for m in ('h2d','x1','p1s')):indices.append(2)
     if data.get('support_chamber_fan') is True or any(m in model for m in ('h2d','x1','p1s')):indices.append(3)
-    return [{'key':FAN_KEYS[i],'id':i,'label':FAN_NAMES[i],'protocol':'gcode_line','minimum':0,'maximum':100,'manual':True,'percent':None} for i in indices]
+    return [{'key':FAN_KEYS[i],'id':i,'label':FAN_NAMES[i],'protocol':'gcode_line','minimum':0,'maximum':100,'manual':True,
+             'percent':legacy_percent(data,i) if legacy_percent(data,i) is not None else (data.get('demo_fan_targets') or {}).get(str(i))} for i in indices]
 
 
 def fan_commands(core,name,target,percent):
