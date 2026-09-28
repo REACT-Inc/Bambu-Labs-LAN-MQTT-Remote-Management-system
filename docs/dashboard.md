@@ -92,7 +92,7 @@ MeshCentral connection settings, the matching laptops with their online state, a
 
 | Panel | Use it to |
 |---|---|
-| Discord settings | Set the notification channel ID, public commands channel ID and **approved user IDs** (admins without Discord Administrator). **Send test notification** checks the channel. |
+| Discord settings | Set the notification channel ID, the **commands channel ID** (replies are public there and private in every other channel) and **approved user IDs** (admins without Discord Administrator). **Send test notification** checks the channel. |
 | Dashboard access | Change the dashboard password (12+ characters). This signs everyone out. |
 | Diagnostics & error logs | Download a diagnostic ZIP and see recent errors with their error IDs. See [Troubleshooting](troubleshooting.md). |
 | Send a problem report | Send a description plus diagnostics to the developers as a GitHub issue, and set the report destination. See [Troubleshooting](troubleshooting.md#sending-a-problem-report). |

@@ -5,6 +5,7 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## 1.2.1-beta.1
 
 ### Fixed
+- **Discord replies are public only in the commands channel (#35).** Commands still work in every channel, but outside the commands channel the reply, confirmation and result are private: only the person who ran the command sees them. `/dm`, `/diagnostics`, `/reportissue`, report assignment, `/notattending` and `/attendance` stay private everywhere. If no commands channel is set, every reply is private, so run `/setcommandschannel` in the channel where replies should be public. To hide the commands elsewhere, limit the bot under Discord's **Server Settings → Integrations → Channels**.
 - **Updates only wait for printing (#32).** Updates used to need every printer idle, connected and reporting, and no active or needs-review queue jobs. Now only a printer that's printing (or paused mid-print) or a file being sent to a printer holds an update back. Offline or switched-off printers and waiting queue jobs no longer block updates, manual or automatic. The message names the printer that's blocking.
 - **Force update.** Installing from the dashboard while a printer is printing asks you to force the update, explains what happens, and records who forced it in the Activity feed. Automatic updates are never forced.
 

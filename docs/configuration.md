@@ -94,7 +94,7 @@ Example:
 | `/var/lib/3d-printer-management/` | All data (owned by `printermanager`): |
 | ├ `management.sqlite3` | Queue jobs, history, activity feed, Swapmod state (SQLite WAL; stop the service before copying it) |
 | ├ `uploads/` | Uploaded `.3mf` files. Not cleaned automatically. |
-| ├ `settings.json` | Channel IDs, approved user IDs, printer display names |
+| ├ `settings.json` | Channel IDs (`notification_channel_id`, and `commands_channel_id`: the only channel where Discord replies are public), approved user IDs, printer display names |
 | ├ `auth.json` | Dashboard password hash (scrypt) |
 | ├ `team.json` | Team links, practice schedule and roster |
 | ├ `meshcentral.json` | MeshCentral URL, token and allowed commands. See [LAPTOPS.md](../laptopManagement_Intergration/LAPTOPS.md). |
