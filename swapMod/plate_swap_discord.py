@@ -1,15 +1,11 @@
 import discord
 from discord import app_commands
-from discord_Intergration.extra_discord import permitted
 
 
 def install(core,engine):
     group=app_commands.Group(name='plateswap',description='Per-printer Swapmod A1m settings')
     async def admin(i):
-        if permitted(core,i):return True
-        if i.response.is_done():await i.followup.send('Administrators and approved user IDs only.',ephemeral=core.ephemeral(i))
-        else:await i.response.send_message('Administrators and approved user IDs only.',ephemeral=core.ephemeral(i))
-        return False
+        return await core.require(i,'plateswap')
 
     async def preview(i,title,detail,apply):
         class Confirm(core.OwnedView):

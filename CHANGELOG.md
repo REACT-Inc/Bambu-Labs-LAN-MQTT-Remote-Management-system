@@ -7,6 +7,11 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ### Added
 - **Ubuntu and other Linux distributions (#26).** The installer now runs on any systemd-based Linux as a Raspberry Pi alternative: Ubuntu 24.04+, Debian 12+, Fedora, Arch and openSUSE. It detects the package manager, checks for Python 3.11+ and systemd before changing anything, suggests a LAN address when Tailscale isn't connected, and prints the firewall command to open the dashboard port. See [Installation](docs/installation.md#ubuntu-and-other-linux-distributions).
 
+### Changed
+- **Discord permissions (#21).** Printer actions (`/pause`, `/resume`, `/stop`, `/reprint`, `/lighton`, `/lightoff`, `/speed`, `/fan`) and queue commands (`/queuestart`, `/queueforce`, `/queuemanage`) are open to every member. Each asks for confirmation and is logged with who ran it. `/fanall` now sets fans on **every** printer. Temperatures, chamber heating, movement, Swapmod, DMs, archiving, laptops and the Pi stay admin-only.
+- **Command permissions in the dashboard.** **Settings → Discord command permissions** sets each command to Everyone, Allowed roles + admins, Admins only or Off. Commands that reboot the Pi, run laptop commands, send DMs or change channels can only be admin-only or off.
+- **Command reference.** [docs/commands.md](docs/commands.md) lists every command and its default permission. A test fails if it goes out of date.
+
 ## 1.2.0-beta.2
 
 ### Added

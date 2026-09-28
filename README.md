@@ -18,7 +18,7 @@ Both share the same printer connections, print queues, files and history. Nothin
 - **Printers:** live status, temperatures, progress, AMS/external spool, HMS and print errors (official Bambu descriptions), camera snapshots and low-frame-rate live view.
 - **Shared print queue:** one queue per printer, fed from the dashboard or Discord. Jobs are sliced `.3mf` uploads or files already on the printer. Jobs never start automatically: someone confirms the plate is clear first.
 - **Printer controls:** pause/resume/stop, light, nozzle/bed/chamber temperatures, speed profile, fans, and axis jogging.
-- **Discord:** about 50 slash commands, progress notifications with camera snapshots at every 10%, and admin-only commands for approved users.
+- **Discord:** about 50 slash commands and progress notifications with camera snapshots at every 10%. Printer and queue actions are open to every member with confirmation and logging, and admins can choose who may use each command.
 - **Team tools:** shared notes, DM reminders, report-writer assignment and practice schedules, channel archiving, MeshCentral laptop commands, and Pi status/reboot.
 - **Operations:**
   - updates from the dashboard or GitHub releases, with stable/beta/alpha channels and automatic rollback
@@ -47,7 +47,8 @@ The guides below are in the `docs/` folder of the [GitHub repository](https://gi
 | [Installation](docs/installation.md) | Requirements, installing, network access, first login, demo mode, migrating from the old bot, uninstalling |
 | [Configuration](docs/configuration.md) | Every `config.json` setting, printer entries, files and folders, service commands, password reset |
 | [Web dashboard](docs/dashboard.md) | Each tab and what it does |
-| [Discord bot](docs/discord.md) | All commands, who can use them, reply visibility, notifications |
+| [Discord bot](docs/discord.md) | Setup, all commands, reply visibility, notifications |
+| [Commands and permissions](docs/commands.md) | Every command's default permission, changing permissions in the dashboard, logging |
 | [Print queue](docs/print-queue.md) | Supported files, job states, starting prints safely, review and recovery |
 | [Printer controls & camera](docs/printer-controls.md) | Temperatures, speed, fans, chamber, movement, lights, live view |
 | [Swapmod A1m](docs/swapmod.md) | Plate-swap batches for equipped A1 minis |

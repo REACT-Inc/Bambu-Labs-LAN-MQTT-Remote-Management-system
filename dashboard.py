@@ -67,6 +67,7 @@ class Dashboard:
             web.post('/api/jobs', self.add_job), web.post('/api/jobs/{id}/{action}', self.job_action),
             web.post('/api/printers/{name}/{action}', self.control),
             web.get('/api/camera/{name}', self.camera), web.post('/api/settings', self.settings),
+            web.get('/api/permissions', self.permissions), web.post('/api/permissions', self.save_permissions),
             web.get('/api/diagnostics', self.diagnostic_report), web.get('/api/errors', self.recent_errors),
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
         ])
@@ -218,10 +219,10 @@ class Dashboard:
         name=request.match_info['name'];action=request.match_info['action'];data=await request.json()
         if name not in self.core.names(): raise ValueError('Unknown printer.')
         if action in ('nozzle','bed','chamber','speed','fan','fanall','move') or action.startswith('fan_'):
-            message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'))
+            message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'),author='web administrator')
             return web.json_response({'ok':True,'message':message})
         if action=='stop' and data.get('confirmed') is not True: raise ValueError('Confirm stopping the print.')
-        await self.engine.control(name,action)
+        await self.engine.control(name,action,'web administrator')
         return web.json_response({'ok':True,'message':'Command submitted; wait for printer telemetry.'})
 
     async def plate_swap(self,request):
@@ -255,6 +256,41 @@ class Dashboard:
         self.core.settings.clear();self.core.settings.update(updated)
         self.core.SETTINGS_USER_IDS=set(ids)
         return web.json_response({'ok':True})
+
+    def permission_state(self):
+        """Every top-level Discord command with its default and current permission level."""
+        core=self.core;rows=[]
+        for command in sorted(core.bot.tree.get_commands(),key=lambda c:c.name):
+            names=[c.qualified_name for c in command.walk_commands() if not hasattr(c,'commands')] if hasattr(command,'walk_commands') else [command.name]
+            rows.append({'command':command.name,'subcommands':names,'description':command.description,
+                'default':core.default_level(command.name),'level':core.command_level(command.name),'locked':command.name in core.LOCKED_COMMANDS})
+        return {'commands':rows,'levels':core.LEVEL_LABELS,'member_role_ids':[str(r) for r in core.settings.get('member_role_ids') or []]}
+
+    async def permissions(self,request):
+        return web.json_response(self.permission_state())
+
+    async def save_permissions(self,request):
+        data=await request.json();core=self.core
+        levels=data.get('levels') or {}
+        if not isinstance(levels,dict):raise ValueError('Send levels as {command: level}.')
+        known={row['command'] for row in self.permission_state()['commands']}
+        overrides=dict(core.settings.get('command_permissions') or {})
+        for name,level in levels.items():
+            if name not in known:raise ValueError(f'Unknown command /{name}.')
+            if level not in core.LEVELS:raise ValueError(f'Choose one of: {", ".join(core.LEVELS)}.')
+            if name in core.LOCKED_COMMANDS and level in ('everyone','role'):raise ValueError(f'/{name} can only be admins only or off.')
+            if level==core.default_level(name):overrides.pop(name,None)
+            else:overrides[name]=level
+        roles=[int(v.strip()) for v in str(data.get('member_role_ids','')).replace('\n',',').split(',') if v.strip()]
+        if any(v<=0 for v in roles):raise ValueError('Role IDs must be positive numbers.')
+        before={name:core.command_level(name) for name in known};before_roles=core.settings.get('member_role_ids') or []
+        core.save_settings({**core.settings,'command_permissions':overrides,'member_role_ids':roles})
+        changes=[f'/{n}: {core.LEVEL_LABELS[before[n]]} → {core.LEVEL_LABELS[core.command_level(n)]}' for n in sorted(known) if before[n]!=core.command_level(n)]
+        if sorted(before_roles)!=sorted(roles):changes.append('allowed role IDs: '+(', '.join(map(str,roles)) or 'none'))
+        if changes:
+            self.store.event(None,'Discord permissions changed','; '.join(changes)[:1800]+' • web administrator')
+            core.log.info('Discord permissions changed by web administrator: %s','; '.join(changes))
+        return web.json_response(dict(self.permission_state(),changed=changes))
 
     async def change_password(self,request):
         data=await request.json();password=str(data.get('password',''))

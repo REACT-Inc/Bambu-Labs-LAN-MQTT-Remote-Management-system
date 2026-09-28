@@ -1,6 +1,6 @@
 # Printer controls & camera
 
-You can change temperatures, speed, fans and lights, and jog the axes, from the dashboard (click a printer card to open its panel) or from Discord. The Discord control commands are admin-only.
+You can change temperatures, speed, fans and lights, and jog the axes, from the dashboard (click a printer card to open its panel) or from Discord. In Discord, `/speed`, `/fan`, `/fanall` and the light commands are open to everyone (with confirmation and logging), while `/temperature`, `/chamber` and `/move` are admin-only by default. See [Commands and permissions](commands.md).
 
 **Every change asks for confirmation.** A change is **sent** over MQTT, which doesn't mean it was **applied**: the firmware can still reject it. If the printer rejects a command, it's shown in Activity and posted to the notification channel. Otherwise, check the printer's telemetry or screen to confirm.
 

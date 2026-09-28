@@ -28,6 +28,8 @@ The bot runs inside the same service as the dashboard and uses the same printers
 
 - **Allowed servers:** commands only work in servers listed in `guild_ids`, never in DMs.
 - **Admin:** a member with Discord's **Administrator** permission in that server, **or** a user ID in the approved list (dashboard **Settings → Approved user IDs**, or `admin_user_ids` in `config.json`).
+- **Everyone, with confirmation and logging:** printer actions (pause, resume, stop, reprint, lights, speed, fans) and the queue (start, force start, manage) are open to every member. Each asks for confirmation and is recorded in the Activity feed with who ran it.
+- **Changing who can use a command:** admins can set each command to **Everyone**, **Allowed roles + admins**, **Admins only** or **Off** in the dashboard under **Settings → Discord command permissions**. Commands that reboot the Pi, run laptop commands, send DMs or change channels can only be admins-only or off. The full list with default levels is in [Commands and permissions](commands.md).
 - **Enforcement:**
   - **When a command starts:** admin-only commands are checked centrally.
   - **When a button is pressed:** most are checked again, so revoking someone's access takes effect at once.
@@ -45,7 +47,7 @@ The bot runs inside the same service as the dashboard and uses the same printers
 
 ## Command reference
 
-**E** = everyone in an allowed server, **A** = admin (see above). `?` marks an optional option.
+**E** = everyone in an allowed server, **A** = admin (see above), by default. `?` marks an optional option. Full details and notes per command: [Commands and permissions](commands.md).
 
 ### Printers and files
 
@@ -66,10 +68,10 @@ The file listings go up to 10 folders deep, list up to 2000 entries, and stop af
 |---|---|---|
 | `/queue name?` | E | Show a printer's waiting jobs |
 | `/queueadd name? file? remote? label? plate? use_ams? mapping? bed?` | E | Add a job: attach a sliced `.3mf` **or** give `remote:` (a path already on the printer, e.g. `cache/part.gcode.3mf`) |
-| `/queuestart name?` | A | Confirm the plate is clear and start the first waiting job |
-| `/queueforce name?` | A | Start the next job even though the printer reports an error |
-| `/queuemanage job_id action` | A | `up`, `down`, `remove`, or record an outcome: `resolve_finished` / `resolve_failed` / `resolve_cancelled` |
-| `/reprint name?` | A | Add the most recent finished queue job back to the queue (it isn't started) |
+| `/queuestart name?` | E | Confirm the plate is clear and start the first waiting job |
+| `/queueforce name?` | E | Start the next job even though the printer reports an error |
+| `/queuemanage job_id action` | E | `up`, `down`, `remove`, or record an outcome: `resolve_finished` / `resolve_failed` / `resolve_cancelled` |
+| `/reprint name?` | E | Add the most recent finished queue job back to the queue (it isn't started) |
 
 Details: [Print queue](print-queue.md).
 
@@ -77,14 +79,14 @@ Details: [Print queue](print-queue.md).
 
 | Command | Who | What it does |
 |---|---|---|
-| `/pause name?` · `/resume name?` | A | Pause or resume the current print |
-| `/stop name?` | A | Cancel the current print (confirmation) |
-| `/lighton name?` · `/lightoff name?` | A | Chamber light |
+| `/pause name?` · `/resume name?` | E | Pause or resume the current print |
+| `/stop name?` | E | Cancel the current print (confirmation) |
+| `/lighton name?` · `/lightoff name?` | E | Chamber light |
 | `/temperature target degrees name?` | A | `nozzle`, `bed` or `chamber` target in °C (0 = off) |
 | `/chamber degrees name?` | A | H2D chamber target: 0 = off or 40–65 °C |
-| `/speed mode name?` | A | `silent`, `standard`, `sport` or `ludicrous` |
-| `/fan percent name? target?` | A | One fan, 0–100 % (autocomplete lists the printer's fans) |
-| `/fanall percent name?` | A | All manually controllable fans on **one printer** |
+| `/speed mode name?` | E | `silent`, `standard`, `sport` or `ludicrous` |
+| `/fan percent name? target?` | E | One fan, 0–100 % (autocomplete lists the printer's fans) |
+| `/fanall percent` | E | All manually controllable fans on **every printer** (reports the result per printer) |
 | `/move axis millimeters name?` | A | Jog X, Y or Z. Needs an idle, homed printer. |
 
 Limits and safety rules: [Printer controls](printer-controls.md).

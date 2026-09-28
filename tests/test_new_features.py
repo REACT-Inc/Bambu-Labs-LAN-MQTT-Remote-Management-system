@@ -112,10 +112,14 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             for name in ('temperature','move','rename','dm','plateswap approve','laptop cmd'):
                 self.assertIn('`/'+name+'`',admintext)
             self.i.user.id=7
-            for name in ('temperature','chamber','fan','fanall','move','rename','dm','plateswap','laptop','pause'):
+            for name in ('temperature','chamber','move','rename','dm','plateswap','laptop'):
                 cmd=self.core.bot.tree.get_command(name)
                 self.i.command=cmd
                 self.assertFalse(await self.core.bot.tree.interaction_check(self.i))
+            # Open to every member (each asks for confirmation and is logged).
+            for name in ('fan','fanall','speed','lighton','lightoff','pause','resume','stop','reprint','queuestart','queueforce','queuemanage'):
+                self.i.command=self.core.bot.tree.get_command(name)
+                self.assertTrue(await self.core.bot.tree.interaction_check(self.i),name)
             self.i.command=self.core.bot.tree.get_command('temperature')
             self.i.user.id=42
             self.assertTrue(await self.core.bot.tree.interaction_check(self.i))

@@ -199,18 +199,97 @@ def resolve_name(query):
     return None, None
 
 
+# Default: commands only server administrators and approved user IDs may run. Everything else is open to
+# every member of an authorized server; state-changing commands ask for confirmation and are logged.
+# The dashboard can override the level per command (settings.json "command_permissions").
 ADMIN_COMMANDS = {
-    'adminhelp','diagnostics','reportissue','temperature','chamber','speed','fan','fanall','move','plateswap','rename','dm',
+    'adminhelp','diagnostics','reportissue','temperature','chamber','move','plateswap','rename','dm',
     'laptops','laptop','server','reboot','setnotificationchannel','setcommandschannel',
-    'publiccommands','archive','unarchive','assign','meeting','queuestart','queueforce',
-    'queuemanage','reprint','pause','resume','stop','lighton','lightoff',
+    'publiccommands','archive','unarchive','assign','meeting',
 }
+# Permission levels, most to least open.
+LEVELS = ('everyone', 'role', 'admin', 'disabled')
+LEVEL_LABELS = {'everyone': 'Everyone', 'role': 'Allowed roles + admins', 'admin': 'Admins only', 'disabled': 'Off'}
+# Commands that can control the Pi or laptops, message people as the server, or change channels:
+# these can be admin-only or turned off, never opened to everyone.
+LOCKED_COMMANDS = {'reboot', 'laptop', 'laptops', 'dm', 'setnotificationchannel', 'setcommandschannel', 'archive', 'unarchive'}
+# Free-text options are not copied into the service log.
+PRIVATE_OPTIONS = {'message','text','title','description','command'}
+
+
+def who(interaction):
+    """Who ran a Discord action, for the activity log: display name plus the stable user ID."""
+    user = interaction.user
+    return f'Discord {getattr(user, "display_name", None) or user} ({user.id})'
+
+
+def command_summary(interaction):
+    data = getattr(interaction, 'data', None) or {}
+    parts, options = [data.get('name', '?')], data.get('options') or []
+    while options and options[0].get('type') in (1, 2):  # subcommand / subcommand group
+        parts.append(options[0].get('name', '?'))
+        options = options[0].get('options') or []
+    values = ' '.join(f"{o.get('name')}={'[text]' if o.get('name') in PRIVATE_OPTIONS else str(o.get('value'))[:80]}" for o in options)
+    return '/' + ' '.join(parts) + (' ' + values if values else '')
 
 
 def admin_allowed(interaction):
     return interaction.guild_id in ALLOWED_GUILD_IDS and (
         interaction.user.id in SETTINGS_USER_IDS or
         isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator)
+
+
+def default_level(root):
+    return 'admin' if root in ADMIN_COMMANDS else 'everyone'
+
+
+def command_level(root):
+    """Effective permission level for a top-level command name (e.g. 'plateswap' for /plateswap check)."""
+    level = (settings.get('command_permissions') or {}).get(root, default_level(root))
+    if level not in LEVELS:
+        level = default_level(root)
+    if root in LOCKED_COMMANDS and level in ('everyone', 'role'):
+        level = 'admin'
+    return level
+
+
+def has_allowed_role(interaction):
+    allowed = {int(r) for r in settings.get('member_role_ids') or []}
+    return bool(allowed) and any(getattr(role, 'id', None) in allowed for role in (getattr(interaction.user, 'roles', None) or []))
+
+
+def command_allowed(interaction, root):
+    """The single permission check for every command, its buttons and its autocomplete."""
+    if interaction.guild_id not in ALLOWED_GUILD_IDS:
+        return False
+    level = command_level(root)
+    if level == 'everyone':
+        return True
+    if level == 'disabled':
+        return False
+    return admin_allowed(interaction) or (level == 'role' and has_allowed_role(interaction))
+
+
+def denial_text(root):
+    level = command_level(root)
+    if level == 'disabled':
+        return f'/{root} is turned off. An administrator can turn it on in the dashboard under Settings → Discord command permissions.'
+    if level == 'role':
+        return 'Only members with an allowed role, administrators and approved user IDs can use this.'
+    return 'Administrators and approved user IDs only.'
+
+
+async def require(interaction, root):
+    """Check permission for a command (or one of its buttons) and tell the user if denied."""
+    if command_allowed(interaction, root):
+        return True
+    log.warning('Denied %s for %s (%s)', command_summary(interaction) if getattr(interaction, 'data', None) else '/' + root, who(interaction), command_level(root))
+    text = denial_text(root)
+    if interaction.response.is_done():
+        await interaction.followup.send(text, ephemeral=ephemeral(interaction))
+    else:
+        await interaction.response.send_message(text, ephemeral=ephemeral(interaction))
+    return False
 
 
 update_pending = lambda: False
@@ -226,9 +305,9 @@ class PrinterTree(app_commands.CommandTree):
                 embed=card('Unavailable', 'Use this bot in an authorized server.', RED), ephemeral=ephemeral(interaction))
             return False
         command = interaction.command
-        if command and command.qualified_name.split()[0] in ADMIN_COMMANDS and not admin_allowed(interaction):
-            await interaction.response.send_message('Administrators and approved user IDs only.', ephemeral=ephemeral(interaction))
+        if command and not await require(interaction, command.qualified_name.split()[0]):
             return False
+        log.info('%s ran %s in channel %s', who(interaction), command_summary(interaction), interaction.channel_id)
         return True
 
 
@@ -487,6 +566,8 @@ def publish_light(name, on):
 async def send_action(interaction, name, action, filename=None):
     try:
         publish_action(name, action, filename)
+        if event_listener:
+            event_listener(name, 'Control submitted', f'{action} • {who(interaction)}')
         description = f'**{safe(name)}**\n'
         description += 'Demo only — no printer was controlled.' if EXAMPLE_MODE else 'Command queued. Check printer status to confirm the result.'
         if filename:
@@ -497,11 +578,22 @@ async def send_action(interaction, name, action, filename=None):
     await respond(interaction, embed)
 
 
+# Printer actions anyone may run; each asks for confirmation first.
+CONFIRMED_ACTIONS = {
+    'pause': ('Pause print', 'Pause the current print on **{}**?'),
+    'resume': ('Resume print', 'Resume the paused print on **{}**?\nCheck the printer and build plate are ready first.'),
+    'stop': ('Stop print', 'Cancel the current print on **{}**?\nThis cannot be undone.'),
+    'lighton': ('Turn light on', 'Turn the chamber light **on** on **{}**?'),
+    'lightoff': ('Turn light off', 'Turn the chamber light **off** on **{}**?'),
+}
+
+
 class ActionConfirm(OwnedView):
     def __init__(self, owner, name, action, filename=None):
         super().__init__(owner)
         self.name, self.action, self.filename = name, action, filename
-        self.button('Stop print' if action == 'stop' else 'Reprint', self.confirm, discord.ButtonStyle.danger)
+        label = CONFIRMED_ACTIONS[action][0] if action in CONFIRMED_ACTIONS else 'Reprint'
+        self.button(label, self.confirm, discord.ButtonStyle.primary if action in ('lighton', 'lightoff', 'resume') else discord.ButtonStyle.danger)
         self.button('Cancel', self.cancel)
 
     async def confirm(self, interaction):
@@ -524,12 +616,15 @@ async def run_action(interaction, action, name):
         await interaction.followup.send(**kwargs)
     elif action == 'filaments':
         await respond(interaction, filament_embed(name))
-    elif action in ('stop', 'reprint'):
-        filename = state_data(name)[2].get('subtask_name') if action == 'reprint' else None
-        if action == 'reprint' and not filename:
+    elif action in CONFIRMED_ACTIONS:
+        await respond(interaction, card('⚠️ Confirm ' + CONFIRMED_ACTIONS[action][0].lower(), CONFIRMED_ACTIONS[action][1].format(safe(name)), YELLOW),
+                      ActionConfirm(interaction.user.id, name, action))
+    elif action == 'reprint':
+        filename = state_data(name)[2].get('subtask_name')
+        if not filename:
             await respond(interaction, card('No file available', 'No previous filename has been reported.', YELLOW))
             return
-        description = f'Cancel the current print on **{safe(name)}**?' if action == 'stop' else (
+        description = (
             f'Reprint **{safe(filename)}** on **{safe(name)}**?\n'
             'Clear the build plate before confirming.\n'
             'Experimental: the reported job name may not be a printable file on storage. '
@@ -540,19 +635,10 @@ async def run_action(interaction, action, name):
         await send_action(interaction, name, action)
 
 
-async def settings_allowed(interaction):
-    permitted = interaction.guild_id in ALLOWED_GUILD_IDS and (
-        interaction.user.id in SETTINGS_USER_IDS or
-        isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator)
-    if not permitted:
-        await interaction.response.send_message(embed=card('Settings restricted', 'Only server administrators and approved users can change settings.', RED), ephemeral=ephemeral(interaction))
-    return permitted
-
-
 @bot.tree.command(name='setnotificationchannel', description='Set notifications here (admins or approved users)')
 @app_commands.guild_only()
 async def set_notification_channel(interaction: discord.Interaction):
-    if await settings_allowed(interaction):
+    if await require(interaction, 'setnotificationchannel'):
         store_channel('notification_channel_id', interaction)
         await respond(interaction, card('🔔 Notifications configured', 'Automatic printer updates will appear in this channel.', GREEN))
 
@@ -560,7 +646,7 @@ async def set_notification_channel(interaction: discord.Interaction):
 @bot.tree.command(name='setcommandschannel', description='Set the main commands channel (admins or approved users)')
 @app_commands.guild_only()
 async def set_commands_channel(interaction: discord.Interaction):
-    if await settings_allowed(interaction):
+    if await require(interaction, 'setcommandschannel'):
         store_channel('commands_channel_id', interaction)
         await respond(interaction, card('💬 Commands channel configured', 'Main commands channel saved. Replies are public in every server channel except publiccommands, report assignment and dm.', GREEN))
 
@@ -614,7 +700,7 @@ def help_embed(admin=False):
     groups = [
         ('📊 Printers & files', {'status','printer','filaments','file','help','adminhelp'}, 'Printer status, camera snapshots, filament and stored files.'),
         ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move'}, 'Pause/resume/cancel, lights, temperatures, speed, fan and axis jogging.'),
-        ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'Manage jobs and confirm starts.' if admin else 'View the queue and add files for an administrator to start.'),
+        ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'View, add, start and manage jobs. Starts and changes ask for confirmation and are logged.'),
         ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
         ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),
         ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','attending','notattending','attendance','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes, reminders and meeting attendance.'),
@@ -627,7 +713,9 @@ def help_embed(admin=False):
             for child in command.commands:
                 collect(child, root)
         else:
-            if (root in ADMIN_COMMANDS) == admin:
+            # /help lists what everyone (or allowed roles) can use; /adminhelp lists admin-only commands. Off commands are hidden.
+            level = command_level(root)
+            if level != 'disabled' and (level == 'admin') == admin:
                 commands.append((root, command.qualified_name))
     for command in bot.tree.get_commands():
         collect(command)
@@ -639,7 +727,8 @@ def help_embed(admin=False):
         if entries:
             field(embed, title, description + '\n' + ' · '.join(sorted(entries)), False)
     field(embed, 'Selection, permissions & privacy',
-          'Use printer-name autocomplete or the selection buttons when available. Admin commands require a server administrator or an approved user ID. '
+          'Use printer-name autocomplete or the selection buttons when available. Admin commands require a server administrator or an approved user ID; '
+          'administrators can change who may use each command in the dashboard. '
           'Replies are public in the current server channel, except publiccommands, report assignment and dm.', False)
     return embed
 
@@ -653,8 +742,7 @@ async def help_command(interaction: discord.Interaction):
 @bot.tree.command(name='adminhelp', description='Command guide for administrators and approved IDs')
 @app_commands.guild_only()
 async def admin_help_command(interaction: discord.Interaction):
-    if not admin_allowed(interaction):
-        await interaction.response.send_message('Administrators and approved user IDs only.', ephemeral=ephemeral(interaction))
+    if not await require(interaction, 'adminhelp'):
         return
     await interaction.response.send_message(embed=help_embed(admin=True), ephemeral=ephemeral(interaction))
 

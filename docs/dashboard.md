@@ -93,6 +93,7 @@ MeshCentral connection settings, the matching laptops with their online state, a
 | Panel | Use it to |
 |---|---|
 | Discord settings | Set the notification channel ID, public commands channel ID and **approved user IDs** (admins without Discord Administrator). **Send test notification** checks the channel. |
+| Discord command permissions | Choose who can use each Discord command: Everyone, Allowed roles + admins (with the **Allowed role IDs** list), Admins only, or Off. Commands marked 🔒 can only be admin-only or off. Opening an admin command to everyone asks for confirmation, and **Reset all to defaults** restores the defaults. See [Commands and permissions](commands.md). |
 | Dashboard access | Change the dashboard password (12+ characters). This signs everyone out. |
 | Diagnostics & error logs | Download a diagnostic ZIP and see recent errors with their error IDs. See [Troubleshooting](troubleshooting.md). |
 | Send a problem report | Send a description plus diagnostics to the developers as a GitHub issue, and set the report destination. See [Troubleshooting](troubleshooting.md#sending-a-problem-report). |

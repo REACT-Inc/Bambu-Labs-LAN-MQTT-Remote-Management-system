@@ -1,19 +1,15 @@
 import discord
 from discord import app_commands
-from discord_Intergration.extra_discord import permitted
 from printer_controls import prepare
 from thermal_controls import fans
 
 
 def install(core,controls):
-    async def check(i):
-        if permitted(core,i):return True
-        if i.response.is_done():await i.followup.send('Administrators and approved user IDs only.',ephemeral=core.ephemeral(i))
-        else:await i.response.send_message('Administrators and approved user IDs only.',ephemeral=core.ephemeral(i))
-        return False
-
-    async def choose(i,name,kind,value,axis=None):
-        if not await check(i):return
+    # Who may use each command (and press its buttons) is decided by core.require: by default
+    # /temperature, /chamber and /move are admin-only and /fan and /speed are open to everyone.
+    async def choose(i,name,kind,value,axis=None,command=None):
+        command=command or kind
+        if not await core.require(i,command):return
         await i.response.defer(ephemeral=core.ephemeral(i))
         async def preview(click,printer):
             try:_,_,label=prepare(core,printer,kind,value,axis)
@@ -25,10 +21,10 @@ def install(core,controls):
                     self.button('Confirm move' if kind=='move' else 'Apply setting',self.apply,discord.ButtonStyle.danger)
                     self.button('Cancel',self.cancel)
                 async def apply(self,event):
-                    if not await check(event):return
+                    if not await core.require(event,command):return
                     if self.used:return
                     self.used=True;self.stop();await event.response.defer()
-                    try:message=controls.apply(printer,kind,value,axis,confirmed=True,homed=kind=='move')
+                    try:message=controls.apply(printer,kind,value,axis,confirmed=True,homed=kind=='move',author=core.who(event))
                     except ValueError as exc:message=str(exc)
                     await event.edit_original_response(content=message,embed=None,view=None)
             detail=f'{core.safe(printer)}\n{label}'
@@ -41,7 +37,7 @@ def install(core,controls):
             class Picker(core.PrinterPicker):
                 def choose(self,printer):
                     async def picked(click):
-                        if not await check(click):return
+                        if not await core.require(click,command):return
                         if await self.finish(click,core.card('Printer selected',core.safe(printer))):await preview(click,printer)
                     return picked
             view=Picker(i.user.id,kind,suggestion)
@@ -50,30 +46,53 @@ def install(core,controls):
     @core.bot.tree.command(name='temperature',description='Set bed or active nozzle temperature (admins/approved IDs)')
     @app_commands.guild_only()
     @app_commands.choices(target=[app_commands.Choice(name=x,value=x) for x in ('nozzle','bed','chamber')])
-    async def temperature(i:discord.Interaction,target:str,degrees:int,name:str=None):await choose(i,name,target,degrees)
+    async def temperature(i:discord.Interaction,target:str,degrees:int,name:str=None):await choose(i,name,target,degrees,command='chamber' if target=='chamber' else 'temperature')
 
-    @core.bot.tree.command(name='speed',description='Set print speed profile (admins/approved IDs)')
+    @core.bot.tree.command(name='speed',description='Set a printer\'s print speed profile, with confirmation')
     @app_commands.guild_only()
     @app_commands.choices(mode=[app_commands.Choice(name=x.title(),value=x) for x in ('silent','standard','sport','ludicrous')])
     async def speed(i:discord.Interaction,mode:str,name:str=None):await choose(i,name,'speed',mode)
 
     async def fan_options(i:discord.Interaction,current:str):
-        if not permitted(core,i):return []
         name=getattr(i.namespace,'name',None)
         exact,_=core.resolve_name(name)
         if exact:options=[(f['label']+(' (automatic)' if not f['manual'] else ''),f['key']) for f in fans(core,exact)]
         else:options=[('Part cooling','part'),('Auxiliary cooling','auxiliary'),('Chamber / exhaust','chamber'),('Internal circulation','circulation'),('Auxiliary cooling 2','auxiliary2')]
         return [app_commands.Choice(name=label[:100],value=key) for label,key in options if current.lower() in (label+' '+key).lower()][:25]
 
-    @core.bot.tree.command(name='fan',description='Set a selected fan percentage (admins/approved IDs)')
+    @core.bot.tree.command(name='fan',description='Set one fan on a printer (0–100 %), with confirmation')
     @app_commands.guild_only()
     @app_commands.autocomplete(target=fan_options)
     async def fan(i:discord.Interaction,percent:app_commands.Range[int,0,100],name:str=None,target:str='part'):
-        await choose(i,name,'fan_'+target,percent)
+        await choose(i,name,'fan_'+target,percent,command='fan')
 
-    @core.bot.tree.command(name='fanall',description='Set all manually controllable fans on one printer (admins/approved IDs)')
+    @core.bot.tree.command(name='fanall',description='Set every manually controllable fan on every printer (0–100 %), with confirmation')
     @app_commands.guild_only()
-    async def fanall(i:discord.Interaction,percent:app_commands.Range[int,0,100],name:str=None):await choose(i,name,'fanall',percent)
+    @app_commands.describe(percent='Fan speed for all printers; 0 turns the fans off')
+    async def fanall(i:discord.Interaction,percent:app_commands.Range[int,0,100]):
+        printers=core.names()
+        if not printers:
+            await core.respond(i,core.card('No printers','No printers are configured.',core.RED));return
+        class Confirm(core.OwnedView):
+            def __init__(self):
+                super().__init__(i.user.id)
+                self.button(f'Set all fans to {percent}%',self.apply,discord.ButtonStyle.danger)
+                self.button('Cancel',self.cancel)
+            async def apply(self,event):
+                if not await core.require(event,'fanall'):return
+                if self.used:return
+                self.used=True;self.stop();await event.response.defer()
+                author=core.who(event);lines=[]
+                # One printer being offline or unsupported must not stop the others.
+                for printer in printers:
+                    try:lines.append('✅ '+core.safe(core.display_name(printer))+': '+controls.apply(printer,'fanall',percent,confirmed=True,author=author).split(' • ')[0])
+                    except ValueError as exc:lines.append('⚠️ '+core.safe(core.display_name(printer))+': '+core.safe(str(exc)))
+                core.log.info('%s set all fans to %s%% on %d printer(s)',author,percent,len(printers))
+                await event.edit_original_response(embed=core.card(f'🌀 All fans → {percent}%','\n'.join(lines)[:4000]),view=None)
+        view=Confirm()
+        await core.respond(i,core.card('⚠️ Confirm fans on every printer',
+            f'Set every manually controllable fan to **{percent}%** on all {len(printers)} printer(s)?\n'+', '.join(core.safe(core.display_name(p)) for p in printers)+
+            ('\nThis turns the fans off.' if percent==0 else ''),core.YELLOW),view)
 
     @core.bot.tree.command(name='chamber',description='Set H2D chamber target: 0 off or 40–65 °C (admins/approved IDs)')
     @app_commands.guild_only()
