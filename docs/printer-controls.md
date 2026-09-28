@@ -12,6 +12,8 @@ In demo mode, controls only change the simulated data.
 - [Print speed](#print-speed)
 - [Fans](#fans)
 - [Moving the axes](#moving-the-axes)
+- [Filament: material and colour per slot](#filament-material-and-colour-per-slot)
+- [Nozzle diameter and type](#nozzle-diameter-and-type)
 - [Camera](#camera)
 
 ## Pause, resume, stop and light
@@ -105,6 +107,26 @@ The app refuses to move unless all of these hold:
 - **Directions** follow printer coordinates: +Z doesn't necessarily mean the bed moves up.
 - **What it never does:** extrude, home automatically, change motor current, or bypass endstops.
 - **Not yet tested on physical hardware:** the movement fix. Try a 1 mm move first on each model.
+
+## Filament: material and colour per slot
+
+In the dashboard's printer panel, **click an AMS slot** (or the external spool) under **Filament**. Choose the **material** and **colour** (or one of the preset colours) and **Save filament**.
+
+- **What it changes:** what the printer *thinks* is loaded. This is the same as Bambu Studio's *Edit filament*, and it's what Studio and the queue's AMS mapping see. It doesn't move or unload the spool.
+- **Materials:** PLA, PETG, ABS, ASA, TPU, PC, PA and PVA, sent as Bambu's generic presets with their usual nozzle temperature range.
+  - PLA 190–230 °C, PETG 220–260, ABS/ASA 240–270, TPU 200–250, PC/PA 260–290, PVA 190–230.
+- **During a print:** you can edit any slot except the one feeding the current print.
+- **Waiting feedback:** the slot pulses purple until the printer reports the new material and colour.
+- **Hardware check needed:** the `ams_filament_setting` fields (including the external spool's `ams_id 255` / `tray_id 254`) follow Bambu Studio and still need checking on each model.
+
+## Nozzle diameter and type
+
+Under **Nozzle** in the printer panel, pick the **diameter** (0.2, 0.4, 0.6 or 0.8 mm) and **type** (stainless steel, hardened steel or tungsten carbide), then **Save**.
+
+- **When to use it:** after you've physically swapped the nozzle, so the printer, and Bambu Studio when slicing, know what's fitted. It doesn't change anything mechanically.
+- **Not while printing:** it's refused while a print is running or paused.
+- **Command used:** Bambu Studio's printer-parts setting, `{"system": {"command": "set_accessories", "accessory_type": "nozzle", ...}}`.
+- **Hardware check needed:** this command still needs checking on each model. The H2D has two nozzles, and this sets the printer's nozzle setting without choosing left or right. Check it on the H2D before relying on it.
 
 ## Camera
 

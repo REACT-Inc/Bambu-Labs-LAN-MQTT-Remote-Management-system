@@ -8,6 +8,7 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 - **Ubuntu and other Linux distributions (#26).** The installer now runs on any systemd-based Linux as a Raspberry Pi alternative: Ubuntu 24.04+, Debian 12+, Fedora, Arch and openSUSE. It detects the package manager, checks for Python 3.11+ and systemd before changing anything, suggests a LAN address when Tailscale isn't connected, and prints the firewall command to open the dashboard port. See [Installation](docs/installation.md#ubuntu-and-other-linux-distributions).
 
 ### Changed
+- **Edit AMS filament and nozzle.** In the printer panel, click an AMS slot or the external spool to set its material and colour, as Bambu Studio's *Edit filament* does. A new **Nozzle** row sets the fitted nozzle's diameter and type.
 - **Homing.** **⌂ Home** in the dashboard's printer panel and a new admin-only `/home` command home X, Y and Z on an idle printer. It uses Bambu Studio's `back_to_center` where the printer supports MQTT homing, otherwise `G28`.
 - **Faster dashboard controls (#37).** In the web dashboard only **Pause** and **Stop** ask for confirmation. Temperatures, speed, fans, light and resume apply straight away, with the same server-side limits. Discord keeps its confirmation cards.
 - **Camera on by default (#37).** Opening a printer starts its live camera, and the Overview cards show a camera image that refreshes every few seconds. The printer panel's camera area no longer collapses to nothing.

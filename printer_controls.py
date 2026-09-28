@@ -7,6 +7,12 @@ import time
 from thermal_controls import fans,fan_commands,model_name
 
 SPEEDS={'silent':1,'standard':2,'sport':3,'ludicrous':4}
+# Bambu generic filament presets: tray_info_idx and nozzle temperature range sent with ams_filament_setting.
+FILAMENTS={'PLA':('GFL99',190,230),'PETG':('GFG99',220,260),'ABS':('GFB99',240,270),'ASA':('GFB98',240,270),
+           'TPU':('GFU99',200,250),'PC':('GFC99',260,290),'PA':('GFN99',260,290),'PVA':('GFS99',190,230)}
+NOZZLE_DIAMETERS=(0.2,0.4,0.6,0.8)
+NOZZLE_TYPES={'stainless_steel':'Stainless steel','hardened_steel':'Hardened steel','tungsten_carbide':'Tungsten carbide'}
+EXTERNAL_SPOOL=255
 
 
 def limits(core,name):
@@ -54,6 +60,30 @@ def prepare(core,name,kind,value,axis=None):
         return 'gcode_line',gcode,f'Move {axis} by {value:+g} mm'
     if kind=='home':
         return 'gcode_line','G28 \n','Home all axes'
+    if kind=='filament':
+        # Same fields as Bambu Studio's "Edit filament" (command ams_filament_setting). External spool: ams_id 255, tray 254.
+        if not isinstance(value,dict):raise ValueError('Choose a slot, material and colour.')
+        material=str(value.get('type','')).upper()
+        if material not in FILAMENTS:raise ValueError('Material must be one of: '+', '.join(FILAMENTS)+'.')
+        color=str(value.get('color','')).lstrip('#').upper()
+        if not re.fullmatch(r'[0-9A-F]{6}',color):raise ValueError('Colour must be a hex colour like #FF8800.')
+        ams=value.get('ams')
+        if ams in ('external',EXTERNAL_SPOOL,str(EXTERNAL_SPOOL)):ams_id,slot,tray_id,where=EXTERNAL_SPOOL,0,254,'External spool'
+        else:
+            ams_id=number(ams,0,7,True);slot=number(value.get('slot'),0,3,True);tray_id=slot
+            where=f'AMS {ams_id+1} slot {slot+1}'
+        idx,low,high=FILAMENTS[material]
+        return 'batch',[{'command':'ams_filament_setting','ams_id':ams_id,'tray_id':tray_id,'slot_id':slot,'tray_info_idx':idx,
+            'setting_id':'','tray_color':color+'FF','tray_type':material,'nozzle_temp_min':low,'nozzle_temp_max':high}],f'{where} → {material} #{color}'
+    if kind=='nozzle_size':
+        # Bambu Studio's printer-parts setting: {"system": {"command": "set_accessories", "accessory_type": "nozzle", ...}}.
+        if not isinstance(value,dict):raise ValueError('Choose a nozzle diameter and type.')
+        diameter=number(value.get('diameter'),0.2,0.8)
+        if diameter not in NOZZLE_DIAMETERS:raise ValueError('Nozzle diameter must be 0.2, 0.4, 0.6 or 0.8 mm.')
+        nozzle=str(value.get('type',''))
+        if nozzle not in NOZZLE_TYPES:raise ValueError('Nozzle type must be stainless steel, hardened steel or tungsten carbide.')
+        return 'batch',[{'_root':'system','command':'set_accessories','accessory_type':'nozzle','nozzle_diameter':diameter,'nozzle_type':nozzle}],\
+            f'Nozzle → {diameter:g} mm {NOZZLE_TYPES[nozzle].lower()}'
     raise ValueError('Unknown control.')
 
 
@@ -115,11 +145,27 @@ class Controls:
             if time.monotonic()-self.moved.get(name,-100)<3:raise ValueError('Wait three seconds between moves.')
             if kind=='move' and axis_ctrl_supported(data):command,param=('batch',xyz_ctrl(axis,round(float(value),1)))
             if kind=='home' and mqtt_homing_supported(data):command,param=('batch',[{'command':'back_to_center'}])
+        if kind=='nozzle_size' and state in ('RUNNING','PAUSE','PREPARE'):raise ValueError('Change the nozzle setting only when no print is running.')
+        if kind=='filament' and state in ('RUNNING','PAUSE','PREPARE'):
+            item=param[0];ams=data.get('ams') if isinstance(data.get('ams'),dict) else {}
+            active=ams.get('tray_now')
+            in_use=(active in (254,255,'254','255')) if item['ams_id']==EXTERNAL_SPOOL else str(active)==str(item['ams_id']*4+item['slot_id'])
+            if in_use:raise ValueError('That slot is feeding the current print. Change it after the print.')
         if self.core.EXAMPLE_MODE:
             d=self.core.EXAMPLE_DATA[name]
             if kind in ('nozzle','bed'):d[kind+'_target_temper']=int(value)
             elif kind=='speed':d['spd_lvl']=SPEEDS[value]
             elif kind=='chamber':d['ctt']=int(value)
+            elif kind=='filament':
+                item=param[0];tray={'tray_type':item['tray_type'],'tray_color':item['tray_color'],'remain':100}
+                if item['ams_id']==EXTERNAL_SPOOL:d['vt_tray']={**d.get('vt_tray',{}),**tray}
+                else:
+                    units=d.get('ams');units=units.get('ams',[]) if isinstance(units,dict) else units
+                    for unit in units:
+                        if str(unit.get('id'))==str(item['ams_id']):
+                            for t in unit.get('tray',[]):
+                                if str(t.get('id'))==str(item['slot_id']):t.update(tray)
+            elif kind=='nozzle_size':d['nozzle_diameter']=str(param[0]['nozzle_diameter']);d['nozzle_type']=param[0]['nozzle_type']
             elif kind.startswith('fan'):
                 targets=d.setdefault('demo_fan_targets',{})
                 for c in param:
@@ -135,7 +181,8 @@ class Controls:
                 self.pending={k:v for k,v in self.pending.items() if time.monotonic()-v[3]<300}
                 sequence=str(time.time_ns()%1000000000)
                 self.pending[sequence]=(name,item['command'],label,time.monotonic())
-                payload={'print':dict(item,sequence_id=sequence)}
+                item=dict(item);root=item.pop('_root','print')
+                payload={root:dict(item,sequence_id=sequence)}
                 result=client.publish(f"device/{self.core.printer_config(name)['serial']}/request",json.dumps(payload),qos=1)
                 if result.rc!=0:raise ValueError(f'MQTT submission failed after {submitted}/{len(commands)} commands. Inspect actual fan/settings state before retrying.')
                 submitted+=1

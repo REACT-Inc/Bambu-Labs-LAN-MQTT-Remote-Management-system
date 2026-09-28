@@ -138,13 +138,49 @@ $('jogHome').onclick=async()=>{const b=$('jogHome');b.classList.add('pending');j
   jogReadyAt=Date.now()+3100;setTimeout(()=>renderJog(devPrinter()),3200);}
  catch(e){jogNote={text:e.message,until:Date.now()+15000};}finally{jogBusy=false;b.classList.remove('pending');renderJog(devPrinter());}};
 
-function swatch(t,active){const color=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6):null,empty=!t||!t.tray_type,remain=num(t?.remain);
- return `<div class="slot${empty?' is-empty':''}${active?' active':''}" title="${esc(empty?'Empty':t.tray_type+(remain!==null&&remain>=0?' · '+remain+'%':''))}"><span class="swatch"${color&&!empty?` data-color="${color}"`:''}></span><strong>${empty?'Empty':esc(t.tray_type)}</strong><small>${empty?'—':remain!==null&&remain>=0?remain+'%':'?'}</small>${!empty&&remain!==null&&remain>=0?`<i class="remain" data-width="${Math.max(0,Math.min(100,remain))}"></i>`:''}</div>`;}
+function swatch(t,active,ams,slot,waiting){const color=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6):null,empty=!t||!t.tray_type,remain=num(t?.remain);
+ return `<button type="button" class="slot${empty?' is-empty':''}${active?' active':''}${waiting?' pending':''}" data-ams="${esc(ams)}" data-slot="${esc(slot)}" title="${esc((empty?'Empty':t.tray_type+(remain!==null&&remain>=0?' · '+remain+'%':''))+' — click to edit')}"><span class="swatch"${color&&!empty?` data-color="${color}"`:''}></span><strong>${empty?'Empty':esc(t.tray_type)}</strong><small>${empty?'—':remain!==null&&remain>=0?remain+'%':'?'}</small>${!empty&&remain!==null&&remain>=0?`<i class="remain" data-width="${Math.max(0,Math.min(100,remain))}"></i>`:''}</button>`;}
 function exists(bits,unit,slot){try{return bits==null||Number(unit)>=32||((BigInt('0x'+bits)>>BigInt(Number(unit)*4+Number(slot)))&1n)===1n;}catch{return true;}}
 function renderAms(p){const d=p.data||{},ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),units=ams.ams||[],now=num(ams.tray_now);
- let html=units.map(u=>`<div class="ams-unit"><div class="ams-head"><strong>AMS ${esc(Number(u.id)+1||u.id)}</strong><small>💧 ${esc(u.humidity??'—')} · ${esc(u.temp??'—')}°C</small></div><div class="slots">${(u.tray||[]).map(t=>swatch(exists(ams.tray_exist_bits,u.id,t.id)?t:null,now===Number(u.id)*4+Number(t.id))).join('')}</div></div>`).join('');
- if(d.vt_tray)html+=`<div class="ams-unit external"><div class="ams-head"><strong>External spool</strong></div><div class="slots">${swatch(d.vt_tray,now===254||now===255)}</div></div>`;
+ const wait=(a,s)=>isPending('fil|'+p.name+'|'+a+'|'+s,p);
+ let html=units.map(u=>`<div class="ams-unit"><div class="ams-head"><strong>AMS ${esc(Number(u.id)+1||u.id)}</strong><small>💧 ${esc(u.humidity??'—')} · ${esc(u.temp??'—')}°C</small></div><div class="slots">${(u.tray||[]).map(t=>swatch(exists(ams.tray_exist_bits,u.id,t.id)?t:null,now===Number(u.id)*4+Number(t.id),u.id,t.id,wait(u.id,t.id))).join('')}</div></div>`).join('');
+ if(d.vt_tray)html+=`<div class="ams-unit external"><div class="ams-head"><strong>External spool</strong></div><div class="slots">${swatch(d.vt_tray,now===254||now===255,'external',0,wait('external',0))}</div></div>`;
  $('amsView').innerHTML=html||'<p class="muted">No filament data reported yet.</p>';applyStyles($('amsView'));}
+
+// ---- Edit a slot's filament (material and colour) ----------------------------------------
+const MATERIALS=['PLA','PETG','ABS','ASA','TPU','PC','PA','PVA'];
+const PRESET_COLOURS=['FFFFFF','161616','8E9089','E8412C','F28C28','F4D03F','39B54A','2E7DD1','7D4CDB','E86FA8','8B5A2B','C0C0C0'];
+let editingSlot=null;
+$('feType').innerHTML=MATERIALS.map(m=>`<option>${m}</option>`).join('');
+$('fePresets').innerHTML=PRESET_COLOURS.map(c=>`<button type="button" class="fe-preset" data-preset="${c}" data-color="#${c}" aria-label="Colour #${c}" title="#${c}"></button>`).join('');applyStyles($('fePresets'));
+$('fePresets').addEventListener('click',e=>{const b=e.target.closest('[data-preset]');if(b)$('feColor').value='#'+b.dataset.preset.toLowerCase();});
+function slotTray(p,ams,slot){const d=p.data||{};if(ams==='external')return d.vt_tray;const a=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{});
+ return (a.ams||[]).find(u=>String(u.id)===String(ams))?.tray?.find(t=>String(t.id)===String(slot));}
+$('amsView').addEventListener('click',e=>{const b=e.target.closest('.slot[data-ams]');if(!b)return;const p=devPrinter(),t=slotTray(p,b.dataset.ams,b.dataset.slot);
+ editingSlot={ams:b.dataset.ams,slot:b.dataset.slot};
+ $('feTitle').textContent=b.dataset.ams==='external'?'External spool':`AMS ${Number(b.dataset.ams)+1} · slot ${Number(b.dataset.slot)+1}`;
+ $('feType').value=MATERIALS.includes(String(t?.tray_type||'').toUpperCase())?t.tray_type.toUpperCase():'PLA';
+ $('feColor').value=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6).toLowerCase():'#ffffff';
+ $('filamentEditor').hidden=false;$('filamentEditor').scrollIntoView({block:'nearest',behavior:'smooth'});});
+$('feCancel').onclick=()=>{$('filamentEditor').hidden=true;editingSlot=null;};
+$('filamentEditor').onsubmit=e=>{e.preventDefault();if(!editingSlot)return;const name=selectedPrinter,{ams,slot}=editingSlot,type=$('feType').value,color=$('feColor').value.slice(1).toUpperCase(),key='fil|'+name+'|'+ams+'|'+slot;
+ $('filamentEditor').hidden=true;editingSlot=null;
+ setPending(key,20000,p=>{const t=slotTray(p,ams,slot);return String(t?.tray_type||'').toUpperCase()===type&&String(t?.tray_color||'').slice(0,6).toUpperCase()===color;},printerLabel(name)+' filament');
+ renderAms(devPrinter());
+ sendControl('filament',{ams:ams==='external'?'external':Number(ams),slot:Number(slot),type,color}).then(pollSoon,()=>{delete pending[key];renderAms(devPrinter());});};
+$('detailDialog').addEventListener('close',()=>{$('filamentEditor').hidden=true;editingSlot=null;});
+
+// ---- Nozzle diameter and type -----------------------------------------------------------
+const NOZZLE_TYPES={stainless_steel:'Stainless steel',hardened_steel:'Hardened steel',tungsten_carbide:'Tungsten carbide'};
+function renderNozzle(p){const d=p.data||{},dia=num(d.nozzle_diameter),type=d.nozzle_type,key='nozzle|'+p.name,waiting=isPending(key,p);
+ $('nozzleNow').textContent=dia?`${dia} mm · ${NOZZLE_TYPES[type]||type||'type not reported'}`:'Not reported';
+ $('nozzleSave').classList.toggle('pending',waiting);$('nozzleSave').disabled=['RUNNING','PAUSE','PREPARE'].includes(p.state)||!p.connected;
+ const form=$('nozzleForm');if(form.dataset.printer!==p.name||(!form.contains(document.activeElement)&&!waiting&&form.dataset.dirty!=='1')){form.dataset.printer=p.name;
+  if(dia)$('nozzleDiameter').value=String(dia);if(NOZZLE_TYPES[type])$('nozzleType').value=type;}}
+$('nozzleForm').addEventListener('change',()=>{$('nozzleForm').dataset.dirty='1';});
+$('nozzleForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,diameter=Number($('nozzleDiameter').value),type=$('nozzleType').value,key='nozzle|'+name;
+ $('nozzleForm').dataset.dirty='';setPending(key,20000,p=>num(p.data?.nozzle_diameter)===diameter&&p.data?.nozzle_type===type,printerLabel(name)+' nozzle');renderNozzle(devPrinter());
+ sendControl('nozzle_size',{diameter,type}).then(pollSoon,()=>{delete pending[key];renderNozzle(devPrinter());});};
 
 function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},progress=Math.max(0,Math.min(100,num(d.mc_percent)||0)),active=['RUNNING','PAUSE','PREPARE'].includes(p.state);
  $('detailTitle').textContent=p.display_name||p.name;$('detailModel').textContent=((p.limits||{}).chamber?'H2D · ':'')+(p.connected?'ONLINE':'OFFLINE');
@@ -160,7 +196,7 @@ function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},pro
  $('devPause').hidden=p.state!=='RUNNING'&&p.state!=='PREPARE';$('devResume').hidden=p.state!=='PAUSE';$('devStop').hidden=!active;
  const lt=lightShown(p);$('devLight').setAttribute('aria-pressed',String(lt.on));$('devLight').classList.toggle('pending',lt.busy);
  for(const a of ['pause','resume','stop'])$('dev'+a[0].toUpperCase()+a.slice(1)).classList.toggle('pending',isPending(a+'|'+p.name,p));
- renderTiles(p);renderSpeed(p);renderFans(p);renderJog(p);renderAms(p);}
+ renderTiles(p);renderNozzle(p);renderSpeed(p);renderFans(p);renderJog(p);renderAms(p);}
 document.querySelector('#detailDialog .now-actions').addEventListener('click',async e=>{const b=e.target.closest('[data-dev]');if(!b)return;const name=selectedPrinter,action=b.dataset.dev;
  if(action==='stop'){confirmStop(name);return;}
  if(action==='pause'){confirmPause(name);return;}

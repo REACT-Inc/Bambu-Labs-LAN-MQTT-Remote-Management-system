@@ -123,6 +123,18 @@ button.toggle[aria-pressed="true"]{background:#3a3523;border-color:#665c36;color
 .jog{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
 .jog-steps{display:grid;gap:6px}
 .home-btn{margin-top:8px}
+button.slot{color:inherit;font:inherit;cursor:pointer;padding:10px 4px 12px}
+button.slot:hover{border-color:#4d624c;background:#17201b}
+.section-hint{margin:-4px 0 10px;font-size:12px}
+.filament-editor{margin-top:10px}
+.fe-head{display:flex;justify-content:space-between;align-items:center}
+.fe-presets{display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 14px}
+.fe-preset{width:26px;height:26px;padding:0;border-radius:50%;border:2px solid #fff3}
+.fe-note{display:block;margin-top:8px}
+.filament-editor input[type=color]{height:44px;padding:4px}
+.nozzle-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.nozzle-row select{width:auto;margin:0;flex:1;min-width:120px}
+.nozzle-now{font-weight:600;min-width:150px}
 .jog-pad{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(3,54px);gap:6px}
 .jog-pad button,.jog-z button{padding:0;display:grid;place-items:center;font-size:15px;line-height:1;border-radius:12px}
 .jog-pad button small,.jog-z button small{font-size:9px;color:var(--muted)}

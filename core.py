@@ -13,7 +13,11 @@ SETTINGS_FILE = str(DATA_DIR / 'settings.json')
 PRINTERS = CONFIG.get('printers', [])
 EXAMPLE_DATA = CONFIG.get('example_data') or {
     p['name']: {'state':'IDLE','error':0,'connected':True,'mc_percent':0,
-                'ams':[], 'vt_tray':{'tray_type':'PLA','tray_color':'FFFFFFFF','remain':100}}
+                'ams':{'ams':[{'id':'0','humidity':'4','temp':'24.5','tray':[
+                    {'id':str(i),'tray_type':t,'tray_color':c,'remain':r} for i,(t,c,r) in enumerate(
+                    [('PLA','161616FF',80),('PLA','F2F2F2FF',45),('PETG','2E7DD1FF',100),('TPU','E8412CFF',20)])]}],'tray_now':'0'},
+                'nozzle_diameter':'0.4','nozzle_type':'stainless_steel',
+                'vt_tray':{'tray_type':'PLA','tray_color':'FFFFFFFF','remain':100}}
     for p in (PRINTERS or [{'name':'Demo H2D'}, {'name':'Demo A1'}])
 }
 import asyncio
@@ -868,11 +872,15 @@ def connect_printer(printer):
 
     def on_message(client, userdata, message):
         try:
-            new = json.loads(message.payload).get('print', {})
+            payload = json.loads(message.payload)
+            listener=globals().get('control_response_listener')
+            system = payload.get('system') if isinstance(payload, dict) else None
+            if listener and bot_loop and isinstance(system, dict) and system.get('command') == 'set_accessories':
+                bot_loop.call_soon_threadsafe(listener,name,dict(system))
+            new = payload.get('print', {}) if isinstance(payload, dict) else {}
             if not isinstance(new, dict) or not new:
                 return
-            listener=globals().get('control_response_listener')
-            if listener and bot_loop and new.get('command') in ('set_fan','set_ctt','gcode_line','print_speed','xyz_ctrl'):
+            if listener and bot_loop and new.get('command') in ('set_fan','set_ctt','gcode_line','print_speed','xyz_ctrl','back_to_center','ams_filament_setting'):
                 bot_loop.call_soon_threadsafe(listener,name,dict(new))
             with data_lock:
                 current = reports.setdefault(name, {})
