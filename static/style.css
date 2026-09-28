@@ -122,6 +122,7 @@ button.toggle[aria-pressed="true"]{background:#3a3523;border-color:#665c36;color
 .arm small{display:block}
 .jog{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
 .jog-steps{display:grid;gap:6px}
+.home-btn{margin-top:8px}
 .jog-pad{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(3,54px);gap:6px}
 .jog-pad button,.jog-z button{padding:0;display:grid;place-items:center;font-size:15px;line-height:1;border-radius:12px}
 .jog-pad button small,.jog-z button small{font-size:9px;color:var(--muted)}

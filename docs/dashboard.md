@@ -38,7 +38,7 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 | Temperature | Tiles for nozzle, bed and chamber. Tap a tile to type a new target. |
 | Print speed | Silent, Standard, Sport, Ludicrous |
 | Fans | A slider per fan, plus all fans. The fan is set when you let go of the slider. It shows *Setting…* until the printer reports the new speed. |
-| Move axes | A movement pad, locked until you tick the safety checkbox. See [Printer controls](printer-controls.md). |
+| Move axes | **⌂ Home** (homes X, Y and Z while the printer is idle), and a movement pad locked until you tick the safety checkbox. See [Printer controls](printer-controls.md). |
 | Filament | AMS units (humidity, temperature) and each slot's material, colour and remaining %, plus the external spool |
 | More: files, snapshot, Swapmod | Download the printer's file listing, take a single camera snapshot, and Swapmod A1m kit settings (see [Swapmod](swapmod.md)) |
 

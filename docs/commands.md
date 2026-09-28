@@ -91,6 +91,7 @@ Every command in this table shows a confirmation card first. Only the person who
 |---|---|---|---|
 | `/temperature` | `target` `degrees` `name?` | Set the bed or active nozzle target temperature | Model limits: nozzle ≤300 °C (H2D ≤350), bed ≤80–120 °C by model |
 | `/chamber` | `degrees` `name?` | Set the chamber heating target | H2D only. 0 = off, or 40–65 °C |
+| `/home` | `name?` | Home X, Y and Z | Asks for confirmation. Printer must be idle, error-free and have no active queue job. 3 s gap shared with `/move` |
 | `/move` | `axis` `millimeters` `name?` | Jog an axis | Printer must be idle, error-free, homed and have no active queue job. X/Y ±10 mm, Z ±1 mm. 3 s between moves |
 
 ### Swapmod

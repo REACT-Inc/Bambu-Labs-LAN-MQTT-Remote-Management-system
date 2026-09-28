@@ -48,6 +48,24 @@ class ControlsTests(unittest.TestCase):
         self.core.last_seen['A1 Mini']=time.time()-60
         with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',1,'X',True,True)
         self.client.publish.assert_not_called()
+    def test_home_uses_g28_or_back_to_center(self):
+        # No "already homed" confirmation is needed to home.
+        self.controls.apply('A1 Mini','home',None,None,True,False)
+        data=json.loads(self.client.publish.call_args.args[1])['print']
+        self.assertEqual((data['command'],data['param']),('gcode_line','G28 \n'))
+        with self.assertRaisesRegex(ValueError,'three seconds'):self.controls.apply('A1 Mini','home',None,None,True)
+        # Bit 32 of "fun": Bambu Studio homes these printers with back_to_center.
+        self.controls.moved.clear();self.core.state_data=lambda n:('IDLE',0,{'fun':format(1<<32,'x')},True)
+        self.controls.apply('A1 Mini','home',None,None,True)
+        self.assertEqual(json.loads(self.client.publish.call_args.args[1])['print']['command'],'back_to_center')
+    def test_home_blocked_while_printing_or_unconfirmed(self):
+        with self.assertRaises(ValueError):self.controls.apply('A1 Mini','home',None,None,False)
+        for state in ['RUNNING','PAUSE','PREPARE','FAILED']:
+            self.core.state_data=lambda n,s=state:(s,0,{},True)
+            with self.assertRaisesRegex(ValueError,'Homing requires'):self.controls.apply('A1 Mini','home',None,None,True)
+        self.core.state_data=lambda n:('IDLE',0,{},True);self.store.jobs=lambda:[{'printer':'A1 Mini','status':'printing'}]
+        with self.assertRaisesRegex(ValueError,'before homing'):self.controls.apply('A1 Mini','home',None,None,True)
+        self.client.publish.assert_not_called()
     def test_queue_blocks_move(self):
         self.store.jobs=lambda:[{'printer':'A1 Mini','status':'staging'}]
         with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',1,'X',True,True)

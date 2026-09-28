@@ -43,6 +43,8 @@ $('logout').addEventListener('click',stopLive);
 setInterval(()=>{if(livePrinter&&(!state||!$('detailDialog').open))stopLive();},1000);
 // ---- Printer panel (Bambu Handy style) ----------------------------------------------------
 const SPEEDS={1:'silent',2:'standard',3:'sport',4:'ludicrous'};
+// jogNote: a result message stays visible for a while instead of being replaced by the checkbox hint.
+let jogNote={text:'',until:0};
 let editingTile=null,jogBusy=false,jogStep=null,jogArmTimer=null,jogReadyAt=0;
 const devPrinter=()=>state?.printers.find(p=>p.name===selectedPrinter);
 function num(v){const n=Number(v);return v===null||v===undefined||v===''||!Number.isFinite(n)?null:n;}
@@ -116,7 +118,10 @@ function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringi
  const zStep=steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1];if(Date.now()>=jogReadyAt)$('jogCenter').textContent=jogStep+' mm';$('jogZStep').textContent='Z '+zStep+' mm';
  const idle=['IDLE','FINISH'].includes(p.state)&&p.connected&&!p.error,armed=$('jogArm').checked;
  const cooling=Date.now()<jogReadyAt;document.querySelectorAll('#jogPad button,#jogZ button').forEach(b=>b.disabled=!armed||!idle||jogBusy||cooling);
- if(!idle)$('jogStatus').textContent='Movement is only available while the printer is idle, connected and error-free.';
+ // Homing doesn't need the "already homed" checkbox, only an idle printer.
+ $('jogHome').disabled=!idle||jogBusy||cooling;
+ if(Date.now()<jogNote.until)$('jogStatus').textContent=jogNote.text;
+ else if(!idle)$('jogStatus').textContent='Movement is only available while the printer is idle, connected and error-free.';
  else if(!armed)$('jogStatus').textContent='Tick the box above to unlock the movement buttons. Directions follow printer coordinates.';}
 $('jogSteps').addEventListener('click',e=>{const b=e.target.closest('[data-step]');if(!b)return;jogStep=Number(b.dataset.step);renderJog(devPrinter());});
 $('jogArm').onchange=()=>{clearTimeout(jogArmTimer);if($('jogArm').checked){jogArmTimer=setTimeout(()=>{$('jogArm').checked=false;renderJog(devPrinter());},5*60*1000);$('jogStatus').textContent='Unlocked for 5 minutes or until this panel closes.';}renderJog(devPrinter());};
@@ -128,6 +133,10 @@ async function jogMove(axis,dir){const p=devPrinter(),steps=jogSteps(p),step=axi
   jogReadyAt=Date.now()+3100;const tick=()=>{const left=Math.ceil((jogReadyAt-Date.now())/1000);if(left>0){$('jogCenter').textContent=left+' s';setTimeout(tick,250);}else renderJog(devPrinter());};tick();}
  catch(e){$('jogStatus').textContent=e.message;}finally{jogBusy=false;renderJog(devPrinter());}}
 document.querySelectorAll('#jogPad [data-axis],#jogZ [data-axis]').forEach(b=>b.onclick=()=>jog(b.dataset.axis,Number(b.dataset.dir),b));
+$('jogHome').onclick=async()=>{const b=$('jogHome');b.classList.add('pending');jogBusy=true;jogNote={text:'Homing X, Y and Z…',until:Date.now()+30000};renderJog(devPrinter());
+ try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/home',{confirmed:true});jogNote={text:r.message+' Wait for homing to finish before moving.',until:Date.now()+15000};
+  jogReadyAt=Date.now()+3100;setTimeout(()=>renderJog(devPrinter()),3200);}
+ catch(e){jogNote={text:e.message,until:Date.now()+15000};}finally{jogBusy=false;b.classList.remove('pending');renderJog(devPrinter());}};
 
 function swatch(t,active){const color=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6):null,empty=!t||!t.tray_type,remain=num(t?.remain);
  return `<div class="slot${empty?' is-empty':''}${active?' active':''}" title="${esc(empty?'Empty':t.tray_type+(remain!==null&&remain>=0?' · '+remain+'%':''))}"><span class="swatch"${color&&!empty?` data-color="${color}"`:''}></span><strong>${empty?'Empty':esc(t.tray_type)}</strong><small>${empty?'—':remain!==null&&remain>=0?remain+'%':'?'}</small>${!empty&&remain!==null&&remain>=0?`<i class="remain" data-width="${Math.max(0,Math.min(100,remain))}"></i>`:''}</div>`;}

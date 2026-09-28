@@ -203,7 +203,7 @@ def resolve_name(query):
 # every member of an authorized server; state-changing commands ask for confirmation and are logged.
 # The dashboard can override the level per command (settings.json "command_permissions").
 ADMIN_COMMANDS = {
-    'adminhelp','diagnostics','reportissue','temperature','chamber','move','plateswap','rename','dm',
+    'adminhelp','diagnostics','reportissue','temperature','chamber','move','home','plateswap','rename','dm',
     'laptops','laptop','server','reboot','setnotificationchannel','setcommandschannel',
     'publiccommands','archive','unarchive','assign','meeting',
 }
@@ -699,7 +699,7 @@ def help_embed(admin=False):
     # wrap this callback or send their own extra help messages.
     groups = [
         ('📊 Printers & files', {'status','printer','filaments','file','help','adminhelp'}, 'Printer status, camera snapshots, filament and stored files.'),
-        ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move'}, 'Pause/resume/cancel, lights, temperatures, speed, fan and axis jogging.'),
+        ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move','home'}, 'Pause/resume/cancel, lights, temperatures, speed, fan, homing and axis jogging.'),
         ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'View, add, start and manage jobs. Starts and changes ask for confirmation and are logged.'),
         ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
         ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),

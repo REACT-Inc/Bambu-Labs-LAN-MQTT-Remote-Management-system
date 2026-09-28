@@ -74,6 +74,12 @@ How fans are controlled:
 
 ## Moving the axes
 
+**Homing:** **⌂ Home** in the dashboard's printer panel, or Discord `/home` (admins, with confirmation), homes X, Y and Z.
+- **When it's allowed:** only while the printer is idle, connected and error-free, with no active queue job.
+- **Command used:** printers that report MQTT homing support (bit 32 of the `fun` flags) get Bambu Studio's `back_to_center` command. Others get `G28`.
+- **Hardware check needed:** this command choice follows Bambu Studio and still needs checking on each model.
+- **Before moving:** let homing finish before you move any axis.
+
 Discord `/move axis:X millimeters:1`, or the **Move axes** pad in the dashboard's printer panel.
 
 **In the dashboard:** the pad is locked until you tick *The printer is homed, the travel path is clear and I am watching it*. It stays unlocked until the panel closes. After each move the buttons count down the 3-second gap before the next one.

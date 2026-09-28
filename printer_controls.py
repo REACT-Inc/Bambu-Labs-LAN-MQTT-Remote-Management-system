@@ -52,7 +52,16 @@ def prepare(core,name,kind,value,axis=None):
         gcode=(f'M211 S\nM211 X1 Y1 Z1\nM1002 push_ref_mode\nG91\nG1 {axis}{value:.1f} F{300 if axis=="Z" else 1200}\n'
                'M1002 pop_ref_mode\nM211 R\n')
         return 'gcode_line',gcode,f'Move {axis} by {value:+g} mm'
+    if kind=='home':
+        return 'gcode_line','G28 \n','Home all axes'
     raise ValueError('Unknown control.')
+
+
+def mqtt_homing_supported(data):
+    # Bambu Studio (MachineObject::command_go_home) homes printers with bit 32 of the "fun" flags set via the
+    # back_to_center command, and others with G28.
+    try:return bool(int(str(data.get('fun') or '0'),16)>>32&1)
+    except ValueError:return False
 
 
 def axis_ctrl_supported(data):
@@ -96,15 +105,16 @@ class Controls:
         if confirmed is not True:raise ValueError('Confirm this control change.')
         state,error,data,connected=self.core.state_data(name)
         if not connected:raise ValueError('Printer is offline.')
-        if kind=='move':
-            if homed is not True:raise ValueError('Confirm the printer was homed and the movement area is clear.')
-            if state not in ('IDLE','FINISH') or error:raise ValueError('Jogging requires an idle, error-free printer; paused prints are blocked.')
+        if kind in ('move','home'):
+            if kind=='move' and homed is not True:raise ValueError('Confirm the printer was homed and the movement area is clear.')
+            if state not in ('IDLE','FINISH') or error:raise ValueError(('Homing' if kind=='home' else 'Jogging')+' requires an idle, error-free printer; paused prints are blocked.')
             if not self.core.EXAMPLE_MODE and time.time()-self.core.last_seen.get(name,0)>15:
                 raise ValueError('Telemetry is stale. Wait for a fresh printer report.')
             if any(j['printer']==name and j['status'] in ('staging','awaiting_start','printing','paused','needs_review') for j in self.store.jobs()):
-                raise ValueError('Resolve the active queue job before jogging.')
+                raise ValueError('Resolve the active queue job before '+('homing.' if kind=='home' else 'jogging.'))
             if time.monotonic()-self.moved.get(name,-100)<3:raise ValueError('Wait three seconds between moves.')
-            if axis_ctrl_supported(data):command,param=('batch',xyz_ctrl(axis,round(float(value),1)))
+            if kind=='move' and axis_ctrl_supported(data):command,param=('batch',xyz_ctrl(axis,round(float(value),1)))
+            if kind=='home' and mqtt_homing_supported(data):command,param=('batch',[{'command':'back_to_center'}])
         if self.core.EXAMPLE_MODE:
             d=self.core.EXAMPLE_DATA[name]
             if kind in ('nozzle','bed'):d[kind+'_target_temper']=int(value)
@@ -129,6 +139,6 @@ class Controls:
                 result=client.publish(f"device/{self.core.printer_config(name)['serial']}/request",json.dumps(payload),qos=1)
                 if result.rc!=0:raise ValueError(f'MQTT submission failed after {submitted}/{len(commands)} commands. Inspect actual fan/settings state before retrying.')
                 submitted+=1
-        if kind=='move':self.moved[name]=time.monotonic()
+        if kind in ('move','home'):self.moved[name]=time.monotonic()
         self.store.event(name,'Demo control' if self.core.EXAMPLE_MODE else 'Control submitted',f'{label} • {author}')
         return label+(' • Demo only.' if self.core.EXAMPLE_MODE else ' • Submitted; verify the result on the printer.')
