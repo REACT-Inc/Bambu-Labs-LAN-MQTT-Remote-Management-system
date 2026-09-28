@@ -185,6 +185,12 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         click=self.i;click.edit_original_response=AsyncMock()
         await kw['view'].children[0].callback(click)
         recipient.send.assert_awaited_once()
+        sent=recipient.send.call_args.kwargs['embed'].to_dict()
+        self.assertEqual(sent['title'],'Message from Team');self.assertEqual(sent['description'],'hello')
+        # The recipient sees only the server name, never the sending administrator (user ID 42).
+        self.assertNotIn('author',sent);self.assertNotIn('fields',sent)
+        self.assertEqual(sent['footer']['text'].split(' • ')[0],'3D Printer Management')
+        for text in (sent['title'],sent['description'],sent['footer']['text']):self.assertNotIn('42',text);self.assertNotIn('Requested by',text)
         await kw['view'].children[0].callback(click)
         recipient.send.assert_awaited_once()
     async def test_dm_rechecks_permission(self):
@@ -244,6 +250,37 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.i.user.id=7
         await self.core.bot.tree.get_command('rename').callback(self.i,'Unauthorized',name)
         self.assertEqual(self.core.display_name(name),'New Name')
+
+    async def test_attendance_commands_are_private_and_hide_reasons_from_members(self):
+        from datetime import date
+        from aiohttp import web
+        from queueing import Store
+        from team import Team
+        from discord_Intergration.team_discord import install
+        store=Store(Path(self.tmp.name)/'attendance.sqlite')
+        try:
+            team=Team(self.core,store,SimpleNamespace(app=web.Application()))
+            team.config.update(practice_days=[0,2,4],roster=['42','7']);team.today=lambda:date(2026,9,28)
+            install(self.core,team)
+            tree=self.core.bot.tree
+            self.core.public_channels[(123,789)]=float('inf')
+            self.i.user=SimpleNamespace(id=7,display_name='Sam')
+            await tree.get_command('notattending').callback(self.i,'Dentist appointment','')
+            reply=self.i.response.send_message.call_args.kwargs
+            self.assertTrue(reply['ephemeral']);self.assertIn('not attending',reply['embed'].description);self.assertIn('Today',reply['embed'].description)
+            await tree.get_command('attending').callback(self.i,'2026-10-02')
+            self.assertIn('Friday October 2',self.i.response.send_message.call_args.kwargs['embed'].description)
+            await tree.get_command('attending').callback(self.i,'2026-10-01')
+            self.assertIn('no meeting',self.i.response.send_message.call_args.kwargs['embed'].description)
+            await tree.get_command('attendance').callback(self.i,'')
+            member_view=self.i.response.send_message.call_args.kwargs
+            self.assertTrue(member_view['ephemeral']);self.assertIn('<@7>',member_view['embed'].description);self.assertNotIn('Dentist',member_view['embed'].description)
+            self.assertIn('No reply yet (1)',member_view['embed'].description)
+            self.i.user=SimpleNamespace(id=42,display_name='Admin')
+            await tree.get_command('attendance').callback(self.i,'')
+            self.assertIn('Dentist',self.i.response.send_message.call_args.kwargs['embed'].description)
+        finally:
+            store.db.close()
 
     async def test_meeting_specific_assignment_private_during_override(self):
         from discord_Intergration.team_discord import install

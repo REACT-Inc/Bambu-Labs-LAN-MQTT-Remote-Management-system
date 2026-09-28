@@ -1,26 +1,60 @@
-# Dashboard software updates
+# Web updater internals
 
-Install this release once from the extracted ZIP with `sudo bash update.sh`.
-New installations use `sudo bash install.sh`. Thereafter open **Settings & help → Software update**, upload a management release ZIP, review its version and confirm **Install reviewed update**. Finish or resolve active queue jobs and wait for printers to finish first. Reconnect and sign in after restart to see the outcome.
+How dashboard and GitHub updates are installed. For how to *use* updates, see [docs/updates.md](../docs/updates.md).
 
-Only authenticated dashboard administrators can upload/install. The existing dashboard password grants administrative access. Upload only trusted releases; installed application code has access to printer, Discord and MeshCentral credentials. Manifest checks detect corruption; they are not a publisher signature. Old ZIPs without `update-manifest.json` are rejected.
+## Components
 
-The fixed root-owned worker validates the ZIP again, prepares a separate application release and Python environment, stops management, backs up configuration and mutable data, switches releases and checks the new dashboard several times. Failed startup triggers restoration of the previous code, config and data. Printer-uploaded files are kept in place. Queue jobs are not automatically restarted. Health checks verify local dashboard startup, not Discord connectivity, camera availability or every feature.
+| Component | Runs as | Role |
+|---|---|---|
+| Dashboard (`Updater/web_updates.py`, `Updater/github_updates.py`) | `printermanager` | Accepts an uploaded or downloaded ZIP, validates it, and places it plus a `request.json` in `/var/lib/3d-printer-management/updates/` |
+| `pm-web-update.path` | systemd | Starts the worker when `request.json` appears |
+| `pm-web-update.service` → `/usr/local/lib/pm-updater/worker.py` | root | Installs the release and rolls it back on failure |
+| `Updater/update_package.py` | both | Validates packages (the same code is installed root-owned for the worker) |
 
-Preparation needs internet access to install Python dependencies and at least 1 GiB free on the application disk. Dependency installation runs as printermanager. A failed dependency install keeps the existing release. This updates application code, web assets and Python dependencies; it does not upgrade Raspberry Pi OS, networking, system packages, or execute shell scripts from ZIPs. The privileged updater itself requires a manual installer update if it changes.
+The worker is installed by `Updater/install-web-updater.sh`, which `install.sh` and `Updater/update.sh` run. **Changes to the worker itself only take effect after a manual `install.sh` or `Updater/update.sh`.**
 
-Updates pause new dashboard changes and Discord commands. Avoid operating printers independently during installation. Backups remain root-only in `/var/lib/pm-updater/backups`; releases remain in `/opt/3d-printer-management-releases`. They are retained for recovery, so monitor disk space. Do not remove the current or previous release. An interrupted switch is recovered by the updater service at boot. If the web page is unavailable, use:
+## Package validation
+
+A release ZIP must:
+- **Have the right root:** contain a `printer-management/` folder with `update-manifest.json` (format 1, application `3d-printer-management`).
+- **Match the manifest:** list every runtime file with its SHA-256; files not in the manifest are ignored.
+- **Be safe:** have no absolute paths, `..`, symlinks, special or encrypted entries.
+- **Fit the limits:** at most 1500 entries and 128 MiB expanded (32 MiB compressed).
+- **Parse:** every `.py` file must be valid Python.
+- **Have a plain `requirements.txt`:** package names and version constraints only.
+
+The manifest detects corruption; it **isn't a signature**. GitHub downloads are also checked against the release's `.sha256` asset.
+
+## Install sequence
+
+1. **Validate again** as root, and check there's at least 1 GiB free.
+2. **Prepare a new release folder** in `/opt/3d-printer-management-releases/<id>/`, with its own Python environment. The packages are installed as `printermanager`. If this fails, the running version is untouched.
+3. **Stop the service** and back up the configuration and data to `/var/lib/pm-updater/backups/<id>/`.
+4. **Switch versions:** point `/opt/3d-printer-management` at the new release, record a journal, and start the service.
+5. **Health check:** poll the dashboard health endpoint several times. On failure, **restore the previous code, configuration and data**, and report `rolled_back`.
+
+Uploaded print files stay in place, and queue jobs are never restarted automatically. The health check covers the dashboard starting, not Discord, cameras or printers.
+
+**Interrupted switch:** if the worker is interrupted mid-switch (power loss), the journal makes the updater recover at the next boot.
+
+## Status and recovery
 
 ```bash
 sudo systemctl status pm-web-update 3d-printer-management --no-pager
 sudo journalctl -u pm-web-update -n 60 --no-pager
+cat /var/lib/pm-updater/status.json
 ```
 
-If status says recovery is required, inspect the log and run `sudo systemctl restart pm-web-update` after addressing the reported problem. Do not delete its journal to bypass recovery.
+- **If status says recovery is required:** read the log, fix the reported problem, then run `sudo systemctl restart pm-web-update`. Don't delete the journal to skip recovery.
+- **Disk space:** backups (`/var/lib/pm-updater/backups`) and old releases (`/opt/3d-printer-management-releases`) are kept for recovery. Watch disk space, and never delete the current or previous release.
 
-## Building a release ZIP
+## Scope
 
-Run `python3 build_release.py VERSION /absolute/output.zip` in the source folder. Use a distinct version containing only letters, digits, dots, underscores or hyphens. The builder generates the manifest and ZIP with the required `printer-management/` root. It excludes caches, local config, environments and uploaded files. Tests and installer scripts may be included for manual installation, but the web updater only extracts manifest-listed application files.
+**Updated:** application code, web files and Python packages.
 
+**Never touched:**
+- Raspberry Pi OS and system packages
+- networking and systemd units
+- the updater itself
 
-GitHub releases are now supported in Settings. See GITHUB_SETUP.md for repository setup, publishing and opt-in automatic installation. Manual ZIP upload remains available.
+No shell scripts from a ZIP are ever run.
