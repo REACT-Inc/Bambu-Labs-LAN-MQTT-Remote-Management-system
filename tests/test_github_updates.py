@@ -54,6 +54,13 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.gh.path.stat().st_mode&0o777,0o600)
         self.assertNotIn('secret-token',json.dumps(self.gh.public()))
         self.assertEqual(self.updater.idle_check.call_count,2)
+        self.assertEqual(self.updater.idle_check.call_args.args,(True,False))
+        self.assertFalse(self.updater.queue_package.call_args.kwargs['force'])
+    async def test_manual_install_passes_force_and_who_through(self):
+        self.setup_fetch(self.payload());self.gh.config.pop('automatic')
+        await self.gh.install(expected='1.0.1',force=True,who='dashboard (100.64.0.9)')
+        self.assertEqual(self.updater.idle_check.call_args.args,(False,True))
+        self.assertEqual(self.updater.queue_package.call_args.kwargs,{'force':True,'who':'dashboard (100.64.0.9)'})
     async def test_checksum_mismatch_never_queues(self):
         self.setup_fetch(self.payload(),('0'*64+'  '+ASSET).encode())
         with self.assertRaisesRegex(ValueError,'checksum'):await self.gh.install()
@@ -129,18 +136,52 @@ class GitHubTests(unittest.IsolatedAsyncioTestCase):
         with patch('Updater.github_updates.VERSION','dev-build'):self.assertEqual(self.gh.public()['installed_channel'],'unknown')
 
 
-class AutomaticIdleTests(unittest.TestCase):
-    def test_offline_stale_and_busy_printers_block_auto(self):
+class UpdateBlockerTests(unittest.TestCase):
+    """Only printing (or a file transfer) holds an update back (#32)."""
+    def setUp(self):
         from Updater.web_updates import WebUpdates
-        with tempfile.TemporaryDirectory() as root:
-            core=SimpleNamespace(DATA_DIR=Path(root),EXAMPLE_MODE=False,names=lambda:['A'],last_seen={'A':time.time()},state_data=lambda n:('IDLE',0,{},True))
-            dashboard=SimpleNamespace(core=core,store=SimpleNamespace(jobs=lambda:[]),app=web.Application())
-            updater=WebUpdates(dashboard);updater.busy=lambda:False
-            with patch('Updater.web_updates.Path.exists',return_value=True):
-                updater.idle_check(True)
-                core.last_seen['A']=0
-                with self.assertRaises(ValueError):updater.idle_check(True)
-                core.last_seen['A']=time.time();core.state_data=lambda n:('IDLE',0,{},False)
-                with self.assertRaises(ValueError):updater.idle_check(True)
-                core.state_data=lambda n:('RUNNING',0,{},True)
-                with self.assertRaises(ValueError):updater.idle_check(True)
+        self.tmp=tempfile.TemporaryDirectory()
+        self.states={'A':('IDLE',True),'B':('IDLE',True)};self.jobs=[];self.events=[]
+        self.core=SimpleNamespace(DATA_DIR=Path(self.tmp.name),EXAMPLE_MODE=False,names=lambda:list(self.states),last_seen={},
+            display_name=lambda n:'Printer '+n,state_data=lambda n:(self.states[n][0],0,{},self.states[n][1]),log=Mock())
+        store=SimpleNamespace(jobs=lambda:self.jobs,event=lambda *a:self.events.append(a))
+        self.updater=WebUpdates(SimpleNamespace(core=self.core,store=store,app=web.Application()));self.updater.busy=lambda:False
+        exists=patch('Updater.web_updates.Path.exists',return_value=True);exists.start();self.addCleanup(exists.stop)
+    def tearDown(self):self.tmp.cleanup()
+    def job(self,printer,status):self.jobs.append({'printer':printer,'status':status,'label':'part'})
+
+    def test_offline_stale_finished_and_waiting_jobs_do_not_block(self):
+        self.states={'A':('IDLE',False),'B':('FINISH',True),'C':('FAILED',True),'D':('',False)}
+        for status in ('queued','awaiting_start','needs_review'):self.job('B',status)
+        for automatic in (False,True):self.assertEqual(self.updater.idle_check(automatic),[])
+
+    def test_printing_paused_and_staging_block_with_names(self):
+        for state,text in [('RUNNING','Printer A is printing'),('PREPARE','Printer A is printing'),('PAUSE','Printer A is paused mid-print')]:
+            self.states['A']=(state,True)
+            for automatic in (False,True):
+                with self.assertRaisesRegex(ValueError,text):self.updater.idle_check(automatic)
+        self.states['A']=('IDLE',True);self.job('B','staging')
+        with self.assertRaisesRegex(ValueError,'Printer B is receiving a print file'):self.updater.idle_check()
+
+    def test_offline_printer_with_a_print_in_progress_blocks_only_automatic(self):
+        self.states['A']=('RUNNING',False);self.job('A','printing')
+        self.assertEqual(self.updater.idle_check(),[])
+        with self.assertRaisesRegex(ValueError,'Automatic update waiting: Printer A is offline'):self.updater.idle_check(True)
+
+    def test_force_overrides_printing_but_never_automatic_or_a_pending_update(self):
+        self.states['A']=('RUNNING',True)
+        self.assertEqual(self.updater.idle_check(force=True),['Printer A is printing'])
+        with self.assertRaisesRegex(ValueError,'never forced'):self.updater.idle_check(True,True)
+        self.updater.busy=lambda:True
+        with self.assertRaisesRegex(ValueError,'already pending'):self.updater.idle_check(force=True)
+
+    def test_forced_update_is_logged_with_who_and_what(self):
+        self.states['A']=('PAUSE',True)
+        with self.assertRaises(ValueError):self.updater.queue_package('t1','0'*64)
+        self.assertFalse((self.updater.inbox/'request.json').is_file())  # Path.exists is patched in setUp
+        self.updater.queue_package('t1','0'*64,force=True,who='dashboard (100.64.0.9)')
+        self.assertTrue((self.updater.inbox/'request.json').is_file())
+        (_,title,detail),=self.events
+        self.assertEqual(title,'Forced software update')
+        self.assertEqual(detail,'dashboard (100.64.0.9) forced the update while Printer A is paused mid-print')
+        self.core.log.warning.assert_called_once()

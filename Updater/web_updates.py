@@ -11,6 +11,8 @@ from aiohttp import web
 from Updater.update_package import inspect_package,MAX_ZIP
 
 STATUS=Path('/var/lib/pm-updater/status.json')
+# Printer states that mean a print is in progress. Only these (and a file transfer) hold back an update.
+PRINTING={'RUNNING','PREPARE','PAUSE'}
 BUSY={'queued','validating','preparing','backing_up','installing','checking','rolling_back','recovery_required'}
 
 
@@ -33,7 +35,7 @@ class WebUpdates:
         return (self.inbox/'request.json').exists() or state.get('state') in BUSY
 
     async def status(self,request):
-        return web.json_response(dict(self.read_status(),enabled=Path('/etc/systemd/system/pm-web-update.path').exists(),busy=self.busy()))
+        return web.json_response(dict(self.read_status(),enabled=Path('/etc/systemd/system/pm-web-update.path').exists(),busy=self.busy(),blockers=self.blockers()))
 
     async def upload(self,request):
         async with self.lock:
@@ -61,24 +63,50 @@ class WebUpdates:
             data=await request.json();token=data.get('token');preview=self.previews.get(token)
             if data.get('confirmed') is not True or not preview or preview['session']!=request.cookies.get('pm_session'):
                 raise ValueError('Upload and review the ZIP in this session, then confirm installation.')
-            self.queue_package(token,preview['sha256'])
+            self.queue_package(token,preview['sha256'],force=data.get('force') is True,who=f'dashboard ({request.remote or "?"})')
             self.previews.clear()
             return web.json_response({'ok':True,'id':token,'message':'Update queued. The dashboard will disconnect during restart.'})
 
-    def idle_check(self,automatic=False):
+    def blockers(self,automatic=False):
+        """What an update would interrupt right now, as short readable reasons. Empty means it's safe.
+
+        Updating restarts this service, not the printers: a printer keeps printing from its own storage.
+        So only an actual print, or a file transfer to a printer, holds an update back. Idle, finished,
+        failed and offline printers, and queue jobs waiting for a start or a review, don't.
+        """
+        names=getattr(self.core,'display_name',lambda n:n)
+        reasons,connected={},{}
+        for name in self.core.names():
+            state,_,_,online=self.core.state_data(name);connected[name]=online
+            if online and state in PRINTING:
+                reasons[name]=f"{names(name)} is {'paused mid-print' if state=='PAUSE' else 'printing'}"
+        for job in self.dashboard.store.jobs():
+            printer=job['printer']
+            if job['status']=='staging':
+                reasons.setdefault(printer,f"{names(printer)} is receiving a print file")
+            elif automatic and job['status'] in ('printing','paused') and not connected.get(printer,False):
+                # An offline printer can't tell us whether it's still printing; only a person can decide.
+                reasons.setdefault(printer,f"{names(printer)} is offline with a print in progress")
+        return list(reasons.values())
+
+    def idle_check(self,automatic=False,force=False):
+        """Refuse an update that would interrupt a print. Returns the blockers a forced update overrode."""
         if self.busy():raise ValueError('An update is already pending.')
         if not Path('/etc/systemd/system/pm-web-update.path').exists():raise ValueError('Install this release once using sudo bash update.sh to enable updates.')
-        if any(j['status'] in ('staging','awaiting_start','printing','paused','needs_review') for j in self.dashboard.store.jobs()):
-            raise ValueError('Finish or resolve active queue jobs before updating.')
-        for name in self.core.names():
-            state,_,_,connected=self.core.state_data(name)
-            if state in ('RUNNING','PAUSE','PREPARE'):raise ValueError('Wait until printers finish before updating.')
-            if automatic and not self.core.EXAMPLE_MODE:
-                if not connected or state not in ('IDLE','FINISH','FAILED') or time.time()-self.core.last_seen.get(name,0)>90:
-                    raise ValueError('Automatic updates require fresh, connected, idle printer reports.')
+        if force and automatic:raise ValueError('Automatic updates are never forced.')
+        reasons=self.blockers(automatic)
+        if reasons and not force:
+            if automatic:raise ValueError('Automatic update waiting: '+'; '.join(reasons)+'.')
+            raise ValueError('Not updating while '+'; '.join(reasons)+'. Wait for it to finish, or use Force update.')
+        return reasons
 
-    def queue_package(self,token,digest,automatic=False):
-        self.idle_check(automatic)
+    def queue_package(self,token,digest,automatic=False,force=False,who='dashboard'):
+        overridden=self.idle_check(automatic,force)
         request_data={'id':token,'sha256':digest}
         temp=self.inbox/'request.tmp';temp.write_text(json.dumps(request_data));os.replace(temp,self.inbox/'request.json')
         self.pending=token;self.queued_at=time.time()
+        if force:
+            detail=f"{who} forced the update"+(' while '+'; '.join(overridden) if overridden else ' (nothing was printing)')
+            log=getattr(self.core,'log',None)
+            if log:log.warning('Forced software update: %s',detail)
+            self.dashboard.store.event(None,'Forced software update',detail)

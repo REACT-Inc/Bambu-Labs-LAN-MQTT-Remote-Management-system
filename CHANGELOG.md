@@ -2,6 +2,12 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## 1.2.1-beta.1
+
+### Fixed
+- **Updates only wait for printing (#32).** Updates used to need every printer idle, connected and reporting, and no active or needs-review queue jobs. Now only a printer that's printing (or paused mid-print) or a file being sent to a printer holds an update back. Offline or switched-off printers and waiting queue jobs no longer block updates, manual or automatic. The message names the printer that's blocking.
+- **Force update.** Installing from the dashboard while a printer is printing asks you to force the update, explains what happens, and records who forced it in the Activity feed. Automatic updates are never forced.
+
 ## 1.2.0-beta.2
 
 ### Added
