@@ -13,7 +13,7 @@ The bot runs inside the same service as the dashboard and uses the same printers
 
 1. **Create the bot:** create a bot in the [Discord Developer Portal](https://discord.com/developers/applications). Invite it with the `bot` and `applications.commands` scopes.
 2. **Configure it:** put the token in `discord_token` and your server ID(s) in `guild_ids` in [`config.json`](configuration.md), then restart the service. Slash commands sync when the bot connects, which can take a minute to show up.
-3. **Set the channels:** in the channel for automatic updates, run `/setnotificationchannel`. Optionally run `/setcommandschannel` in the main commands channel. Both can also be set in dashboard **Settings**.
+3. **Set the channels:** in the channel for automatic updates, run `/setnotificationchannel`. In the channel where people should use printer commands, run `/setcommandschannel`: replies are public there and private everywhere else (see [Reply visibility](#reply-visibility)). Both can also be set in dashboard **Settings**.
 4. **Grant these permissions to the bot:**
 
    | Permission | Needed for |
@@ -126,7 +126,7 @@ Details: [Team tools](team-tools.md).
 | `/adminhelp` | A | Admin command guide |
 | `/setnotificationchannel` · `/setcommandschannel` | A | Use the current channel for notifications or commands |
 | `/rename new_name name?` | A | Change a printer's display name (dashboard and Discord only; history is kept) |
-| `/publiccommands minutes?` | A | Explain the reply-visibility policy. `minutes` is ignored; it's left over from an older version. |
+| `/publiccommands minutes?` | A | Show the reply-visibility policy and the current commands channel. `minutes` is ignored; it's left over from an older version. |
 | `/diagnostics` | A | Private diagnostic ZIP (logs, errors, printer status). See [Troubleshooting](troubleshooting.md). |
 | `/reportissue title description` | A | Send a problem report to the developers as a GitHub issue |
 | `/laptops` · `/laptop cmd device_id command` · `/laptop result task_id` | A | MeshCentral laptops. See [LAPTOPS.md](../laptopManagement_Intergration/LAPTOPS.md). |
@@ -154,9 +154,15 @@ How repeats are handled:
 
 ## Reply visibility
 
-**Replies are public** in the channel where the command was used. These reply only to you (ephemeral):
-- `/dm`
-- `/publiccommands`
-- `/assign report` and `/meeting report assign` (the optional `announce` posts separately in the practice channel)
-- `/diagnostics` and `/reportissue`
-- `/attending`, `/notattending` and `/attendance`
+- **In the commands channel** (set with `/setcommandschannel` or in dashboard **Settings**): replies are **public**, so everyone in the channel sees them.
+- **In any other channel:** commands still work, but replies are **private**. Only the person who ran the command sees them, and nothing is posted in that channel. This covers the reply, confirmation cards, printer buttons and the result.
+- **No commands channel set:** every reply is private.
+- **Always private, even in the commands channel:**
+  - `/dm`
+  - `/publiccommands`
+  - `/assign report` and `/meeting report assign` (the optional `announce` posts separately in the practice channel)
+  - `/diagnostics` and `/reportissue`
+  - `/notattending` and `/attendance`
+- **Unchanged:** printer notifications still go to the **notification channel**.
+
+**Hiding the commands in other channels (optional):** the bot can't remove its commands from Discord's command list. A server admin can do that in **Server Settings → Integrations → *the bot* → Channels**, by allowing only the commands channel.

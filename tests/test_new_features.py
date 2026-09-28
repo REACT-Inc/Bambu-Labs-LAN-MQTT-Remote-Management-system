@@ -66,6 +66,8 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.i.message=None;self.i.command=None;self.i.data={}
         self.i.response=SimpleNamespace(is_done=lambda:False,defer=AsyncMock(),send_message=AsyncMock())
         self.i.followup=SimpleNamespace(send=AsyncMock())
+        # Tests run in the commands channel, where replies are public.
+        self.core.settings['commands_channel_id']=789
     async def asyncTearDown(self):
         await self.core.bot.close();self.tmp.cleanup()
     async def test_help_single_reply_with_all_features(self):
@@ -84,7 +86,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             install_team(self.core,Team(self.core,store,dashboard))
             install_controls(self.core,dashboard.controls)
             install_swap(self.core,engine)
-            self.core.settings['commands_channel_id']=456
+            self.core.settings['commands_channel_id']=789
             await self.core.bot.tree.get_command('help').callback(self.i)
             self.i.response.send_message.assert_awaited_once()
             self.i.followup.send.assert_not_awaited()
@@ -156,21 +158,44 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.i.followup.send.call_args.kwargs['ephemeral'])
         controls.apply.assert_not_called()  # preview is not execution
 
-    async def test_public_replies_and_private_exceptions(self):
-        self.core.settings['commands_channel_id']=456
-        for name in ('help','rename','status','adminhelp'):
-            self.i.command=self.core.bot.tree.get_command(name)
-            self.assertFalse(self.core.ephemeral(self.i))
-        for name in ('dm','publiccommands','assign report','meeting report assign'):
+    async def test_replies_public_only_in_commands_channel(self):
+        # In the commands channel: public, except commands with private details.
+        for name in ('help','rename','status','adminhelp','pause','queuestart','attending'):
+            self.i.command=self.core.bot.tree.get_command(name) or SimpleNamespace(qualified_name=name)
+            self.assertFalse(self.core.ephemeral(self.i),name)
+        for name in ('dm','publiccommands','assign report','meeting report assign','diagnostics','reportissue','notattending','attendance'):
             self.i.command=SimpleNamespace(qualified_name=name)
-            self.assertTrue(self.core.ephemeral(self.i))
+            self.assertTrue(self.core.ephemeral(self.i),name)
+        # Any other channel: every reply is private, including buttons pressed there.
+        self.i.command=self.core.bot.tree.get_command('status');self.i.channel_id=555
+        self.assertTrue(self.core.ephemeral(self.i))
+        self.i.command=None;self.i.data={'name':'status'}
+        self.assertTrue(self.core.ephemeral(self.i))
+        # Buttons on a private reply stay private, even in the commands channel.
+        self.i.channel_id=789;self.i.message=SimpleNamespace(flags=SimpleNamespace(ephemeral=True))
+        self.assertTrue(self.core.ephemeral(self.i))
+        self.i.message=SimpleNamespace(flags=SimpleNamespace(ephemeral=False))
+        self.assertFalse(self.core.ephemeral(self.i))
+        # No commands channel set: private everywhere.
+        self.core.settings.pop('commands_channel_id')
+        self.assertTrue(self.core.ephemeral(self.i))
+
+    async def test_publiccommands_explains_policy_privately(self):
         self.i.command=self.core.bot.tree.get_command('publiccommands')
         await self.i.command.callback(self.i,2)
-        self.assertTrue(self.i.response.send_message.call_args.kwargs['ephemeral'])
-        self.i.command=self.core.bot.tree.get_command('status')
-        self.assertFalse(self.core.ephemeral(self.i))
-        self.i.command=None;self.i.message=SimpleNamespace(flags=SimpleNamespace(ephemeral=True))
-        self.assertTrue(self.core.ephemeral(self.i))
+        kwargs=self.i.response.send_message.call_args.kwargs
+        self.assertTrue(kwargs['ephemeral']);self.assertIn('<#789>',self.i.response.send_message.call_args.args[0])
+        self.core.settings.pop('commands_channel_id')
+        await self.i.command.callback(self.i,2)
+        self.assertIn('/setcommandschannel',self.i.response.send_message.call_args.args[0])
+
+    async def test_command_used_outside_commands_channel_replies_privately(self):
+        from discord_Intergration.controls_discord import install
+        install(self.core,SimpleNamespace(apply=MagicMock()))
+        self.i.channel_id=555;self.i.command=self.core.bot.tree.get_command('temperature')
+        await self.i.command.callback(self.i,'bed',60,'A1')
+        self.assertTrue(self.i.response.defer.call_args.kwargs['ephemeral'])
+        self.assertTrue(self.i.followup.send.call_args.kwargs['ephemeral'])
 
     async def test_dm_denies_unapproved(self):
         self.i.command=self.core.bot.tree.get_command('dm')
@@ -269,6 +294,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             tree=self.core.bot.tree
             self.core.public_channels[(123,789)]=float('inf')
             self.i.user=SimpleNamespace(id=7,display_name='Sam')
+            self.i.command=tree.get_command('notattending')
             await tree.get_command('notattending').callback(self.i,'Dentist appointment','')
             reply=self.i.response.send_message.call_args.kwargs
             self.assertTrue(reply['ephemeral']);self.assertIn('not attending',reply['embed'].description);self.assertIn('Today',reply['embed'].description)
@@ -276,11 +302,13 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('Friday October 2',self.i.response.send_message.call_args.kwargs['embed'].description)
             await tree.get_command('attending').callback(self.i,'2026-10-01')
             self.assertIn('no meeting',self.i.response.send_message.call_args.kwargs['embed'].description)
+            self.i.command=tree.get_command('attendance')
             await tree.get_command('attendance').callback(self.i,'')
             member_view=self.i.response.send_message.call_args.kwargs
             self.assertTrue(member_view['ephemeral']);self.assertIn('<@7>',member_view['embed'].description);self.assertNotIn('Dentist',member_view['embed'].description)
             self.assertIn('No reply yet (1)',member_view['embed'].description)
             self.i.user=SimpleNamespace(id=42,display_name='Admin')
+            self.i.command=tree.get_command('attendance')
             await tree.get_command('attendance').callback(self.i,'')
             self.assertIn('Dentist',self.i.response.send_message.call_args.kwargs['embed'].description)
         finally:

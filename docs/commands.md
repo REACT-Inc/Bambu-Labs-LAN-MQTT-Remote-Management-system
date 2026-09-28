@@ -35,7 +35,7 @@ The tables below show the **default** level of each command.
 
 **Other rules for every command:**
 - Commands are refused while a management software update is being installed.
-- Replies are **public** in the channel where the command was run. `/dm`, `/publiccommands`, `/assign report`, `/meeting report assign`, `/diagnostics`, `/reportissue`, `/attending`, `/notattending` and `/attendance` always reply privately. "Not allowed" replies follow the same rule.
+- Replies are **public only in the commands channel** (set with `/setcommandschannel` or in dashboard **Settings**). In any other channel the command works but replies privately, and with no commands channel set every reply is private. `/dm`, `/publiccommands`, `/assign report`, `/meeting report assign`, `/diagnostics`, `/reportissue`, `/notattending` and `/attendance` always reply privately. "Not allowed" replies follow the same rule. See [Reply visibility](discord.md#reply-visibility).
 
 Parameters marked `?` are optional. `name?` is a printer name, with autocomplete. When it's left out, the bot shows printer selection buttons.
 

@@ -102,17 +102,33 @@ def save_settings(updated):
             os.unlink(temporary)
 
 
+# Commands whose replies contain private details stay private even in the commands channel.
+PRIVATE_COMMANDS = {'dm', 'publiccommands', 'assign report', 'meeting report assign', 'diagnostics', 'reportissue',
+                    'notattending', 'attendance'}
+
+
+def commands_channel():
+    try:
+        return int(settings.get('commands_channel_id') or 0) or None
+    except (TypeError, ValueError):
+        return None
+
+
 def ephemeral(interaction):
-    # Public in the channel where invoked, except the three private workflows.
+    """Replies are public only in the commands channel; everywhere else only the user sees them."""
     command=getattr(interaction,'command',None)
     name=getattr(command,'qualified_name','')
     if not name:
         data=getattr(interaction,'data',None) or {}
         name=data.get('name','')
-    if name in ('dm','publiccommands','assign report','meeting report assign'):
+    if name in PRIVATE_COMMANDS:
         return True
+    # Buttons and follow-ups on a private reply stay private.
     message=getattr(interaction,'message',None)
-    return bool(getattr(getattr(message,'flags',None),'ephemeral',False))
+    if getattr(getattr(message,'flags',None),'ephemeral',False):
+        return True
+    channel=commands_channel()
+    return channel is None or getattr(interaction,'channel_id',None)!=channel
 
 
 def card(title, description='', color=BLUE):
@@ -652,7 +668,7 @@ async def set_notification_channel(interaction: discord.Interaction):
 async def set_commands_channel(interaction: discord.Interaction):
     if await require(interaction, 'setcommandschannel'):
         store_channel('commands_channel_id', interaction)
-        await respond(interaction, card('💬 Commands channel configured', 'Main commands channel saved. Replies are public in every server channel except publiccommands, report assignment and dm.', GREEN))
+        await respond(interaction, card('💬 Commands channel configured', 'Commands channel saved. Replies are public here and private (only the person who ran the command sees them) in every other channel. To hide the commands elsewhere, limit the bot under Server Settings → Integrations → Channels.', GREEN))
 
 
 @bot.tree.command(name='status', description='Bot uptime and all printer connections')
@@ -733,7 +749,7 @@ def help_embed(admin=False):
     field(embed, 'Selection, permissions & privacy',
           'Use printer-name autocomplete or the selection buttons when available. Admin commands require a server administrator or an approved user ID; '
           'administrators can change who may use each command in the dashboard. '
-          'Replies are public in the current server channel, except publiccommands, report assignment and dm.', False)
+          'Replies are public in the commands channel and private everywhere else. DMs, diagnostics, problem reports, report assignment and attendance replies are always private.', False)
     return embed
 
 

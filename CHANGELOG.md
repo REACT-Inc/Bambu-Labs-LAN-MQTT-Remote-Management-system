@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.3.0)
+## 1.3.0-beta.1
+
+Includes the 1.2.1-beta.1 fixes (commands-channel replies and update checks).
 
 ### Added
 - **Ubuntu and other Linux distributions (#26).** The installer now runs on any systemd-based Linux as a Raspberry Pi alternative: Ubuntu 24.04+, Debian 12+, Fedora, Arch and openSUSE. It detects the package manager, checks for Python 3.11+ and systemd before changing anything, suggests a LAN address when Tailscale isn't connected, and prints the firewall command to open the dashboard port. See [Installation](docs/installation.md#ubuntu-and-other-linux-distributions).
@@ -19,6 +21,13 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 - **Discord permissions (#21).** Printer actions (`/pause`, `/resume`, `/stop`, `/reprint`, `/lighton`, `/lightoff`, `/speed`, `/fan`) and queue commands (`/queuestart`, `/queueforce`, `/queuemanage`) are open to every member. Each asks for confirmation and is logged with who ran it. `/fanall` now sets fans on **every** printer. Temperatures, chamber heating, movement, Swapmod, DMs, archiving, laptops and the Pi stay admin-only.
 - **Command permissions in the dashboard.** **Settings → Discord command permissions** sets each command to Everyone, Allowed roles + admins, Admins only or Off. Commands that reboot the Pi, run laptop commands, send DMs or change channels can only be admin-only or off.
 - **Command reference.** [docs/commands.md](docs/commands.md) lists every command and its default permission. A test fails if it goes out of date.
+
+## 1.2.1-beta.1
+
+### Fixed
+- **Discord replies are public only in the commands channel (#35).** Commands still work in every channel, but outside the commands channel the reply, confirmation and result are private: only the person who ran the command sees them. `/dm`, `/diagnostics`, `/reportissue`, report assignment, `/notattending` and `/attendance` stay private everywhere. If no commands channel is set, every reply is private, so run `/setcommandschannel` in the channel where replies should be public. To hide the commands elsewhere, limit the bot under Discord's **Server Settings → Integrations → Channels**.
+- **Updates only wait for printing (#32).** Updates used to need every printer idle, connected and reporting, and no active or needs-review queue jobs. Now only a printer that's printing (or paused mid-print) or a file being sent to a printer holds an update back. Offline or switched-off printers and waiting queue jobs no longer block updates, manual or automatic. The message names the printer that's blocking.
+- **Force update.** Installing from the dashboard while a printer is printing asks you to force the update, explains what happens, and records who forced it in the Activity feed. Automatic updates are never forced.
 
 ## 1.2.0-beta.2
 
