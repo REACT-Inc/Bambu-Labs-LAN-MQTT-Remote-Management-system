@@ -617,7 +617,7 @@ def help_embed(admin=False):
         ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'Manage jobs and confirm starts.' if admin else 'View the queue and add files for an administrator to start.'),
         ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
         ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),
-        ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes and personal reminders.'),
+        ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','attending','notattending','attendance','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes, reminders and meeting attendance.'),
         ('💻 Laptops & server', {'laptops','laptop','server','reboot'}, 'MeshCentral laptops and commands, Pi status and reboot.'),
     ]
     commands = []

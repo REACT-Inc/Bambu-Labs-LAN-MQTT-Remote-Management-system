@@ -107,6 +107,8 @@ Details: [Swapmod](swapmod.md).
 | `/rememberthis title text` · `/remember query?` | E | Save / search shared notes for this server |
 | `/forget note_id` | E | Delete your own note (admins can delete any) |
 | `/remindme minutes text` · `/reminders` · `/cancelreminder reminder_id` | E | Personal DM reminders |
+| `/attending meeting?` · `/notattending reason? meeting?` | E | Say whether you'll be at the next meeting, or a chosen meeting date |
+| `/attendance meeting?` | E | Who is attending, not attending and hasn't replied (only admins see reasons) |
 | `/assign report member? announce?` | A | Assign a practice report writer (chosen, or picked from the roster) |
 | `/meeting report assign member? announce?` | A | Same as `/assign report` |
 | `/archive channel` · `/unarchive channel` | A | Make a text channel read-only and move it to Archive, or restore it |
@@ -154,3 +156,4 @@ How repeats are handled:
 - `/publiccommands`
 - `/assign report` and `/meeting report assign` (the optional `announce` posts separately in the practice channel)
 - `/diagnostics` and `/reportissue`
+- `/attending`, `/notattending` and `/attendance`
