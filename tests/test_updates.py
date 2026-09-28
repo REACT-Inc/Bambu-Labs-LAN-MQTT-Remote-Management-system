@@ -137,7 +137,14 @@ class UpdateHTTPTests(unittest.IsolatedAsyncioTestCase):
         original=Path.exists
         with patch.object(Path,'exists',lambda p:True if str(p)=='/etc/systemd/system/pm-web-update.path' else original(p)):
             r=await self.client.post('/api/update/install',json={'token':preview['token'],'confirmed':True},headers=h)
-        self.assertEqual(r.status,400);self.assertIn('finish',(await r.json())['error']);self.assertFalse(self.core.update_pending())
+        self.assertEqual(r.status,400);self.assertIn('Test is printing',(await r.json())['error']);self.assertFalse(self.core.update_pending())
+        status=await (await self.client.get('/api/update/status')).json()
+        self.assertEqual(status['blockers'],['Test is printing'])
+        with patch.object(Path,'exists',lambda p:True if str(p)=='/etc/systemd/system/pm-web-update.path' else original(p)):
+            r=await self.client.post('/api/update/install',json={'token':preview['token'],'confirmed':True,'force':True},headers=h)
+        self.assertEqual(r.status,200);self.assertTrue(self.core.update_pending())
+        forced=[e for e in self.store.events() if e['title']=='Forced software update']
+        self.assertEqual(len(forced),1);self.assertIn('while Test is printing',forced[0]['detail']);self.assertIn('dashboard (',forced[0]['detail'])
     async def test_github_settings_require_auth_csrf_and_hide_token(self):
         self.assertEqual((await self.client.get('/api/github/status')).status,401)
         headers=await self.login()
