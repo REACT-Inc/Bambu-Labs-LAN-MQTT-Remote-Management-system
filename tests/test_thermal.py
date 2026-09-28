@@ -28,6 +28,19 @@ class ThermalTests(unittest.TestCase):
         self.assertEqual(self.sent()[0]['param'],'M106 P1 S255\n');self.assertEqual(len(self.sent()),1)
         with self.assertRaises(ValueError):prepare(self.core,'BOB','fan_auxiliary',50)
         with self.assertRaises(ValueError):prepare(self.core,'BOB','chamber',50)
+    def test_legacy_fans_report_their_current_percent(self):
+        # Older reports give 0-15; the dashboard shows the percentage so the slider doesn't snap back to 0.
+        self.data={'cooling_fan_speed':'15','big_fan1_speed':'7','big_fan2_speed':'0'}
+        self.core.printer_config=lambda n:{'model':'X1C','serial':'serial'}
+        self.assertEqual({f['key']:f['percent'] for f in fans(self.core,'BOB')},{'part':100,'auxiliary':40,'chamber':0})
+        self.data={'cooling_fan_speed':'junk'}
+        self.assertIsNone(fans(self.core,'BOB')[0]['percent'])
+    def test_demo_fan_targets_are_kept_per_fan(self):
+        self.data={};self.core.EXAMPLE_MODE=True;self.core.EXAMPLE_DATA={'BOB':self.data}
+        self.core.printer_config=lambda n:{'model':'X1C','serial':'serial'}
+        self.controls.apply('BOB','fan_part',40,confirmed=True);self.controls.apply('BOB','fan_auxiliary',70,confirmed=True)
+        self.assertEqual(self.data['demo_fan_targets'],{'1':40,'2':70})
+        self.assertEqual({f['key']:f['percent'] for f in fans(self.core,'BOB')},{'part':40,'auxiliary':70,'chamber':None})
     def test_chamber_command_and_limits(self):
         self.controls.apply('BOB','chamber',60,confirmed=True)
         self.assertEqual(self.sent()[0]['command'],'set_ctt');self.assertEqual(self.sent()[0]['ctt_val'],60)

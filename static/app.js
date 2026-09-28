@@ -3,6 +3,7 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state=null, csrf='', selectedPrinter=null, cameraUrl=null, polling=false, settingsLoaded=false;
 let pendingConfirmation=null;
+const camThumbs={};  // latest camera still per printer, shown on the Overview cards
 const terminal=new Set(['finished','failed','cancelled']);
 async function api(path,body,method='POST'){
  const headers={'X-PM':'1'};
@@ -19,6 +20,16 @@ function notice(text){$('notice').textContent=text;$('notice').hidden=false;setT
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.'}[name];}
 function printerLabel(name){return state?.printers.find(p=>p.name===name)?.display_name||name;}
 function statusClass(s,online=true){return !online||['FAILED','failed','needs_review'].includes(s)?'bad':['PAUSE','paused','PREPARE','staging','awaiting_start'].includes(s)?'warn':['RUNNING','printing'].includes(s)?'blue':'';}
+// Light: show the requested state (pulsing) straight away, until the printer reports it or 10 s pass.
+const lightPending={};
+function lightShown(p){const reported=((p.data||{}).lights_report||[]).find(l=>l.node==='chamber_light')?.mode==='on',pend=lightPending[p.name];
+ if(pend&&(reported===pend.on||Date.now()>pend.until)){if(reported!==pend.on)notice(printerLabel(p.name)+' did not confirm the light change. Check the printer.');delete lightPending[p.name];}
+ return lightPending[p.name]?{on:lightPending[p.name].on,busy:true}:{on:reported,busy:false};}
+async function toggleLight(name){const p=state.printers.find(x=>x.name===name),on=!lightShown(p).on;
+ lightPending[name]={on,until:Date.now()+10000};render();
+ try{await api('printers/'+encodeURIComponent(name)+'/'+(on?'lighton':'lightoff'),{});}catch(e){delete lightPending[name];notice(e.message);render();return;}
+ for(const ms of [1500,4000,7000,10500])setTimeout(refresh,ms);}
+function confirmPause(name){confirmAction('Pause this print?',printerLabel(name)+' — the print pauses until you resume it.','I want to pause this print.',()=>api('printers/'+encodeURIComponent(name)+'/pause',{}));}
 function actionButton(action,label,extra='',cls=''){return `<button class="${cls}" data-action="${action}" ${extra}>${label}</button>`;}
 function render(){
  const p=state.printers,j=state.jobs;
@@ -66,14 +77,15 @@ function printerCard(x){
  const waiting=state.jobs.filter(v=>v.printer===x.name&&v.status==='queued').length,left=fmtMinutes(d.mc_remaining_time);
  const round=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?'—':Math.round(Number(v));
  const temp=(now,target)=>`<b>${round(now)}°</b>${Number(target)?`<em>→ ${round(target)}°</em>`:''}`;
- const light=(d.lights_report||[]).find(l=>l.node==='chamber_light')?.mode==='on';
+ const lt=lightShown(x),light=lt.on;
  let actions='';
  if(x.state==='RUNNING'||x.state==='PREPARE')actions+=actionButton('pause','⏸ Pause',n);
  if(x.state==='PAUSE')actions+=actionButton('resume','▶ Resume',n,'primary');
  if(active)actions+=actionButton('stop','■ Stop',n,'danger');
- actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':''));
+ actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':'')+(lt.busy?' busy':''));
  return `<article class="printer-card${x.connected?'':' offline'}" ${n} tabindex="0" role="button" aria-label="Open ${esc(x.display_name||x.name)}">
 <div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${statusClass(x.state,x.connected)}">${esc(x.connected?x.state:'OFFLINE')}</span></div>
+${x.has_camera?`<div class="pc-cam"><img data-cam="${esc(x.name)}" alt="${esc(x.display_name||x.name)} camera"${camThumbs[x.name]?` src="${camThumbs[x.name]}"`:' hidden'}></div>`:''}
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
@@ -84,7 +96,8 @@ async function downloadFileListing(printer,button){if(button)button.disabled=tru
   a.href=url;a.download='printer-files.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('Printer file listing downloaded.');}
  catch(e){notice(e.message);}finally{if(button)button.disabled=false;}}
 function openPrinter(printer){selectedPrinter=printer;loadSwapSettings();$('cameraImage').hidden=true;$('cameraMessage').textContent='';
- $('detailDialog').querySelector('.drawer-body').scrollTop=0;renderDetails();if(!$('detailDialog').open)$('detailDialog').showModal();}
+ $('detailDialog').querySelector('.drawer-body').scrollTop=0;renderDetails();if(!$('detailDialog').open)$('detailDialog').showModal();
+ if(typeof autoStartLive==='function')autoStartLive();}
 // Popups: click outside or press Esc to close, with a short animation.
 function closeDialog(d){if(!d.open||d.dataset.closing)return;d.dataset.closing='1';
  const done=()=>{if(!d.dataset.closing)return;delete d.dataset.closing;d.classList.remove('closing');d.close();};
@@ -109,7 +122,9 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  if(action==='files'){await downloadFileListing(printer,b);return}
  if(action==='details'){openPrinter(printer);return}
  if(action==='printerQueue'){$('queueFilter').value=printer;tab('queue');renderJobs();return;}
- if(['pause','resume','lighton','lightoff'].includes(action)){await api('printers/'+encodeURIComponent(printer)+'/'+action,{});notice('Command submitted. Waiting for printer telemetry.');}
+ if(action==='pause'){confirmPause(printer);return;}
+ if(action==='lighton'||action==='lightoff'){await toggleLight(printer);return;}
+ if(action==='resume'){await api('printers/'+encodeURIComponent(printer)+'/resume',{});notice('Command submitted. Waiting for printer telemetry.');}
  if(action==='stop'){confirmAction('Stop this print?',printer+' — this cancels the current job.','I want to cancel this print.',()=>api('printers/'+encodeURIComponent(printer)+'/stop',{confirmed:true}));return;}
  if(action==='swapapprove'){openSwapApproval(job);return;}
  if(action==='startOverride'){const j=state.jobs.find(x=>x.id===job);confirmAction('Start ignoring reported error?',`${j.label} on ${printerLabel(j.printer)}. This bypasses the management error check and allows FAILED state. It does not clear the printer error or override firmware protections.`,'I inspected the printer, cleared the plate, and verified the material and sliced file. Start despite the reported error.',()=>api('jobs/'+job+'/start',{confirmed:true,override_error:true}));return;}

@@ -16,10 +16,29 @@ async function fetchLiveFrame(generation,version=0,feed=''){
  finally{clearTimeout(timeout);if(liveRequest===controller)liveRequest=null;}
  if(generation===liveGeneration)liveTimer=setTimeout(()=>fetchLiveFrame(generation,version,feed),750);
 }
-$('startLive').onclick=()=>{stopLive();livePrinter=selectedPrinter;$('liveStatus').textContent='Connecting to printer camera…';$('startLive').disabled=true;fetchLiveFrame(liveGeneration);};
+function startLiveView(){stopLive();livePrinter=selectedPrinter;$('liveStatus').textContent='Connecting to printer camera…';$('startLive').disabled=true;fetchLiveFrame(liveGeneration);}
+// Opening a printer starts its camera, if it has one. The ▶ button restarts it after Stop.
+function autoStartLive(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
+ $('cameraHint').textContent=p?.has_camera?'About one frame per second. Nothing is recorded.':state?.demo?'No camera in demo mode.':'No camera configured for this printer (camera_type in config.json).';
+ if(p?.has_camera){if(livePrinter!==p.name&&!document.hidden)startLiveView();}
+ else{stopLive();$('liveStatus').textContent=state?.demo?'No camera in demo mode.':'No camera configured for this printer.';}}
+$('startLive').onclick=startLiveView;
 $('stopLive').onclick=stopLive;
 $('detailDialog').addEventListener('close',stopLive);
-document.addEventListener('visibilitychange',()=>{if(document.hidden)stopLive();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopLive();else if($('detailDialog').open)autoStartLive();});
+const thumbBusy={},thumbRetry={};
+async function refreshThumb(name){
+ if(thumbBusy[name]||Date.now()<(thumbRetry[name]||0))return;thumbBusy[name]=true;
+ const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
+ try{const r=await fetch('/api/liveframe/'+encodeURIComponent(name)+'?after=0',{signal:controller.signal,cache:'no-store'});
+  if(!r.ok)throw new Error('camera unavailable');
+  const url=URL.createObjectURL(await r.blob()),old=camThumbs[name];camThumbs[name]=url;
+  document.querySelectorAll('img[data-cam]').forEach(img=>{if(img.dataset.cam===name){img.src=url;img.hidden=false;}});
+  if(old)setTimeout(()=>URL.revokeObjectURL(old),2000);}
+ catch{thumbRetry[name]=Date.now()+30000;}  // camera off or unreachable: try again in 30 s
+ finally{clearTimeout(timeout);thumbBusy[name]=false;}}
+// Card cameras refresh every few seconds, only while the Overview tab is on screen.
+setInterval(()=>{if(!state||document.hidden||$('overview').hidden)return;for(const p of state.printers)if(p.has_camera&&p.connected)refreshThumb(p.name);},4000);
 $('logout').addEventListener('click',stopLive);
 setInterval(()=>{if(livePrinter&&(!state||!$('detailDialog').open))stopLive();},1000);
 // ---- Printer panel (Bambu Handy style) ----------------------------------------------------
@@ -31,7 +50,8 @@ function fmtTemp(v){const n=num(v);return n===null?'—':Math.round(n)+'°';}
 // Newer firmware (bit 38 of the hex "fun" flags) only jogs in fixed 1 / 10 mm steps.
 function axisCtrl(d){try{return ((BigInt('0x'+(d.fun||'0'))>>38n)&1n)===1n;}catch{return false;}}
 async function control(kind,body,label){const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/'+kind,body);notice(r.message||label||'Submitted.');return r;}
-function askControl(title,text,kind,value,label){confirmAction(title,printerLabel(selectedPrinter)+' — '+text,label||'I checked this setting and want to apply it.',()=>control(kind,{value,confirmed:true}));}
+// Everyday controls apply straight away; the server still checks limits. Only Pause and Stop ask first.
+async function sendControl(kind,value){try{return await control(kind,{value,confirmed:true});}catch(e){notice(e.message);throw e;}finally{refresh();}}
 
 function tempDefs(p){const d=p.data||{},l=p.limits||{},defs=[
  {kind:'nozzle',label:'Nozzle',icon:'🔥',now:d.nozzle_temper,target:d.nozzle_target_temper,max:l.nozzle||300,hint:'Active nozzle. 0 turns heating off.'},
@@ -51,20 +71,33 @@ $('tempTiles').addEventListener('click',e=>{const edit=e.target.closest('[data-e
  if(cancel){const form=cancel.closest('.tile-edit');form.hidden=true;form.previousElementSibling.hidden=false;editingTile=null;}});
 $('tempTiles').addEventListener('submit',e=>{e.preventDefault();const form=e.target,tile=form.closest('.tile'),kind=tile.dataset.kind,value=Number(form.querySelector('input').value);
  form.hidden=true;form.previousElementSibling.hidden=false;editingTile=null;
- askControl('Set '+kind+' temperature?',`${kind} target → ${value ? value+' °C' : 'off'}`,kind,value);});
+ sendControl(kind,value).catch(()=>{});});
 
 function renderSpeed(p){const level=SPEEDS[(p.data||{}).spd_lvl];$('speedControl').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.speed===level));
  $('detailSpeedLabel').textContent='Speed '+(level?level[0].toUpperCase()+level.slice(1):'—');}
-$('speedControl').addEventListener('click',e=>{const b=e.target.closest('[data-speed]');if(!b||b.classList.contains('active'))return;askControl('Change print speed?','speed → '+b.textContent,'speed',b.dataset.speed);});
+$('speedControl').addEventListener('click',e=>{const b=e.target.closest('[data-speed]');if(!b||b.classList.contains('active'))return;
+ $('speedControl').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));sendControl('speed',b.dataset.speed).catch(()=>renderSpeed(devPrinter()));});
 
 function fanPercent(p,f){const d=p.data||{};const demo=(d.demo_fan_targets||{})[f.id];return num(f.percent)??num(demo);}
-function renderFans(p){const box=$('fanList'),fans=(p.limits||{}).fans||[];
- if(box.contains(document.activeElement)&&box.dataset.printer===p.name)return; // don't disturb a slider being dragged
- box.dataset.printer=p.name;
- box.innerHTML=fans.map(f=>{const pct=fanPercent(p,f);return `<div class="fan-row${f.manual?'':' auto'}" data-fan="${esc(f.key)}"><div class="fan-name"><span>🌀 ${esc(f.label)}</span><small>${f.manual?(pct===null?'Not reported':pct+'%'):'Automatic (firmware)'}</small></div>${f.manual?`<input type="range" min="0" max="100" step="10" value="${pct??0}" aria-label="${esc(f.label)} speed"><output>${pct??0}%</output><button type="button" class="small-btn" data-fan-set hidden>Set</button>`:''}</div>`;}).join('')+(fans.some(f=>f.manual)?`<div class="fan-row all" data-fan="__all"><div class="fan-name"><span>All manual fans</span><small>Sets every fan above at once</small></div><input type="range" min="0" max="100" step="10" value="0" aria-label="All manual fans speed"><output>0%</output><button type="button" class="small-btn" data-fan-set hidden>Set</button></div>`:'')||'<p class="muted">No fans reported.</p>';}
-$('fanList').addEventListener('input',e=>{if(e.target.type!=='range')return;const row=e.target.closest('.fan-row');row.querySelector('output').textContent=e.target.value+'%';row.querySelector('[data-fan-set]').hidden=false;});
-$('fanList').addEventListener('click',e=>{const b=e.target.closest('[data-fan-set]');if(!b)return;const row=b.closest('.fan-row'),value=Number(row.querySelector('input').value);b.hidden=true;
- const all=row.dataset.fan==='__all';askControl(all?'Set all fans?':'Set fan speed?',(all?'all manual fans':row.querySelector('.fan-name span').textContent.replace('🌀 ',''))+' → '+value+'%',all?'fanall':'fan_'+row.dataset.fan,value);});
+const fanPending={};let draggingFan=null;
+function fanShown(p,f){const key=p.name+'|'+f.key,pend=fanPending[key],reported=fanPercent(p,f);
+ if(pend&&(reported===pend.value||Date.now()>pend.until))delete fanPending[key];
+ return fanPending[key]?fanPending[key].value:reported;}
+function renderFans(p){const box=$('fanList'),fans=(p.limits||{}).fans||[],signature=p.name+':'+fans.map(f=>f.key+(f.manual?'m':'a')).join(',');
+ if(box.dataset.signature!==signature){box.dataset.signature=signature;draggingFan=null;
+  box.innerHTML=fans.map(f=>`<div class="fan-row${f.manual?'':' auto'}" data-fan="${esc(f.key)}"><div class="fan-name"><span>🌀 ${esc(f.label)}</span><small></small></div>${f.manual?`<input type="range" min="${f.minimum??0}" max="${f.maximum??100}" step="10" value="0" aria-label="${esc(f.label)} speed"><output>0%</output>`:''}</div>`).join('')
+   +(fans.some(f=>f.manual)?`<div class="fan-row all" data-fan="__all"><div class="fan-name"><span>All manual fans</span><small>Sets every fan above at once</small></div><input type="range" min="0" max="100" step="10" value="0" aria-label="All manual fans speed"><output>0%</output></div>`:'')||'<p class="muted">No fans reported.</p>';}
+ for(const f of fans){const row=[...box.querySelectorAll('.fan-row')].find(r=>r.dataset.fan===f.key);if(!row)continue;
+  const pct=fanShown(p,f),pending=!!fanPending[p.name+'|'+f.key];
+  row.querySelector('small').textContent=!f.manual?'Automatic (firmware)':pending?'Setting '+pct+'%…':pct===null?'Not reported':pct+'%';
+  const input=row.querySelector('input');if(input&&input!==draggingFan){input.value=pct??0;row.querySelector('output').textContent=(pct??0)+'%';}}}
+$('fanList').addEventListener('input',e=>{if(e.target.type!=='range')return;draggingFan=e.target;e.target.closest('.fan-row').querySelector('output').textContent=e.target.value+'%';});
+// 'change' fires when the slider is released (or stepped with the keyboard): apply it then, no Set button.
+$('fanList').addEventListener('change',async e=>{if(e.target.type!=='range')return;draggingFan=null;
+ const p=devPrinter(),row=e.target.closest('.fan-row'),value=Number(e.target.value),all=row.dataset.fan==='__all';
+ const targets=all?((p.limits||{}).fans||[]).filter(f=>f.manual):((p.limits||{}).fans||[]).filter(f=>f.key===row.dataset.fan);
+ for(const f of targets)fanPending[p.name+'|'+f.key]={value,until:Date.now()+20000};renderFans(p);
+ try{await sendControl(all?'fanall':'fan_'+row.dataset.fan,value);}catch{for(const f of targets)delete fanPending[p.name+'|'+f.key];renderFans(devPrinter());}});
 
 function jogSteps(p){return axisCtrl(p.data||{})?{xy:[1,10],z:[1]}:{xy:[1,10],z:[0.1,1]};}
 function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringify(steps);
@@ -106,11 +139,13 @@ function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},pro
  const left=num(d.mc_remaining_time);$('detailRemaining').textContent=left===null?'— remaining':(left>=60?Math.floor(left/60)+' h '+left%60+' min':left+' min')+' remaining';
  $('detailError').hidden=!p.error_text;$('detailError').textContent=p.error_text||'';
  $('devPause').hidden=p.state!=='RUNNING'&&p.state!=='PREPARE';$('devResume').hidden=p.state!=='PAUSE';$('devStop').hidden=!active;
- const light=(d.lights_report||[]).find(l=>l.node==='chamber_light');$('devLight').setAttribute('aria-pressed',String(light?.mode==='on'));
+ const lt=lightShown(p);$('devLight').setAttribute('aria-pressed',String(lt.on));$('devLight').classList.toggle('busy',lt.busy);
  renderTiles(p);renderSpeed(p);renderFans(p);renderJog(p);renderAms(p);}
 document.querySelector('#detailDialog .now-actions').addEventListener('click',async e=>{const b=e.target.closest('[data-dev]');if(!b)return;const name=selectedPrinter,action=b.dataset.dev;
  if(action==='stop'){confirmAction('Stop this print?',printerLabel(name)+' — this cancels the current job.','I want to cancel this print.',()=>api('printers/'+encodeURIComponent(name)+'/stop',{confirmed:true}));return;}
- const target=action==='light'?(b.getAttribute('aria-pressed')==='true'?'lightoff':'lighton'):action;
+ if(action==='pause'){confirmPause(name);return;}
+ if(action==='light'){await toggleLight(name);return;}
+ const target=action;
  b.disabled=true;try{await api('printers/'+encodeURIComponent(name)+'/'+target,{});notice('Command submitted. Waiting for printer telemetry.');await refresh();}catch(err){notice(err.message);}finally{b.disabled=false;}});
 $('devFiles').onclick=()=>downloadFileListing(selectedPrinter,$('devFiles'));
 $('detailDialog').addEventListener('close',()=>{$('jogArm').checked=false;clearTimeout(jogArmTimer);editingTile=null;$('tempTiles').dataset.printer='';});

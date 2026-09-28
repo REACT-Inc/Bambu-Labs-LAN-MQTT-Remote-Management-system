@@ -20,7 +20,9 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
   - **Status:** state (IDLE, RUNNING, PAUSE, FAILED, OFFLINE…), current file, progress, time left, and nozzle/bed temperatures.
   - **Errors:** any printer error, with the official Bambu description.
   - **Filaments:** small colour swatches for the loaded AMS slots.
-  - **Buttons:** only the ones that apply right now: **Pause** (while printing), **Resume** (while paused), **Stop** (asks for confirmation), the chamber **light** 💡, and **N queued →** (opens that printer's queue).
+  - **Camera:** printers with a camera show an image that refreshes every few seconds while the Overview tab is on screen.
+  - **Buttons:** only the ones that apply right now: **Pause** and **Stop** (both ask for confirmation), **Resume**, the chamber **light** 💡, and **N queued →** (opens that printer's queue).
+  - **Light feedback:** the light button turns amber and pulses as soon as you click it, until the printer reports the new state. If the printer doesn't confirm within about 10 seconds, it goes back and a message says so.
   - **Opening a printer:** click anywhere else on the card (or focus it and press Enter or Space).
 - **+ Queue a print:** at the top right. See [Print queue](print-queue.md).
 - **Demo mode:** a **DEMO MODE** badge shows when no real printers are being controlled.
@@ -32,15 +34,15 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 | Part | What it shows / does |
 |---|---|
 | Header | Name, state, a progress ring with layers and time left, and **Pause / Resume / Stop / light** |
-| Live camera | **▶ Start live view**: about 1 frame per second. See [Printer controls & camera](printer-controls.md#camera). |
+| Live camera | Starts automatically when the panel opens (about 1 frame per second). **Stop live view** pauses it and **▶** restarts it. See [Printer controls & camera](printer-controls.md#camera). |
 | Temperature | Tiles for nozzle, bed and chamber. Tap a tile to type a new target. |
 | Print speed | Silent, Standard, Sport, Ludicrous |
-| Fans | A slider per fan, plus all fans |
+| Fans | A slider per fan, plus all fans. The fan is set when you let go of the slider. It shows *Setting…* until the printer reports the new speed. |
 | Move axes | A movement pad, locked until you tick the safety checkbox. See [Printer controls](printer-controls.md). |
 | Filament | AMS units (humidity, temperature) and each slot's material, colour and remaining %, plus the external spool |
 | More: files, snapshot, Swapmod | Download the printer's file listing, take a single camera snapshot, and Swapmod A1m kit settings (see [Swapmod](swapmod.md)) |
 
-Every change asks for confirmation first.
+**Only Pause and Stop ask for confirmation.** Temperatures, speed, fans, light and resume apply straight away. The server still enforces the limits and safety checks (see [Printer controls](printer-controls.md)). Movement stays locked until you tick the safety checkbox.
 
 **Closing:** click outside the panel, press **Esc**, or use ✕. Closing it also stops live view. Every other popup closes the same way. Clicking outside a confirmation only cancels that confirmation.
 

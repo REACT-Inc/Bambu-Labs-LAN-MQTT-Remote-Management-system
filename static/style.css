@@ -166,3 +166,11 @@ button.toggle[aria-pressed="true"]{background:#3a3523;border-color:#665c36;color
  .pc-ams{max-width:40%}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after,dialog[open],dialog[open]::backdrop{animation:none!important;transition:none!important}}
+
+/* ---- Camera on cards, and "working" feedback -------------------------------------------- */
+.pc-cam{aspect-ratio:16/9;background:#0b0f0d;border-radius:10px;overflow:hidden}
+.pc-cam img{width:100%;height:100%;object-fit:cover;display:block}
+@keyframes working{50%{opacity:.5}}
+.icon-btn.busy,button.toggle.busy{background:#4a3b10;border-color:#d9a400;color:var(--yellow);animation:working .9s ease-in-out infinite}
+/* The drawer body scrolls; its sections must keep their size instead of shrinking (the camera collapsed to 0). */
+.drawer-body>*{flex-shrink:0}

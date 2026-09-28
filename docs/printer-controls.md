@@ -2,7 +2,7 @@
 
 You can change temperatures, speed, fans and lights, and jog the axes, from the dashboard (click a printer card to open its panel) or from Discord. In Discord, `/speed`, `/fan`, `/fanall` and the light commands are open to everyone (with confirmation and logging), while `/temperature`, `/chamber` and `/move` are admin-only by default. See [Commands and permissions](commands.md).
 
-**Every change asks for confirmation.** A change is **sent** over MQTT, which doesn't mean it was **applied**: the firmware can still reject it. If the printer rejects a command, it's shown in Activity and posted to the notification channel. Otherwise, check the printer's telemetry or screen to confirm.
+**Confirmations:** in the dashboard, only **Pause** and **Stop** ask first. Everything else applies straight away, and the limits below are still enforced by the server. In Discord, every change still shows a confirmation card. A change is **sent** over MQTT, which doesn't mean it was **applied**: the firmware can still reject it. If the printer rejects a command, it's shown in Activity and posted to the notification channel. Otherwise, check the printer's telemetry or screen to confirm.
 
 In demo mode, controls only change the simulated data.
 
@@ -18,9 +18,10 @@ In demo mode, controls only change the simulated data.
 
 | Action | Dashboard | Discord |
 |---|---|---|
-| Pause / resume | **Pause** / **Resume** on the printer card | `/pause`, `/resume` |
+| Pause | **Pause**, then confirm | `/pause` |
+| Resume | **Resume** (no confirmation) | `/resume` |
 | Stop (cancel the print) | **Stop**, then confirm | `/stop`, then confirm |
-| Chamber light | **Light on** / **Light off** | `/lighton`, `/lightoff` |
+| Chamber light | 💡 button (pulses until the printer reports the change) | `/lighton`, `/lightoff` |
 
 **Stop and the queue:**
 - **Before the file was sent** (the job is still staging): stopping cancels the job.
@@ -63,7 +64,7 @@ Light control uses the standard `chamber_light` command. Whether it works depend
 
 ## Fans
 
-- **One fan:** `/fan percent:50 target:part`, or the dashboard control *Select fan*. Autocomplete and the dashboard list the fans **this printer reports**.
+- **One fan:** `/fan percent:50 target:part`, or drag that fan's slider in the dashboard (it's set when you let go). Autocomplete and the dashboard list the fans **this printer reports**.
 - **All fans on one printer:** `/fanall percent:80` or *All manual fans*. The result lists any automatic fans it skipped.
 
 How fans are controlled:
@@ -109,9 +110,9 @@ Set `camera_type` on each printer in [config.json](configuration.md#printer-entr
 | `rtsp` | H2D and other RTSP cameras | RTSP on port 322, decoded by **ffmpeg** (limited to 5 fps at 960 px wide to spare the Pi) |
 
 - **Snapshots:** `/printer`, notifications, and **Snapshot → Refresh camera snapshot** in the dashboard.
-- **Live view:** **Printer panel → ▶ Start live view** shows about one frame per second. It isn't full-motion video, and nothing is recorded.
+- **Live view:** starts automatically when you open a printer's panel, and shows about one frame per second. The Overview cards also show a camera image that refreshes every few seconds. It isn't full-motion video, and nothing is recorded.
   - **One shared connection:** all viewers and snapshots share one camera connection per printer. It reconnects automatically after errors, and closes when nobody is watching.
-  - **When it stops:** closing the dialog, hiding the browser tab or signing out stops your live view.
+  - **When it stops:** closing the panel, hiding the browser tab or signing out stops your live view. Card images only refresh while the Overview tab is on screen.
 - **Login required:** camera access needs a dashboard login, and the session is re-checked while streaming.
 - **Other clients:** if the printer won't accept another camera connection, close other camera clients (Bambu Studio, Handy).
 - **Printer settings:** firmware LAN settings and the access code still decide whether the camera is available. Camera errors are logged with the access code removed.

@@ -2,6 +2,7 @@
 import asyncio
 import json
 import math
+import re
 import time
 from thermal_controls import fans,fan_commands,model_name
 
@@ -109,7 +110,12 @@ class Controls:
             if kind in ('nozzle','bed'):d[kind+'_target_temper']=int(value)
             elif kind=='speed':d['spd_lvl']=SPEEDS[value]
             elif kind=='chamber':d['ctt']=int(value)
-            elif kind.startswith('fan'):d['demo_fan_targets']={c.get('fan_index',c.get('param')):int(value) for c in param}
+            elif kind.startswith('fan'):
+                targets=d.setdefault('demo_fan_targets',{})
+                for c in param:
+                    fan=c.get('fan_index')
+                    if fan is None:fan=int(re.search(r'M106 P(\d+)',c.get('param',''))[1])
+                    targets[str(fan)]=int(value)
         else:
             client=self.core.clients.get(name)
             if not client or not client.is_connected():raise ValueError('Printer disconnected.')
