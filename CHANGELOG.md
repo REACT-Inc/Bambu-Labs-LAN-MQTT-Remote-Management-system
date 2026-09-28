@@ -2,6 +2,11 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.3.0)
+
+### Added
+- **Ubuntu and other Linux distributions (#26).** The installer now runs on any systemd-based Linux as a Raspberry Pi alternative: Ubuntu 24.04+, Debian 12+, Fedora, Arch and openSUSE. It detects the package manager, checks for Python 3.11+ and systemd before changing anything, suggests a LAN address when Tailscale isn't connected, and prints the firewall command to open the dashboard port. See [Installation](docs/installation.md#ubuntu-and-other-linux-distributions).
+
 ## 1.2.0-beta.2
 
 ### Added

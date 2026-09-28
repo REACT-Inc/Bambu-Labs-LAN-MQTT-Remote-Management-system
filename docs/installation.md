@@ -1,8 +1,9 @@
 # Installation
 
-This guide installs 3D Printer Management as a systemd service on a Raspberry Pi. For settings after installation, see [Configuration](configuration.md).
+This guide installs 3D Printer Management as a systemd service on a Raspberry Pi, or on [Ubuntu or another Linux distribution](#ubuntu-and-other-linux-distributions). For settings after installation, see [Configuration](configuration.md).
 
 - [Requirements](#requirements)
+- [Ubuntu and other Linux distributions](#ubuntu-and-other-linux-distributions)
 - [Choose how you'll reach the dashboard](#choose-how-youll-reach-the-dashboard)
 - [Install](#install)
 - [First login](#first-login)
@@ -24,7 +25,29 @@ This guide installs 3D Printer Management as a systemd service on a Raspberry Pi
 | Internet (during install) | To download OS packages and Python packages from PyPI |
 | Discord (optional) | A bot token and the IDs of the servers (guilds) it may be used in. Without a token the dashboard still works. |
 
-The installer runs `apt-get` to install `python3`, `python3-venv`, `ffmpeg` and `sudo`.
+The installer installs `python3` (with `venv`), `ffmpeg` and `sudo` using the system's package manager.
+
+## Ubuntu and other Linux distributions
+
+The same installer works on a regular Linux PC, mini PC, VM or server instead of a Raspberry Pi. It detects the distribution and installs what it needs.
+
+| Distribution | Package manager | Notes |
+|---|---|---|
+| **Ubuntu 24.04+**, Linux Mint 22+, Pop!\_OS 24.04+ | apt | Ubuntu 22.04 is **not** supported (Python 3.10) |
+| **Debian 12+**, Raspberry Pi OS Bookworm | apt | |
+| **Fedora** 39+ | dnf | ffmpeg needs RPM Fusion for some cameras |
+| **Arch Linux**, Manjaro, EndeavourOS | pacman | The installer runs `pacman -Syu`, which upgrades the system |
+| **openSUSE Tumbleweed** | zypper | ffmpeg needs the Packman repository for some cameras |
+| Other systemd distributions | — | Install Python 3.11+ (with `venv`), `sudo` and optionally `ffmpeg` yourself; the installer skips package installation |
+
+- **systemd is required.** It runs the service and the web updater. WSL without systemd, Docker containers and Alpine/OpenRC aren't supported.
+- **Python 3.11 or newer.** The installer checks this before changing anything.
+- **Network:** the computer must reach the printers' LAN, the same as a Pi (see the ports above).
+- **Dashboard address:** if Tailscale isn't connected and no `PM_LISTEN_IP` is given, the installer stops and suggests this computer's LAN address. `PM_LISTEN_IP=127.0.0.1` limits the dashboard to this computer.
+- **Firewall:** if `ufw` or `firewalld` is active, the installer prints the command that opens the dashboard port, for example `sudo ufw allow 8080/tcp` or `sudo firewall-cmd --permanent --add-port=8080/tcp && sudo firewall-cmd --reload`. It doesn't change your firewall.
+- **ffmpeg** is only needed for camera snapshots from printers with an RTSP camera, such as the H2D. If it can't be installed, the installer warns and carries on.
+- **Leave the computer on.** Laptops and desktops shouldn't suspend while prints are queued or running.
+- **Everything else is the same as on the Pi:** file locations, `systemctl`/`journalctl` commands and updates. Screens that say "Pi" (for example **Reboot Pi**, `/server`, `/reboot`) mean this computer.
 
 ## Choose how you'll reach the dashboard
 

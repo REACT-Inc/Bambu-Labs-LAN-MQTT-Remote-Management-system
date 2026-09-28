@@ -1,6 +1,6 @@
 # 3D Printer Management
 
-Self-hosted management for **Bambu Lab printers on your local network**. One service runs on a Raspberry Pi 4/5 and gives you:
+Self-hosted management for **Bambu Lab printers on your local network**. One service runs on a Raspberry Pi 4/5, **or any systemd-based Linux computer** (Ubuntu, Debian, Fedora, Arch, openSUSE…), and gives you:
 
 - a **web dashboard**, reachable over Tailscale or your LAN
 - a **Discord bot**
@@ -10,7 +10,7 @@ Both share the same printer connections, print queues, files and history. Nothin
 | | |
 |---|---|
 | **Printers** | Built for the H2D, A1 and A1 mini. Other LAN-mode Bambu printers use the same protocol but haven't been verified. |
-| **Host** | Raspberry Pi 4/5 running Raspberry Pi OS (systemd, Python 3.11+) |
+| **Host** | Raspberry Pi 4/5 running Raspberry Pi OS, or another systemd-based Linux (Ubuntu 24.04+, Debian 12+, Fedora, Arch, openSUSE). Python 3.11+. See [Installation](docs/installation.md#ubuntu-and-other-linux-distributions). |
 | **Version** | See `Updater/version.py` and the [changelog](CHANGELOG.md) |
 
 ## What it does
@@ -27,7 +27,7 @@ Both share the same printer connections, print queues, files and history. Nothin
   - one-click problem reports sent as GitHub issues
 - **Swapmod A1m:** plate-swap batch support for equipped A1 minis.
 
-## Quick start (Raspberry Pi)
+## Quick start (Raspberry Pi or Linux)
 
 ```bash
 # On the Pi, in the extracted release folder:
