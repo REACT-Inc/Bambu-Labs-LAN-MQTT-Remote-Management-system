@@ -1,6 +1,6 @@
 # Printer controls & camera
 
-You can change temperatures, speed, fans and lights, and jog the axes, from the dashboard (**Details & camera → Printer controls**) or from Discord. The Discord control commands are admin-only.
+You can change temperatures, speed, fans and lights, and jog the axes, from the dashboard (click a printer card to open its panel) or from Discord. The Discord control commands are admin-only.
 
 **Every change asks for confirmation.** A change is **sent** over MQTT, which doesn't mean it was **applied**: the firmware can still reject it. If the printer rejects a command, it's shown in Activity and posted to the notification channel. Otherwise, check the printer's telemetry or screen to confirm.
 
@@ -73,7 +73,9 @@ How fans are controlled:
 
 ## Moving the axes
 
-Discord `/move axis:X millimeters:1`, or the dashboard control *Move X / Y / Z*.
+Discord `/move axis:X millimeters:1`, or the **Move axes** pad in the dashboard's printer panel.
+
+**In the dashboard:** the pad is locked until you tick *The printer is homed, the travel path is clear and I am watching it*. It stays unlocked until the panel closes. After each move the buttons count down the 3-second gap before the next one.
 
 **Before moving:**
 - **Home the printer** from its own screen.
@@ -107,7 +109,7 @@ Set `camera_type` on each printer in [config.json](configuration.md#printer-entr
 | `rtsp` | H2D and other RTSP cameras | RTSP on port 322, decoded by **ffmpeg** (limited to 5 fps at 960 px wide to spare the Pi) |
 
 - **Snapshots:** `/printer`, notifications, and **Snapshot → Refresh camera snapshot** in the dashboard.
-- **Live view:** **Details & camera → Start live view** shows about one frame per second. It isn't full-motion video, and nothing is recorded.
+- **Live view:** **Printer panel → ▶ Start live view** shows about one frame per second. It isn't full-motion video, and nothing is recorded.
   - **One shared connection:** all viewers and snapshots share one camera connection per printer. It reconnects automatically after errors, and closes when nobody is watching.
   - **When it stops:** closing the dialog, hiding the browser tab or signing out stops your live view.
 - **Login required:** camera access needs a dashboard login, and the session is re-checked while streaming.

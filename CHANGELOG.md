@@ -2,10 +2,17 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.2.0-beta.2
 
 ### Added
-- **Meeting attendance.** `/attending` and `/notattending` (with an optional reason) mark whether you'll be at the next meeting, or a chosen meeting date. Meetings are on the practice/report days. `/attendance` shows who's coming, and the dashboard's **Team tools** tab lists the next six meetings. People who aren't attending are skipped when a report writer is picked.
+- **Meeting attendance.** `/attending` and `/notattending` (with an optional reason) mark whether you'll be at the next meeting, or a chosen meeting date. Meetings are on the practice/report days. `/attendance` shows who's coming, and the dashboard's **Team tools** tab lists the next six meetings. People who aren't attending are skipped when a report writer is picked, so you aren't chosen to write the report for a meeting you said you'd miss.
+
+### Changed
+- **Redesigned printer controls (#3).** The dashboard's printer view is lighter and closer to Bambu Handy:
+  - **Printer cards** are compact and open the printer when clicked (or with Enter/Space). They show only the buttons that apply right now (Pause, Resume, Stop, light), with rounded temperatures and AMS colours.
+  - **Printer panel:** it slides in from the side, or up from the bottom on phones. It has a progress ring, quick actions, the live camera, tap-to-edit temperature tiles, speed, fan sliders, a movement pad and filament swatches. Files, snapshot and Swapmod are under **More**.
+  - **Closing popups:** every popup now closes by clicking outside it or pressing Esc, not just with ✕. Clicking outside a confirmation only cancels that confirmation.
+  - **Movement:** one safety checkbox unlocks the movement buttons until the panel closes. The buttons count down the 3-second gap between moves.
 
 ## 1.2.0-beta.1
 

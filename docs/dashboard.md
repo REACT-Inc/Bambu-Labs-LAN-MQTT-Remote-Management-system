@@ -19,25 +19,30 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
 - **A card per printer:**
   - **Status:** state (IDLE, RUNNING, PAUSE, FAILED, OFFLINE…), current file, progress, time left, and nozzle/bed temperatures.
   - **Errors:** any printer error, with the official Bambu description.
-  - **Buttons:** **Details & camera**, **Printer files** (downloads a listing of the printer's storage), **Pause**, **Resume**, **Light on/off**, **Stop** (asks for confirmation), and **N queued →** (opens that printer's queue).
+  - **Filaments:** small colour swatches for the loaded AMS slots.
+  - **Buttons:** only the ones that apply right now: **Pause** (while printing), **Resume** (while paused), **Stop** (asks for confirmation), the chamber **light** 💡, and **N queued →** (opens that printer's queue).
+  - **Opening a printer:** click anywhere else on the card (or focus it and press Enter or Space).
 - **+ Queue a print:** at the top right. See [Print queue](print-queue.md).
 - **Demo mode:** a **DEMO MODE** badge shows when no real printers are being controlled.
 
 ## Printer details
 
-**Details & camera** opens a dialog for one printer:
+Clicking a printer card opens its **printer panel**. It slides in from the right on a computer, or up from the bottom on a phone.
 
-| Section | What it shows / does |
+| Part | What it shows / does |
 |---|---|
-| Summary | State, progress, layers, last telemetry time |
-| Temperature & speed | Current and target nozzle/bed temperatures, speed profile |
-| Filaments | AMS units (humidity, temperature) and each slot's material, colour and remaining %, plus the external spool |
-| Live camera | **Start / Stop live view**: about 1 frame per second. See [Printer controls & camera](printer-controls.md#camera). |
-| Printer controls | Nozzle/bed/chamber temperature, speed profile, a single fan or all fans, and axis movement. Each change asks for confirmation. See [Printer controls](printer-controls.md). |
-| Swapmod A1m | Kit settings for equipped A1 minis. See [Swapmod](swapmod.md). |
-| Snapshot | Take a single camera picture |
+| Header | Name, state, a progress ring with layers and time left, and **Pause / Resume / Stop / light** |
+| Live camera | **▶ Start live view**: about 1 frame per second. See [Printer controls & camera](printer-controls.md#camera). |
+| Temperature | Tiles for nozzle, bed and chamber. Tap a tile to type a new target. |
+| Print speed | Silent, Standard, Sport, Ludicrous |
+| Fans | A slider per fan, plus all fans |
+| Move axes | A movement pad, locked until you tick the safety checkbox. See [Printer controls](printer-controls.md). |
+| Filament | AMS units (humidity, temperature) and each slot's material, colour and remaining %, plus the external spool |
+| More: files, snapshot, Swapmod | Download the printer's file listing, take a single camera snapshot, and Swapmod A1m kit settings (see [Swapmod](swapmod.md)) |
 
-Close the dialog with ✕. Closing it also stops live view.
+Every change asks for confirmation first.
+
+**Closing:** click outside the panel, press **Esc**, or use ✕. Closing it also stops live view. Every other popup closes the same way. Clicking outside a confirmation only cancels that confirmation.
 
 ## Print queue
 

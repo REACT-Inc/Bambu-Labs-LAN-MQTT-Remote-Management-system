@@ -22,7 +22,7 @@ It replaces the earlier Infinity Flow integration. When you update, old Infinity
 
 ## 1. Enable the kit on a printer
 
-Dashboard: **Details & camera → Swapmod A1m (Swap Systems)** on that printer.
+Dashboard: **printer panel → More → Swapmod A1m (Swap Systems)** on that printer.
 
 1. Tick **Kit installed — enable for this printer**. Only do this on printers that actually have the kit.
 2. **Kit model:** *A1 mini*.
