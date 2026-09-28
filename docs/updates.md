@@ -11,6 +11,7 @@ There are three ways to update an installed system:
 Every method keeps `config.json`, the queue database, uploads and settings, and restores the previous version if the new one fails its startup check.
 
 - [Before updating](#before-updating)
+- [When updates wait, and forcing one](#when-updates-wait-and-forcing-one)
 - [GitHub releases and update channels](#github-releases-and-update-channels)
 - [Uploading a release ZIP](#uploading-a-release-zip)
 - [Manual update on the Pi](#manual-update-on-the-pi)
@@ -19,10 +20,32 @@ Every method keeps `config.json`, the queue database, uploads and settings, and 
 
 ## Before updating
 
-- **Printers and queue:** let prints finish, and resolve any queue job that's active or needs review. Updates are refused while jobs are active, and they pause dashboard changes and Discord commands while installing.
+- **Printers:** updates wait while a printer is printing (see [below](#when-updates-wait-and-forcing-one)). Idle, finished, failed and offline printers don't hold them up. While installing, dashboard changes and Discord commands are paused.
 - **Disk space:** keep at least **1 GiB** free on the application disk.
 - **Internet:** needed to install Python packages.
 - **Trust:** only install releases you trust. Installed code can read the printer, Discord and MeshCentral credentials.
+
+## When updates wait, and forcing one
+
+An update restarts this service, **not the printers**. A printer keeps printing from its own storage while the dashboard and Discord are offline for about a minute. So only these hold an update back:
+
+| Situation | Manual update | Automatic update |
+|---|---|---|
+| A connected printer is printing, preparing or paused mid-print | Waits (or force it) | Waits |
+| A print file is being sent to a printer (queue job *staging*) | Waits (or force it) | Waits |
+| An **offline** printer has a queue job marked printing or paused | Goes ahead | Waits, because nobody can tell whether it's still printing |
+| Printers idle, finished, failed, offline or switched off | Goes ahead | Goes ahead |
+| Queue jobs waiting to start, queued, or needing review | Goes ahead | Goes ahead |
+
+The message says exactly which printer is holding the update back, and **Settings → Software update** shows it too.
+
+**Forcing an update:** if you install (from **Install reviewed update…** or **Install release…**) while something is printing, the confirmation turns into **Force the software update?** and lists what's printing. Forcing:
+- **Keeps prints going** on the printers, but progress notifications during the restart may be missed.
+- **Moves active queue jobs to *needs review*** after the restart, so check each printer and record the outcome.
+- **Cuts off** a print file that's still being sent to a printer.
+- **Is recorded** in the Activity feed and the log, with who forced it (the dashboard session's address) and what was printing.
+
+Forcing never overrides another update in progress, missing web-updater setup, low disk space or a checksum failure. **Automatic updates are never forced.** They wait until nothing is printing.
 
 ## GitHub releases and update channels
 
@@ -37,7 +60,7 @@ Every method keeps `config.json`, the queue database, uploads and settings, and 
    | **Beta** | Beta and stable releases | `v1.2.0-beta.1` |
    | **Alpha** | Alpha, beta and stable releases | `v1.2.0-alpha.1` |
 
-3. **Automatically install newer releases when all printers are idle** (optional). Or use **Check now → Install release…** by hand.
+3. **Automatically install newer releases when no printer is printing** (optional). Or use **Check now → Install release…** by hand.
 
 How it behaves:
 - **Checking:** it checks GitHub about once an hour and picks the **newest release on your channel**. For the same version number, alpha < beta < stable, so `1.2.0-alpha.3` < `1.2.0-beta.1` < `1.2.0`.
@@ -50,7 +73,7 @@ How it behaves:
 **Settings → Software update:**
 1. Choose the release ZIP (up to 32 MiB) and **Upload & review**.
 2. Check the version, file count and SHA-256 shown.
-3. **Install reviewed update…**, then confirm.
+3. **Install reviewed update…**, then confirm. If a printer is printing, the confirmation asks you to force the update (see [above](#when-updates-wait-and-forcing-one)).
 
 The dashboard disconnects while the service restarts. Sign in again to see the result. ZIPs without an `update-manifest.json` (anything not built with `build_release.py`) are rejected.
 

@@ -1,11 +1,11 @@
 'use strict';
-let reviewedUpdate=null,updatePollBusy=false;
+let reviewedUpdate=null,updatePollBusy=false,updateBlockers=[];
 async function pollUpdate(){
  if(updatePollBusy||$('app').hidden)return;
  updatePollBusy=true;
  try{
-  const r=await api('update/status',undefined,'GET');
-  $('updateStatus').textContent=r.enabled ? `${r.state}: ${r.message}` : 'Run this release’s update.sh once on the Pi to enable web updates.';
+  const r=await api('update/status',undefined,'GET');updateBlockers=r.blockers||[];
+  $('updateStatus').textContent=r.enabled ? `${r.state}: ${r.message}`+(updateBlockers.length&&!r.busy?` · Printing now: ${updateBlockers.join('; ')}. Installing will be a forced update.`:'') : 'Run this release’s update.sh once on the Pi to enable web updates.';
   $('uploadUpdate').disabled=r.busy||!r.enabled;
   $('installUpdate').disabled=r.busy||!r.enabled;
  }catch(e){$('updateStatus').textContent='Reconnecting… Sign in again after the restart to see the update result.';}
@@ -24,11 +24,14 @@ $('updateForm').addEventListener('submit',async e=>{
  }catch(e){$('updatePreview').textContent=e.message;}
  finally{$('uploadUpdate').disabled=false;}
 });
-$('installUpdate').addEventListener('click',()=>{
+// When something is printing, the update is only possible as a forced update with this warning.
+function forceWarning(){return `Right now: ${updateBlockers.join('; ')}. Printers keep printing from their own storage, but the dashboard and Discord go offline for about a minute, progress notifications may be missed, and active queue jobs will need review after the restart. A file being sent to a printer will be cut off.`;}
+async function refreshBlockers(){try{updateBlockers=(await api('update/status',undefined,'GET')).blockers||[];}catch(e){}}
+$('installUpdate').addEventListener('click',async()=>{
  if(!reviewedUpdate)return;
- const reviewed=reviewedUpdate;
- confirmAction('Install software update?',`Install ${reviewed.version}? Management commands pause while dependencies are prepared, then the dashboard and Discord service restart. Settings and queue data are backed up.`, 'I trust this release and want to install it.',async()=>{
-  const result=await api('update/install',{token:reviewed.token,confirmed:true});
+ const reviewed=reviewedUpdate;await refreshBlockers();const force=updateBlockers.length>0;
+ confirmAction(force?'Force the software update?':'Install software update?',(force?forceWarning()+' ':'')+`Install ${reviewed.version}? Management commands pause while dependencies are prepared, then the dashboard and Discord service restart. Settings and queue data are backed up.`,force?'I trust this release and want to force the update now.':'I trust this release and want to install it.',async()=>{
+  const result=await api('update/install',{token:reviewed.token,confirmed:true,force});
   reviewedUpdate=null;$('installUpdate').hidden=true;$('updateStatus').textContent=result.message;notice(result.message);await pollUpdate();
  });
 });
@@ -49,16 +52,16 @@ $('githubUpdateForm').onsubmit=e=>{
  e.preventDefault();
  const data={repository:$('githubRepo').value.trim(),automatic:$('githubAuto').checked,channel:$('githubChannel').value,token:$('githubToken').value,clear_token:$('githubClearToken').checked,confirmed:true};
  const save=async()=>{await api('github/settings',data);$('githubToken').value='';$('githubClearToken').checked=false;await pollGitHub(true);notice('GitHub settings saved.');};
- if(data.automatic)confirmAction('Enable automatic software updates?',`New ${data.channel}-channel releases from ${data.repository} will be installed when printers are idle. The service will restart. Only enable this for a repository you trust.`,'I authorize automatic installation from this repository.',save);
+ if(data.automatic)confirmAction('Enable automatic software updates?',`New ${data.channel}-channel releases from ${data.repository} will be installed when no printer is printing. The service will restart. Only enable this for a repository you trust.`,'I authorize automatic installation from this repository.',save);
  else save().catch(e=>notice(e.message));
 };
 $('githubCheck').onclick=async()=>{
  $('githubCheck').disabled=true;
  try{await api('github/check',{});await pollGitHub();}catch(e){notice(e.message);}finally{$('githubCheck').disabled=false;}
 };
-$('githubInstall').onclick=()=>{
+$('githubInstall').onclick=async()=>{
  if(!githubState?.available)return;
- const version=githubState.latest;
- confirmAction('Install GitHub release?',`${githubState.repository} — ${version}. Download, verify, back up, install and restart management.`,'I trust this release and want to install it.',async()=>{await api('github/install',{version,confirmed:true});await pollGitHub();await pollUpdate();});
+ const version=githubState.latest;await refreshBlockers();const force=updateBlockers.length>0;
+ confirmAction(force?'Force the GitHub release install?':'Install GitHub release?',(force?forceWarning()+' ':'')+`${githubState.repository} — ${version}. Download, verify, back up, install and restart management.`,force?'I trust this release and want to force the update now.':'I trust this release and want to install it.',async()=>{await api('github/install',{version,confirmed:true,force});await pollGitHub();await pollUpdate();});
 };
 setInterval(pollGitHub,5000);pollGitHub();
