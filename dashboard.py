@@ -15,6 +15,8 @@ from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits
 from live_camera import Cameras
 from queueing import MAX_UPLOAD, options, validate_archive
+import diagnostics
+from issue_reports import IssueReports
 
 
 def password_hash(password, salt=None):
@@ -50,6 +52,7 @@ class Dashboard:
         self.app['dashboard']=self
         self.updater = WebUpdates(self)
         self.github_updater = GitHubUpdates(self)
+        self.issue_reports = IssueReports(core, store, self.app)
         try:self.release=json.loads((Path(__file__).parent/'release.json').read_text()).get('id','')
         except (OSError,ValueError):self.release=''
         self.app.on_shutdown.append(self.cameras.close)
@@ -65,6 +68,7 @@ class Dashboard:
             web.post('/api/printers/{name}/{action}', self.control),
             web.get('/api/camera/{name}', self.camera), web.post('/api/settings', self.settings),
             web.get('/api/permissions', self.permissions), web.post('/api/permissions', self.save_permissions),
+            web.get('/api/diagnostics', self.diagnostic_report), web.get('/api/errors', self.recent_errors),
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
         ])
 
@@ -91,9 +95,9 @@ class Dashboard:
             response = web.json_response({'error':str(exc)}, status=400)
         except web.HTTPException as exc:
             response = web.json_response({'error':exc.text or exc.reason}, status=exc.status)
-        except Exception:
-            self.core.log.exception('Dashboard request failed')
-            response = web.json_response({'error':'Request failed. Check the service log.'}, status=500)
+        except Exception as exc:
+            error_id = diagnostics.log_error(self.core.log, f'Dashboard request {request.method} {request.path} failed', exc)
+            response = web.json_response({'error':f'Request failed (error ID {error_id}). Download a diagnostic report under Settings.'}, status=500)
         response.headers.update({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
             'Referrer-Policy':'same-origin', 'Content-Security-Policy':"default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
         return response
@@ -103,6 +107,13 @@ class Dashboard:
         if name not in self.core.names():raise ValueError('Unknown printer.')
         result=await self.file_browser.browse(name,request.query.get('path','/'))
         return web.json_response(dict(result,text=render_files(result,request.query.get('printable')=='1')))
+
+    async def diagnostic_report(self, request):
+        filename, data = await asyncio.to_thread(diagnostics.build_report, self.core, self.store)
+        return web.Response(body=data, content_type='application/zip', headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+
+    async def recent_errors(self, request):
+        return web.json_response({'errors': [dict(e, text=e['text'][:600]) for e in reversed(diagnostics.snapshot_errors())][:20]})
 
     async def health(self, request):
         return web.json_response({'ok':True, 'application':'3d-printer-management','release':self.release})

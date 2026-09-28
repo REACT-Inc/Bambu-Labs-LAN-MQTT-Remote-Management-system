@@ -1,5 +1,6 @@
 import secrets
 import time
+from datetime import date
 import discord
 from discord import app_commands
 
@@ -76,6 +77,57 @@ def install(core,team):
     async def cancelreminder(i:discord.Interaction,reminder_id:str):
         with team.db:cursor=team.db.execute("UPDATE reminders SET status='cancelled' WHERE id=? AND owner=? AND guild=? AND status='pending'",(reminder_id,str(i.user.id),str(i.guild_id)))
         await i.response.send_message('Cancelled.' if cursor.rowcount else 'No pending reminder with that ID belongs to you.',ephemeral=core.ephemeral(i))
+
+    def meeting_label(meeting):
+        day=date.fromisoformat(meeting)
+        return ('Today, ' if day==team.today() else '')+day.strftime('%A %B %d').replace(' 0',' ')
+
+    async def meeting_choices(i,current):
+        return [app_commands.Choice(name=meeting_label(d.isoformat()),value=d.isoformat()) for d in team.upcoming_meetings(10)
+                if current.casefold() in (d.isoformat()+' '+meeting_label(d.isoformat())).casefold()][:25]
+
+    async def reply_attendance(i,status,meeting,reason=''):
+        # Always private: a reason for missing a meeting can be personal.
+        try:meeting=team.set_attendance(i.guild_id,i.user.id,status,meeting,reason,getattr(i.user,'display_name',str(i.user)))
+        except ValueError as exc:
+            await i.response.send_message(embed=core.card('Attendance not saved',str(exc),core.RED),ephemeral=True);return
+        if status=='attending':text=f"✅ You're marked as **attending** the meeting on **{meeting_label(meeting)}**."
+        else:text=f"❌ You're marked as **not attending** the meeting on **{meeting_label(meeting)}**."+(f"\nReason: {core.safe(reason)}" if reason else '')
+        other='/notattending' if status=='attending' else '/attending'
+        await i.response.send_message(embed=core.card('Meeting attendance',text+f'\nChanged your mind? Use `{other}` for the same date.',core.GREEN if status=='attending' else core.YELLOW),ephemeral=True)
+
+    @bot.tree.command(name='attending',description="Say you'll be at the next meeting (or a chosen meeting date)")
+    @app_commands.guild_only()
+    @app_commands.describe(meeting='Meeting date; leave blank for the next meeting')
+    async def attending(i:discord.Interaction,meeting:str=''):
+        await reply_attendance(i,'attending',meeting)
+    attending.autocomplete('meeting')(meeting_choices)
+
+    @bot.tree.command(name='notattending',description="Say you won't be at the next meeting (or a chosen meeting date)")
+    @app_commands.guild_only()
+    @app_commands.describe(reason='Optional; only admins see it',meeting='Meeting date; leave blank for the next meeting')
+    async def notattending(i:discord.Interaction,reason:app_commands.Range[str,0,300]='',meeting:str=''):
+        await reply_attendance(i,'not_attending',meeting,reason)
+    notattending.autocomplete('meeting')(meeting_choices)
+
+    @bot.tree.command(name='attendance',description='Who is and isn\'t coming to the next meeting (or a chosen date)')
+    @app_commands.guild_only()
+    @app_commands.describe(meeting='Meeting date; leave blank for the next meeting')
+    async def attendance(i:discord.Interaction,meeting:str=''):
+        try:meeting=team.meeting_date(meeting)
+        except ValueError as exc:
+            await i.response.send_message(embed=core.card('Attendance',str(exc),core.RED),ephemeral=True);return
+        info=team.attendance(i.guild_id,[meeting])[0];admin_view=permitted(i)
+        def who(r):
+            reason=f" — {core.safe(r['reason'])}" if admin_view and r['reason'] else ''
+            return f"<@{r['member']}>{reason}"
+        coming=[who(r) for r in info['replies'] if r['status']=='attending']
+        away=[who(r) for r in info['replies'] if r['status']=='not_attending']
+        lines=[f"**Attending ({len(coming)})**",'\n'.join(coming) or '—','',f"**Not attending ({len(away)})**",'\n'.join(away) or '—']
+        if info['no_reply']:lines+=['',f"**No reply yet ({len(info['no_reply'])})**",' '.join(f'<@{m}>' for m in info['no_reply'])]
+        await i.response.send_message(embed=core.card(f'🗓️ Meeting attendance · {meeting_label(meeting)}','\n'.join(lines)[:4000]),
+            ephemeral=True,allowed_mentions=discord.AllowedMentions.none())
+    attendance.autocomplete('meeting')(meeting_choices)
 
     for cmd,restore in [('archive',False),('unarchive',True)]:
         def make(restore):

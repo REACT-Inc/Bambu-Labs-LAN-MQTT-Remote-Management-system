@@ -1,6 +1,6 @@
 # Discord commands and permissions
 
-Every slash command the bot registers, who can run it **by default**, and what else it needs. Administrators can change who can run each command in the dashboard under **Settings → Discord command permissions**. This list reflects the code on the `beta-v1.1` branch. `tests/test_commands_doc.py` fails if a command is added, removed, or changes permission level without this file being updated.
+Every slash command the bot registers, who can run it **by default**, and what else it needs. Administrators can change who can run each command in the dashboard under **Settings → Discord command permissions**. `tests/test_commands_doc.py` fails if a command is added, removed, or changes permission level without this file being updated.
 
 ## Who can run what
 
@@ -35,7 +35,7 @@ The tables below show the **default** level of each command.
 
 **Other rules for every command:**
 - Commands are refused while a management software update is being installed.
-- Replies are **public** in the channel where the command was run. `/dm`, `/publiccommands`, `/assign report` and `/meeting report assign` always reply privately. "Not allowed" replies follow the same rule.
+- Replies are **public** in the channel where the command was run. `/dm`, `/publiccommands`, `/assign report`, `/meeting report assign`, `/diagnostics`, `/reportissue`, `/attending`, `/notattending` and `/attendance` always reply privately. "Not allowed" replies follow the same rule.
 
 Parameters marked `?` are optional. `name?` is a printer name, with autocomplete. When it's left out, the bot shows printer selection buttons.
 
@@ -60,6 +60,9 @@ Parameters marked `?` are optional. `name?` is a printer name, with autocomplete
 | `/remindme` | `minutes` `text` | DM yourself a reminder later | Your DMs must be open to the bot |
 | `/reminders` | | Your reminders and their delivery status | Only shows your own |
 | `/cancelreminder` | `reminder_id` | Cancel a pending reminder | Only your own |
+| `/attending` | `meeting?` | Mark yourself as attending the next meeting, or a chosen meeting date | Private reply. Meetings are the practice days. See [Team tools](team-tools.md#meeting-attendance) |
+| `/notattending` | `reason?` `meeting?` | Mark yourself as not attending | Private reply. Only admins see the reason. You're skipped when that day's report writer is picked |
+| `/attendance` | `meeting?` | Who is attending, not attending, and hasn't replied | Private reply. Reasons shown to admins only |
 
 ### Printer actions and queue (Everyone, with confirmation)
 
@@ -103,6 +106,8 @@ Every command in this table shows a confirmation card first. Only the person who
 | Command | Parameters | What it does | Notes / limits |
 |---|---|---|---|
 | `/adminhelp` | | Admin command guide | |
+| `/diagnostics` | | Download a diagnostic ZIP (logs, recent errors, printer status) | Private reply. Secrets are removed. See [Troubleshooting](troubleshooting.md) |
+| `/reportissue` | `title` `description` | Send a problem report to the developers as a GitHub issue | Private reply. Needs a GitHub token set in the dashboard |
 | `/setnotificationchannel` | | Send printer notifications to the current channel | |
 | `/setcommandschannel` | | Set the main commands channel | |
 | `/publiccommands` | `minutes?` | Explain the reply-visibility policy | Private reply. `minutes` is left over from an older version and is ignored |

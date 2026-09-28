@@ -4,6 +4,11 @@ if [ "$(id -u)" -ne 0 ]; then
   echo 'Run this installer with sudo bash install.sh'; exit 1
 fi
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# Distribution detection and package installation (Raspberry Pi OS, Ubuntu, Debian, Fedora, Arch, openSUSE).
+. "$SOURCE_DIR/platform.sh"
+pm_detect_platform
+echo "Installing on $PM_OS_NAME (package manager: $PM_PKG)."
+pm_check_systemd
 APP_DIR=/opt/3d-printer-management
 DATA_DIR=/var/lib/3d-printer-management
 CONFIG_DIR=/etc/3d-printer-management
@@ -17,13 +22,18 @@ if [ -z "$LISTEN_IP" ] && command -v tailscale >/dev/null; then
   LISTEN_IP="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
 fi
 if [ -z "$LISTEN_IP" ]; then
-  echo 'Tailscale is not connected. Connect it first, or explicitly set PM_LISTEN_IP to the Pi LAN IP.'
-  echo 'Example: sudo PM_LISTEN_IP=192.168.1.50 bash install.sh'
+  # The dashboard never listens on every interface by default: choose Tailscale or one address explicitly.
+  SUGGESTED_IP="$(pm_suggest_ip)"
+  echo 'Choose which address the dashboard listens on (it always listens on 127.0.0.1 too):'
+  echo '  - Connect Tailscale and run the installer again (recommended), or'
+  echo "  - Set PM_LISTEN_IP to this computer's LAN address, for example:"
+  echo "      sudo PM_LISTEN_IP=${SUGGESTED_IP:-192.168.1.50} bash install.sh"
+  echo '  - Or PM_LISTEN_IP=127.0.0.1 to allow access from this computer only.'
   exit 1
 fi
-apt-get update
-apt-get install -y python3 python3-venv ffmpeg sudo
-id printermanager >/dev/null 2>&1 || useradd --system --home-dir "$DATA_DIR" --shell /usr/sbin/nologin printermanager
+pm_install_packages
+pm_check_python
+id printermanager >/dev/null 2>&1 || useradd --system --home-dir "$DATA_DIR" --shell "$(pm_nologin)" printermanager
 install -d -m 750 -o printermanager -g printermanager "$DATA_DIR"
 install -d -m 750 -o root -g printermanager "$CONFIG_DIR"
 install -d -m 700 "$BACKUP_DIR"
@@ -35,7 +45,7 @@ fi
 if [ -f /etc/systemd/system/3d-printer-management.service ]; then cp -p /etc/systemd/system/3d-printer-management.service "$BACKUP_DIR/management.service"; fi
 if [ -f "$CONFIG_DIR/config.json" ]; then cp -p "$CONFIG_DIR/config.json" "$BACKUP_DIR/config.json"; fi
 install -d -m 755 "$APP_DIR"
-for file in Updater/github_updates.py Updater/version.py thermal_controls.py Updater/web_updates.py Updater/update_package.py Updater/WEB_UPDATES.md laptopManagement_Intergration/meshCentral/meshcentral_client.py swapMod/plate_swap.py swapMod/plate_swap_discord.py printer_controls.py discord_Intergration/controls_discord.py live_camera.py core.py discord_Intergration/extra_discord.py printer_files.py printer_errors.py bambu_error_catalog.json BAMBU_RESOURCE_LICENSE.txt ERROR_SOURCES.md camera_capture.py progress_notifications.py queueing.py dashboard.py discord_Intergration/discord_queue.py main.py team.py discord_Intergration/team_discord.py requirements.txt README.md laptopManagement_Intergration/LAPTOPS.md swapMod/__init__.py Updater/__init__.py discord_Intergration/__init__.py laptopManagement_Intergration/__init__.py laptopManagement_Intergration/meshCentral/__init__.py; do
+for file in configure.py diagnostics.py issue_reports.py Updater/github_updates.py Updater/version.py thermal_controls.py Updater/web_updates.py Updater/update_package.py Updater/WEB_UPDATES.md laptopManagement_Intergration/meshCentral/meshcentral_client.py swapMod/plate_swap.py swapMod/plate_swap_discord.py printer_controls.py discord_Intergration/controls_discord.py live_camera.py core.py discord_Intergration/extra_discord.py printer_files.py printer_errors.py bambu_error_catalog.json BAMBU_RESOURCE_LICENSE.txt ERROR_SOURCES.md camera_capture.py progress_notifications.py queueing.py dashboard.py discord_Intergration/discord_queue.py main.py team.py discord_Intergration/team_discord.py requirements.txt README.md laptopManagement_Intergration/LAPTOPS.md swapMod/__init__.py Updater/__init__.py discord_Intergration/__init__.py laptopManagement_Intergration/__init__.py laptopManagement_Intergration/meshCentral/__init__.py; do
   install -D -m 644 "$SOURCE_DIR/$file" "$APP_DIR/$file"
 done
 install -d "$APP_DIR/static"
@@ -123,4 +133,5 @@ for host in c['listen']:
     print(f"Open: http://{host}:{c['port']}")
 print('Use the initial password shown above, or your existing dashboard password.')
 PY
+pm_firewall_hint "$("$APP_DIR/venv/bin/python" -c "import json; print(json.load(open('/etc/3d-printer-management/config.json')).get('port',8080))")" "$LISTEN_IP"
 printf 'Backup: %s\n' "$BACKUP_DIR"

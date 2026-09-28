@@ -7,9 +7,9 @@ ROOT=Path(__file__).parents[1]
 
 
 def documented():
-    """{command: 'Everyone'|'Admin'} from the command tables in COMMANDS.md."""
+    """{command: 'Everyone'|'Admin'} from the command tables in docs/commands.md."""
     level,result=None,{}
-    for line in (ROOT/'COMMANDS.md').read_text().splitlines():
+    for line in (ROOT/'docs'/'commands.md').read_text().splitlines():
         if line.startswith('## '):level={'## Everyone':'Everyone','## Admin':'Admin'}.get(line.strip())
         match=re.match(r'\|\s*`/([a-z ]+)`\s*\|',line)
         if match and level:result[match[1]]=level
@@ -59,9 +59,9 @@ class CommandsDocTests(unittest.IsolatedAsyncioTestCase):
         finally:getattr(self,'store',None) and self.store.db.close()
         docs=documented()
         self.assertGreater(len(actual),40)
-        self.assertEqual(sorted(set(actual)-set(docs)),[],'Commands missing from COMMANDS.md')
-        self.assertEqual(sorted(set(docs)-set(actual)),[],'COMMANDS.md lists commands that no longer exist')
-        self.assertEqual({k:v for k,v in docs.items() if actual[k]!=v},{},'Permission level in COMMANDS.md is wrong')
+        self.assertEqual(sorted(set(actual)-set(docs)),[],'Commands missing from docs/commands.md')
+        self.assertEqual(sorted(set(docs)-set(actual)),[],'docs/commands.md lists commands that no longer exist')
+        self.assertEqual({k:v for k,v in docs.items() if actual[k]!=v},{},'Permission level in docs/commands.md is wrong')
 
 
 if __name__=='__main__':

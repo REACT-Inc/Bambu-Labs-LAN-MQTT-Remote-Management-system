@@ -67,6 +67,7 @@ def load_settings():
 settings = load_settings()
 public_channels = {}
 from printer_errors import describe as describe_error, errors as decode_errors
+from diagnostics import log_error
 
 def printer_error_text(name, error, data=None):
     printer = printer_config(name) or {}
@@ -202,7 +203,7 @@ def resolve_name(query):
 # every member of an authorized server; state-changing commands ask for confirmation and are logged.
 # The dashboard can override the level per command (settings.json "command_permissions").
 ADMIN_COMMANDS = {
-    'adminhelp','temperature','chamber','move','plateswap','rename','dm',
+    'adminhelp','diagnostics','reportissue','temperature','chamber','move','plateswap','rename','dm',
     'laptops','laptop','server','reboot','setnotificationchannel','setcommandschannel',
     'publiccommands','archive','unarchive','assign','meeting',
 }
@@ -366,8 +367,7 @@ class OwnedView(discord.ui.View):
                 pass
 
     async def on_error(self, interaction, error, item):
-        log.error('Button failed', exc_info=(type(error), error, error.__traceback__))
-        await private_error(interaction)
+        await private_error(interaction, log_error(log, 'Button failed', error))
 
 
 class PrinterPicker(OwnedView):
@@ -702,8 +702,8 @@ def help_embed(admin=False):
         ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move'}, 'Pause/resume/cancel, lights, temperatures, speed, fan and axis jogging.'),
         ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'View, add, start and manage jobs. Starts and changes ask for confirmation and are logged.'),
         ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
-        ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive'}, 'Channel settings, temporary public replies, printer names, DMs and archives.'),
-        ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes and personal reminders.'),
+        ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),
+        ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','attending','notattending','attendance','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes, reminders and meeting attendance.'),
         ('💻 Laptops & server', {'laptops','laptop','server','reboot'}, 'MeshCentral laptops and commands, Pi status and reboot.'),
     ]
     commands = []
@@ -747,8 +747,9 @@ async def admin_help_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=help_embed(admin=True), ephemeral=ephemeral(interaction))
 
 
-async def private_error(interaction):
-    embed = card('Something went wrong', 'The error was logged. Check the bot service log for details.', RED)
+async def private_error(interaction, error_id=None):
+    reference = f'\nError ID: `{error_id}` (an administrator can find it with /diagnostics).' if error_id else ''
+    embed = card('Something went wrong', 'The error was logged.' + reference, RED)
     try:
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, ephemeral=ephemeral(interaction))
@@ -760,8 +761,8 @@ async def private_error(interaction):
 
 @bot.tree.error
 async def command_error(interaction, error):
-    log.error('Slash command failed', exc_info=(type(error), error, error.__traceback__))
-    await private_error(interaction)
+    name = interaction.command.qualified_name if interaction.command else '?'
+    await private_error(interaction, log_error(log, f'Slash command /{name} failed', getattr(error, 'original', error)))
 
 
 async def notify(name, title, description, color, camera=False):
@@ -871,7 +872,7 @@ def connect_printer(printer):
             if not isinstance(new, dict) or not new:
                 return
             listener=globals().get('control_response_listener')
-            if listener and bot_loop and new.get('command') in ('set_fan','set_ctt','gcode_line','print_speed'):
+            if listener and bot_loop and new.get('command') in ('set_fan','set_ctt','gcode_line','print_speed','xyz_ctrl'):
                 bot_loop.call_soon_threadsafe(listener,name,dict(new))
             with data_lock:
                 current = reports.setdefault(name, {})
