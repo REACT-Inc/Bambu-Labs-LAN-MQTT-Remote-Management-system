@@ -5,6 +5,7 @@ Robotics-team helpers shared between Discord and the dashboard's **Team tools** 
 - [Team links](#team-links)
 - [Shared notes](#shared-notes)
 - [Reminders](#reminders)
+- [Meeting attendance](#meeting-attendance)
 - [Report-writer assignments and practice schedule](#report-writer-assignments-and-practice-schedule)
 - [Channel archiving](#channel-archiving)
 - [Direct messages](#direct-messages)
@@ -37,10 +38,26 @@ The dashboard can view, add and delete notes for every allowed server.
 - **Uncertain deliveries:** if the service crashes while delivering, the reminder is marked for review rather than resent, because the app can't know whether Discord accepted it.
 - **From the dashboard:** admins can schedule a reminder for any Discord user ID and see all stored reminders.
 
+## Meeting attendance
+
+Meetings are on the same days as the practice/report schedule (the **Practice days** and **Time zone** in Team tools). Attendance works even if automatic report announcements are off, but the practice days must be set.
+
+| Command | Who | Effect |
+|---|---|---|
+| `/attending meeting?` | everyone | Mark yourself as attending |
+| `/notattending reason? meeting?` | everyone | Mark yourself as not attending, with an optional reason (up to 300 characters) |
+| `/attendance meeting?` | everyone | Who is attending, not attending, and which roster members haven't replied |
+
+- **Which meeting:** without `meeting:`, the reply is for the **next meeting**. On a meeting day that's **today**; otherwise it's the next practice day. Discord suggests the upcoming dates, or you can type one as `YYYY-MM-DD` (up to 120 days ahead).
+- **Changing your mind:** run the other command for the same date. Your latest reply replaces the earlier one.
+- **Privacy:** replies are private (only you see them). Reasons are shown only to admins, in `/attendance` and the dashboard.
+- **Report writers:** people marked **not attending** today are skipped when a report writer is picked from the roster. If everyone on the roster said they're not coming, the whole roster is used.
+- **Dashboard:** **Team tools → Meeting attendance** lists the next six meetings for the chosen server, and admins can set or clear someone's reply by Discord user ID. Every change is recorded in the Activity feed.
+
 ## Report-writer assignments and practice schedule
 
 - **Assign a writer:** `/assign report` (or `/meeting report assign`) picks someone to write the practice/meeting report. Admins only; the reply is private.
-  - **`member:`** assigns that person. Otherwise the bot picks from the **roster**, **least-used members first**, so everyone gets a turn before anyone repeats.
+  - **`member:`** assigns that person. Otherwise the bot picks from the **roster**, **least-used members first**, so everyone gets a turn before anyone repeats. People who said they're [not attending](#meeting-attendance) today are skipped.
   - **`announce:true`** also posts the assignment in the practice channel. Without it, the assignment is only saved (no post, no DM).
 - **Automatic practice schedule** (dashboard **Team tools → Practice & report assignments**):
 

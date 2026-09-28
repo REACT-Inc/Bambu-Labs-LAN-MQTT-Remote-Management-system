@@ -2,6 +2,11 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Added
+- **Meeting attendance.** `/attending` and `/notattending` (with an optional reason) mark whether you'll be at the next meeting, or a chosen meeting date. Meetings are on the practice/report days. `/attendance` shows who's coming, and the dashboard's **Team tools** tab lists the next six meetings. People who aren't attending are skipped when a report writer is picked.
+
 ## 1.2.0-beta.1
 
 ### Changed

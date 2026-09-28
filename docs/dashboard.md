@@ -69,6 +69,7 @@ Settings and records shared with Discord. See [Team tools](team-tools.md).
   - schedule settings: time zone, days, time, channel, role and roster
   - team links used by `/ftc`, `/website` and `/management`
   - **Assign now**, and the assignment history
+- **Meeting attendance:** who is attending, not attending or hasn't replied for the next six meetings (per server), with reasons. You can set or clear someone's reply by user ID.
 - **Remember this:** shared notes per server.
 - **Reminders:** schedule a Discord DM reminder for any user ID, and see delivery status.
 - **Channel archive:** archive and restore text channels.

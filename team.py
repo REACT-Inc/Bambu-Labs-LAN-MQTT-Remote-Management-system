@@ -8,7 +8,7 @@ import platform
 import secrets
 import shutil
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -30,6 +30,7 @@ class Team:
           CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY,guild TEXT,owner TEXT,title TEXT,body TEXT,created REAL);
           CREATE TABLE IF NOT EXISTS reminders(id TEXT PRIMARY KEY,guild TEXT,owner TEXT,body TEXT,due REAL,status TEXT DEFAULT 'pending',error TEXT DEFAULT '');
           CREATE TABLE IF NOT EXISTS assignments(id TEXT PRIMARY KEY,occurrence TEXT UNIQUE,guild TEXT,channel TEXT,member TEXT,created REAL,status TEXT DEFAULT 'pending',error TEXT DEFAULT '');
+          CREATE TABLE IF NOT EXISTS attendance(guild TEXT,meeting TEXT,member TEXT,name TEXT DEFAULT '',status TEXT,reason TEXT DEFAULT '',updated REAL,PRIMARY KEY(guild,meeting,member));
           CREATE TABLE IF NOT EXISTS archives(channel TEXT PRIMARY KEY,guild TEXT,original TEXT,status TEXT DEFAULT 'pending');
           CREATE TABLE IF NOT EXISTS devices(id TEXT PRIMARY KEY,name TEXT,token_hash TEXT,last_seen REAL DEFAULT 0,report TEXT DEFAULT '{}');
           CREATE TABLE IF NOT EXISTS device_tasks(id TEXT PRIMARY KEY,device TEXT,action TEXT,status TEXT DEFAULT 'pending',created REAL,result TEXT DEFAULT '');
@@ -92,6 +93,67 @@ class Team:
         with self.db:self.db.execute('INSERT INTO reminders(id,guild,owner,body,due) VALUES(?,?,?,?,?)',(reminder_id,str(guild),str(owner),body,time.time()+minutes*60))
         return reminder_id
 
+    def today(self):
+        return datetime.now(ZoneInfo(self.config.get('timezone') or 'America/New_York')).date()
+
+    def upcoming_meetings(self,count=6,start=None):
+        """Meeting dates are the practice/report days. Today counts while it is a meeting day."""
+        days=self.config.get('practice_days') or []
+        if not days:return []
+        day=start or self.today();found=[]
+        while len(found)<count:
+            if day.weekday() in days:found.append(day)
+            day+=timedelta(days=1)
+        return found
+
+    def meeting_date(self,value=''):
+        """Resolve an optional YYYY-MM-DD (or 'next'/'today') to a meeting date string."""
+        if not self.config.get('practice_days'):
+            raise ValueError('No meeting days are set up yet. An administrator can set them in the dashboard under Team tools.')
+        value=str(value or '').strip().lower()
+        if value in ('','next','today'):return self.upcoming_meetings(1)[0].isoformat()
+        try:day=date.fromisoformat(value)
+        except ValueError:raise ValueError('Use a date like 2026-10-05, or leave it blank for the next meeting.') from None
+        if day<self.today():raise ValueError('That meeting has already happened.')
+        if day>self.today()+timedelta(days=120):raise ValueError('You can only reply for meetings in the next 120 days.')
+        if day.weekday() not in self.config['practice_days']:
+            names=', '.join(d.strftime('%a %b %d') for d in self.upcoming_meetings(3))
+            raise ValueError(f'There is no meeting on {day.strftime("%A %B %d")}. Next meetings: {names}.')
+        return day.isoformat()
+
+    def set_attendance(self,guild,member,status,meeting='',reason='',name='',source='Discord'):
+        if status not in ('attending','not_attending'):raise ValueError('Unknown attendance status.')
+        try:member=str(int(member))
+        except (TypeError,ValueError):member='0'
+        if int(member)<=0:raise ValueError('Enter a valid Discord user ID.')
+        reason=str(reason or '').strip()
+        if len(reason)>300:raise ValueError('Keep the reason under 300 characters.')
+        meeting=self.meeting_date(meeting)
+        # Upsert: a new reply replaces the old one; the display name is kept when the dashboard doesn't know it.
+        with self.db:self.db.execute('''INSERT INTO attendance(guild,meeting,member,name,status,reason,updated) VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(guild,meeting,member) DO UPDATE SET name=COALESCE(NULLIF(excluded.name,''),attendance.name),
+            status=excluded.status,reason=excluded.reason,updated=excluded.updated''',
+            (str(guild),meeting,member,str(name or '')[:100],status,reason,time.time()))
+        self.store.event('Team','Meeting attendance',f"{source}: Discord user {member} {'attending' if status=='attending' else 'not attending'} on {meeting}")
+        return meeting
+
+    def clear_attendance(self,guild,member,meeting):
+        with self.db:self.db.execute('DELETE FROM attendance WHERE guild=? AND meeting=? AND member=?',(str(guild),str(meeting),str(member)))
+
+    def attendance(self,guild=None,meetings=None):
+        """Replies per meeting date, plus roster members who haven't replied."""
+        meetings=[str(m) for m in (meetings or [d.isoformat() for d in self.upcoming_meetings()])]
+        result=[]
+        for meeting in meetings:
+            query='SELECT * FROM attendance WHERE meeting=?'+(' AND guild=?' if guild else '')+' ORDER BY updated'
+            rows=[dict(r) for r in self.db.execute(query,(meeting,str(guild)) if guild else (meeting,))]
+            replied={r['member'] for r in rows}
+            result.append(dict(meeting=meeting,replies=rows,no_reply=[m for m in self.config.get('roster',[]) if m not in replied]))
+        return result
+
+    def absent(self,guild,meeting):
+        return {r[0] for r in self.db.execute("SELECT member FROM attendance WHERE guild=? AND meeting=? AND status='not_attending'",(str(guild),str(meeting)))}
+
     async def channel(self,cid):
         if not self.core.bot.is_ready():raise ValueError('Discord is not connected.')
         ch=self.core.bot.get_channel(int(cid)) or await self.core.bot.fetch_channel(int(cid))
@@ -108,6 +170,9 @@ class Team:
         if old:return dict(old)
         # Least-used pool, then random choice: everyone gets a turn before repeats.
         if member_id is None:
+            # Skip people who said they won't be at today's meeting, unless that is everyone.
+            away=self.absent(ch.guild.id,self.today().isoformat())
+            roster=[uid for uid in roster if uid not in away] or roster
             counts={uid:self.db.execute("SELECT COUNT(*) FROM assignments WHERE guild=? AND member=? AND status IN ('sent','sending','pending','needs_review','assigned_private')",(str(ch.guild.id),uid)).fetchone()[0] for uid in roster}
             member=secrets.choice([uid for uid,count in counts.items() if count==min(counts.values())])
         else:member=str(int(member_id))
@@ -241,7 +306,7 @@ class Team:
             await asyncio.sleep(20)
 
     async def web_state(self,request):
-        return web.json_response(dict(config=self.config,server=self.server_status(),notes=self.notes(),
+        return web.json_response(dict(config=self.config,server=self.server_status(),notes=self.notes(),attendance=self.attendance(),
             reminders=[dict(r) for r in self.db.execute('SELECT * FROM reminders ORDER BY due DESC LIMIT 100')],
             assignments=[dict(r) for r in self.db.execute('SELECT * FROM assignments ORDER BY created DESC LIMIT 100')],
             archives=[dict(channel=r['channel'],guild=r['guild'],status=r['status']) for r in self.db.execute('SELECT * FROM archives')],
@@ -256,6 +321,11 @@ class Team:
             guild=str(data.get('guild',''))
             if not self.ids_allowed(guild):raise ValueError('Choose an allowed server.')
             result={'id':self.remember(guild,'web administrator',str(data.get('title','')),str(data.get('body','')))}
+        elif action=='attendance':
+            guild=str(data.get('guild',''))
+            if not self.ids_allowed(guild):raise ValueError('Choose an allowed server.')
+            if data.get('status')=='clear':self.clear_attendance(guild,str(data.get('user_id','')),self.meeting_date(data.get('meeting','')))
+            else:result={'meeting':self.set_attendance(guild,data.get('user_id','0'),str(data.get('status','')),data.get('meeting',''),data.get('reason',''),source='Dashboard')}
         elif action=='forget':
             with self.db:self.db.execute('DELETE FROM notes WHERE id=?',(str(data.get('id')),))
         elif action=='remind':
