@@ -90,11 +90,11 @@ def install(core,team):
         # Always private: a reason for missing a meeting can be personal.
         try:meeting=team.set_attendance(i.guild_id,i.user.id,status,meeting,reason,getattr(i.user,'display_name',str(i.user)))
         except ValueError as exc:
-            await i.response.send_message(embed=core.card('Attendance not saved',str(exc),core.RED),ephemeral=True);return
+            await i.response.send_message(embed=core.card('Attendance not saved',str(exc),core.RED),ephemeral=core.ephemeral(i));return
         if status=='attending':text=f"✅ You're marked as **attending** the meeting on **{meeting_label(meeting)}**."
         else:text=f"❌ You're marked as **not attending** the meeting on **{meeting_label(meeting)}**."+(f"\nReason: {core.safe(reason)}" if reason else '')
         other='/notattending' if status=='attending' else '/attending'
-        await i.response.send_message(embed=core.card('Meeting attendance',text+f'\nChanged your mind? Use `{other}` for the same date.',core.GREEN if status=='attending' else core.YELLOW),ephemeral=True)
+        await i.response.send_message(embed=core.card('Meeting attendance',text+f'\nChanged your mind? Use `{other}` for the same date.',core.GREEN if status=='attending' else core.YELLOW),ephemeral=core.ephemeral(i))
 
     @bot.tree.command(name='attending',description="Say you'll be at the next meeting (or a chosen meeting date)")
     @app_commands.guild_only()

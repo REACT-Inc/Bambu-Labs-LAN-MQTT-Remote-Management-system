@@ -91,7 +91,7 @@ def install(core,store):
     @app_commands.guild_only()
     async def publiccommands(i:discord.Interaction,minutes:app_commands.Range[int,0,60]=2):
         if not await core.require(i,'publiccommands'):return
-        await i.response.send_message('Commands now reply publicly in every server channel. This command, report assignment and DM workflows remain private; a temporary override is no longer needed.',ephemeral=True)
+        await i.response.send_message((f'Replies are public in <#{core.commands_channel()}> and private in every other channel. ' if core.commands_channel() else 'No commands channel is set, so every reply is private. Run /setcommandschannel in the channel where replies should be public. ')+'DMs, diagnostics, problem reports, report assignment and attendance replies are always private.',ephemeral=True)
 
     async def run_action(i,action,name):
         kind, _, folder = action.partition(':')
