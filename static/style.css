@@ -171,6 +171,11 @@ button.toggle[aria-pressed="true"]{background:#3a3523;border-color:#665c36;color
 .pc-cam{aspect-ratio:16/9;background:#0b0f0d;border-radius:10px;overflow:hidden}
 .pc-cam img{width:100%;height:100%;object-fit:cover;display:block}
 @keyframes working{50%{opacity:.5}}
-.icon-btn.busy,button.toggle.busy{background:#4a3b10;border-color:#d9a400;color:var(--yellow);animation:working .9s ease-in-out infinite}
+/* Requested, waiting for the printer: purple, a colour no result state uses (light on is amber, active is green). */
+:root{--pending:#b89bff}
+@keyframes pending{0%,100%{box-shadow:0 0 0 0 #b89bff00}50%{box-shadow:0 0 0 4px #b89bff40}}
+button.pending,button.pending[aria-pressed],.segmented button.pending{background:#2b2440;border-color:var(--pending);color:#ddd2ff;animation:working .9s ease-in-out infinite,pending .9s ease-in-out infinite}
+.tile.pending,.fan-row.pending{border-color:var(--pending);animation:pending .9s ease-in-out infinite}
+.tile.pending .tile-target,.fan-row.pending small{color:#ddd2ff}
 /* The drawer body scrolls; its sections must keep their size instead of shrinking (the camera collapsed to 0). */
 .drawer-body>*{flex-shrink:0}

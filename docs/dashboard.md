@@ -22,7 +22,7 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
   - **Filaments:** small colour swatches for the loaded AMS slots.
   - **Camera:** printers with a camera show an image that refreshes every few seconds while the Overview tab is on screen.
   - **Buttons:** only the ones that apply right now: **Pause** and **Stop** (both ask for confirmation), **Resume**, the chamber **light** 💡, and **N queued →** (opens that printer's queue).
-  - **Light feedback:** the light button turns amber and pulses as soon as you click it, until the printer reports the new state. If the printer doesn't confirm within about 10 seconds, it goes back and a message says so.
+  - **Waiting for the printer:** a button you've clicked **pulses purple** until the printer reports the result, then shows the real state. For example, the light goes solid amber when it's on. Purple is only used for "waiting". If the printer doesn't report the change in time (10 s for the light, 20 s for other controls), the button goes back and a message says so.
   - **Opening a printer:** click anywhere else on the card (or focus it and press Enter or Space).
 - **+ Queue a print:** at the top right. See [Print queue](print-queue.md).
 - **Demo mode:** a **DEMO MODE** badge shows when no real printers are being controlled.
@@ -42,7 +42,7 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 | Filament | AMS units (humidity, temperature) and each slot's material, colour and remaining %, plus the external spool |
 | More: files, snapshot, Swapmod | Download the printer's file listing, take a single camera snapshot, and Swapmod A1m kit settings (see [Swapmod](swapmod.md)) |
 
-**Only Pause and Stop ask for confirmation.** Temperatures, speed, fans, light and resume apply straight away. The server still enforces the limits and safety checks (see [Printer controls](printer-controls.md)). Movement stays locked until you tick the safety checkbox.
+**Only Pause and Stop ask for confirmation.** Every control, including temperature tiles, speed, fan rows and movement buttons, pulses purple while it waits for the printer. Temperatures, speed, fans, light and resume apply straight away. The server still enforces the limits and safety checks (see [Printer controls](printer-controls.md)). Movement stays locked until you tick the safety checkbox.
 
 **Closing:** click outside the panel, press **Esc**, or use ✕. Closing it also stops live view. Every other popup closes the same way. Clicking outside a confirmation only cancels that confirmation.
 

@@ -21,7 +21,7 @@ In demo mode, controls only change the simulated data.
 | Pause | **Pause**, then confirm | `/pause` |
 | Resume | **Resume** (no confirmation) | `/resume` |
 | Stop (cancel the print) | **Stop**, then confirm | `/stop`, then confirm |
-| Chamber light | 💡 button (pulses until the printer reports the change) | `/lighton`, `/lightoff` |
+| Chamber light | 💡 button (pulses purple until the printer reports the change, then amber when on) | `/lighton`, `/lightoff` |
 
 **Stop and the queue:**
 - **Before the file was sent** (the job is still staging): stopping cancels the job.

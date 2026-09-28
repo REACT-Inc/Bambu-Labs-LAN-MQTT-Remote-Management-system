@@ -20,16 +20,30 @@ function notice(text){$('notice').textContent=text;$('notice').hidden=false;setT
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.'}[name];}
 function printerLabel(name){return state?.printers.find(p=>p.name===name)?.display_name||name;}
 function statusClass(s,online=true){return !online||['FAILED','failed','needs_review'].includes(s)?'bad':['PAUSE','paused','PREPARE','staging','awaiting_start'].includes(s)?'warn':['RUNNING','printing'].includes(s)?'blue':'';}
-// Light: show the requested state (pulsing) straight away, until the printer reports it or 10 s pass.
-const lightPending={};
-function lightShown(p){const reported=((p.data||{}).lights_report||[]).find(l=>l.node==='chamber_light')?.mode==='on',pend=lightPending[p.name];
- if(pend&&(reported===pend.on||Date.now()>pend.until)){if(reported!==pend.on)notice(printerLabel(p.name)+' did not confirm the light change. Check the printer.');delete lightPending[p.name];}
- return lightPending[p.name]?{on:lightPending[p.name].on,busy:true}:{on:reported,busy:false};}
+// Requested but not yet confirmed: the button pulses purple, a colour no result state uses, until the
+// printer reports the result (then it shows the real state, e.g. amber for light on) or the time runs out.
+const pending={};
+function setPending(key,ms,done,label,extra={}){pending[key]={until:Date.now()+ms,done,label,...extra};}
+function isPending(key,p){const x=pending[key];if(!x)return false;
+ if(p&&x.done(p)){delete pending[key];return false;}
+ if(Date.now()>x.until){delete pending[key];if(x.label)notice(x.label+': the printer hasn\'t reported the change. Check the printer.');return false;}
+ return true;}
+function pollSoon(){for(const ms of [1500,4000,7000,10500,15000])setTimeout(refresh,ms);}
+function reportedLight(p){return ((p.data||{}).lights_report||[]).find(l=>l.node==='chamber_light')?.mode==='on';}
+function lightShown(p){const key='light|'+p.name;return isPending(key,p)?{on:pending[key].on,busy:true}:{on:reportedLight(p),busy:false};}
 async function toggleLight(name){const p=state.printers.find(x=>x.name===name),on=!lightShown(p).on;
- lightPending[name]={on,until:Date.now()+10000};render();
- try{await api('printers/'+encodeURIComponent(name)+'/'+(on?'lighton':'lightoff'),{});}catch(e){delete lightPending[name];notice(e.message);render();return;}
- for(const ms of [1500,4000,7000,10500])setTimeout(refresh,ms);}
-function confirmPause(name){confirmAction('Pause this print?',printerLabel(name)+' — the print pauses until you resume it.','I want to pause this print.',()=>api('printers/'+encodeURIComponent(name)+'/pause',{}));}
+ setPending('light|'+name,10000,q=>reportedLight(q)===on,printerLabel(name)+' light',{on});render();
+ try{await api('printers/'+encodeURIComponent(name)+'/'+(on?'lighton':'lightoff'),{});}catch(e){delete pending['light|'+name];notice(e.message);render();return;}
+ pollSoon();}
+// Pause / resume / stop pulse until the printer's state changes.
+const ACTIVE=['RUNNING','PAUSE','PREPARE'];
+const PRINT_DONE={pause:p=>p.state==='PAUSE'||!ACTIVE.includes(p.state),resume:p=>p.state==='RUNNING'||p.state==='PREPARE'||!ACTIVE.includes(p.state),stop:p=>!ACTIVE.includes(p.state)};
+async function printAction(name,action,body={}){setPending(action+'|'+name,20000,PRINT_DONE[action],printerLabel(name)+' '+action);render();
+ try{await api('printers/'+encodeURIComponent(name)+'/'+action,body);}catch(e){delete pending[action+'|'+name];render();throw e;}
+ pollSoon();}
+function pendingClass(action,p){return isPending(action+'|'+p.name,p)?' pending':'';}
+function confirmPause(name){confirmAction('Pause this print?',printerLabel(name)+' — the print pauses until you resume it.','I want to pause this print.',()=>printAction(name,'pause'));}
+function confirmStop(name){confirmAction('Stop this print?',printerLabel(name)+' — this cancels the current job.','I want to cancel this print.',()=>printAction(name,'stop',{confirmed:true}));}
 function actionButton(action,label,extra='',cls=''){return `<button class="${cls}" data-action="${action}" ${extra}>${label}</button>`;}
 function render(){
  const p=state.printers,j=state.jobs;
@@ -79,10 +93,10 @@ function printerCard(x){
  const temp=(now,target)=>`<b>${round(now)}°</b>${Number(target)?`<em>→ ${round(target)}°</em>`:''}`;
  const lt=lightShown(x),light=lt.on;
  let actions='';
- if(x.state==='RUNNING'||x.state==='PREPARE')actions+=actionButton('pause','⏸ Pause',n);
- if(x.state==='PAUSE')actions+=actionButton('resume','▶ Resume',n,'primary');
- if(active)actions+=actionButton('stop','■ Stop',n,'danger');
- actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':'')+(lt.busy?' busy':''));
+ if(x.state==='RUNNING'||x.state==='PREPARE')actions+=actionButton('pause','⏸ Pause',n,pendingClass('pause',x));
+ if(x.state==='PAUSE')actions+=actionButton('resume','▶ Resume',n,'primary'+pendingClass('resume',x));
+ if(active)actions+=actionButton('stop','■ Stop',n,'danger'+pendingClass('stop',x));
+ actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':'')+(lt.busy?' pending':''));
  return `<article class="printer-card${x.connected?'':' offline'}" ${n} tabindex="0" role="button" aria-label="Open ${esc(x.display_name||x.name)}">
 <div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${statusClass(x.state,x.connected)}">${esc(x.connected?x.state:'OFFLINE')}</span></div>
 ${x.has_camera?`<div class="pc-cam"><img data-cam="${esc(x.name)}" alt="${esc(x.display_name||x.name)} camera"${camThumbs[x.name]?` src="${camThumbs[x.name]}"`:' hidden'}></div>`:''}
@@ -124,14 +138,14 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  if(action==='printerQueue'){$('queueFilter').value=printer;tab('queue');renderJobs();return;}
  if(action==='pause'){confirmPause(printer);return;}
  if(action==='lighton'||action==='lightoff'){await toggleLight(printer);return;}
- if(action==='resume'){await api('printers/'+encodeURIComponent(printer)+'/resume',{});notice('Command submitted. Waiting for printer telemetry.');}
- if(action==='stop'){confirmAction('Stop this print?',printer+' — this cancels the current job.','I want to cancel this print.',()=>api('printers/'+encodeURIComponent(printer)+'/stop',{confirmed:true}));return;}
+ if(action==='resume'){await printAction(printer,'resume');return;}
+ if(action==='stop'){confirmStop(printer);return;}
  if(action==='swapapprove'){openSwapApproval(job);return;}
  if(action==='startOverride'){const j=state.jobs.find(x=>x.id===job);confirmAction('Start ignoring reported error?',`${j.label} on ${printerLabel(j.printer)}. This bypasses the management error check and allows FAILED state. It does not clear the printer error or override firmware protections.`,'I inspected the printer, cleared the plate, and verified the material and sliced file. Start despite the reported error.',()=>api('jobs/'+job+'/start',{confirmed:true,override_error:true}));return;}
  if(action==='start'){const j=state.jobs.find(x=>x.id===job);confirmAction('Start next print?',`${j.label} on ${printerLabel(j.printer)}. Plate ${j.options.plate}. ${j.options.use_ams?'AMS mapping: '+j.options.ams_mapping.join(', '):'External spool'}.`,'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',()=>api('jobs/'+job+'/start',{confirmed:true}));return;}
  if(action==='resolve'){confirmAction('Record the verified outcome?',`Mark ${job} as ${outcome}. This records a result; it does not send any command to the printer.`,'I inspected the physical printer and verified this outcome.',()=>api('jobs/'+job+'/resolve',{confirmed:true,outcome}));return;}
  if(action==='remove'){confirmAction('Remove this queued job?',job,'Remove this waiting job from the queue.',()=>api('jobs/'+job+'/remove',{}));return;}
- if(['up','down','reprint'].includes(action)){await api('jobs/'+job+'/'+action,{});if(action==='reprint')notice('A new copy was added to the queue.');}
+ if(['up','down','reprint'].includes(action)){b.classList.add('pending');await api('jobs/'+job+'/'+action,{});if(action==='reprint')notice('A new copy was added to the queue.');}
  await refresh();
  }catch(e){notice(e.message);}});
 $('takeSnapshot').onclick=async()=>{$('takeSnapshot').disabled=true;$('cameraMessage').textContent='Requesting snapshot…';try{const r=await fetch('/api/camera/'+encodeURIComponent(selectedPrinter));if(!r.ok){const data=await r.json();throw new Error(data.error||'Camera unavailable.');}if(cameraUrl)URL.revokeObjectURL(cameraUrl);cameraUrl=URL.createObjectURL(await r.blob());$('cameraImage').src=cameraUrl;$('cameraImage').hidden=false;$('cameraMessage').textContent='Snapshot captured '+new Date().toLocaleTimeString();}catch(e){$('cameraMessage').textContent=e.message;}finally{$('takeSnapshot').disabled=false;}};

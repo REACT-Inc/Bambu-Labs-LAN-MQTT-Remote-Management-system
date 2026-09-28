@@ -62,7 +62,9 @@ function renderTiles(p){const box=$('tempTiles'),defs=tempDefs(p);
  if(box.dataset.printer!==p.name||box.children.length!==defs.length){box.dataset.printer=p.name;editingTile=null;
   box.innerHTML=defs.map(t=>`<div class="tile" data-kind="${t.kind}"><button type="button" class="tile-main" data-edit="${t.kind}" aria-label="Set ${t.label} temperature"><span class="tile-icon">${t.icon}</span><span class="tile-label">${t.label}</span><strong class="tile-now">—</strong><small class="tile-target">→ —</small></button><form class="tile-edit" hidden><input type="number" inputmode="numeric" min="0" max="${t.max}" step="1" aria-label="${t.label} target °C"><div class="tile-edit-actions"><button type="submit" class="primary">Set</button><button type="button" data-cancel>✕</button></div><small>${esc(t.hint)} Max ${t.max} °C.</small></form></div>`).join('');}
  for(const t of defs){const tile=box.querySelector(`[data-kind="${t.kind}"]`);tile.querySelector('.tile-now').textContent=fmtTemp(t.now);
-  const target=num(t.target);tile.querySelector('.tile-target').textContent=target?'→ '+Math.round(target)+'°':'Off';tile.classList.toggle('heating',!!target);}
+  const target=num(t.target),key='temp|'+p.name+'|'+t.kind,waiting=isPending(key,p);
+  tile.querySelector('.tile-target').textContent=waiting?'Setting '+(pending[key].value?pending[key].value+'°':'off')+'…':target?'→ '+Math.round(target)+'°':'Off';
+  tile.classList.toggle('heating',!!target&&!waiting);tile.classList.toggle('pending',waiting);}
 }
 $('tempTiles').addEventListener('click',e=>{const edit=e.target.closest('[data-edit]'),cancel=e.target.closest('[data-cancel]');
  if(edit){const tile=edit.closest('.tile'),form=tile.querySelector('.tile-edit'),input=form.querySelector('input');
@@ -71,15 +73,21 @@ $('tempTiles').addEventListener('click',e=>{const edit=e.target.closest('[data-e
  if(cancel){const form=cancel.closest('.tile-edit');form.hidden=true;form.previousElementSibling.hidden=false;editingTile=null;}});
 $('tempTiles').addEventListener('submit',e=>{e.preventDefault();const form=e.target,tile=form.closest('.tile'),kind=tile.dataset.kind,value=Number(form.querySelector('input').value);
  form.hidden=true;form.previousElementSibling.hidden=false;editingTile=null;
- sendControl(kind,value).catch(()=>{});});
+ const name=selectedPrinter,key='temp|'+name+'|'+kind;
+ setPending(key,20000,p=>Math.round(num(tempDefs(p).find(x=>x.kind===kind)?.target)||0)===value,printerLabel(name)+' '+kind+' temperature',{value});renderTiles(devPrinter());
+ sendControl(kind,value).then(pollSoon,()=>{delete pending[key];renderTiles(devPrinter());});});
 
-function renderSpeed(p){const level=SPEEDS[(p.data||{}).spd_lvl];$('speedControl').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b.dataset.speed===level));
+function renderSpeed(p){const level=SPEEDS[(p.data||{}).spd_lvl],key='speed|'+p.name,want=isPending(key,p)?pending[key].level:null;
+ $('speedControl').querySelectorAll('button').forEach(b=>{b.classList.toggle('active',b.dataset.speed===level&&!want);b.classList.toggle('pending',b.dataset.speed===want);});
  $('detailSpeedLabel').textContent='Speed '+(level?level[0].toUpperCase()+level.slice(1):'—');}
 $('speedControl').addEventListener('click',e=>{const b=e.target.closest('[data-speed]');if(!b||b.classList.contains('active'))return;
- $('speedControl').querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));sendControl('speed',b.dataset.speed).catch(()=>renderSpeed(devPrinter()));});
+ const name=selectedPrinter,key='speed|'+name,level=b.dataset.speed;
+ setPending(key,20000,p=>SPEEDS[(p.data||{}).spd_lvl]===level,printerLabel(name)+' speed',{level});renderSpeed(devPrinter());
+ sendControl('speed',level).then(pollSoon,()=>{delete pending[key];renderSpeed(devPrinter());});});
 
 function fanPercent(p,f){const d=p.data||{};const demo=(d.demo_fan_targets||{})[f.id];return num(f.percent)??num(demo);}
 const fanPending={};let draggingFan=null;
+setInterval(()=>{const row=document.querySelector('#fanList .fan-row.all.pending');if(row&&!Object.keys(fanPending).some(k=>k.startsWith(selectedPrinter+'|')))row.classList.remove('pending');},500);
 function fanShown(p,f){const key=p.name+'|'+f.key,pend=fanPending[key],reported=fanPercent(p,f);
  if(pend&&(reported===pend.value||Date.now()>pend.until))delete fanPending[key];
  return fanPending[key]?fanPending[key].value:reported;}
@@ -88,8 +96,8 @@ function renderFans(p){const box=$('fanList'),fans=(p.limits||{}).fans||[],signa
   box.innerHTML=fans.map(f=>`<div class="fan-row${f.manual?'':' auto'}" data-fan="${esc(f.key)}"><div class="fan-name"><span>🌀 ${esc(f.label)}</span><small></small></div>${f.manual?`<input type="range" min="${f.minimum??0}" max="${f.maximum??100}" step="10" value="0" aria-label="${esc(f.label)} speed"><output>0%</output>`:''}</div>`).join('')
    +(fans.some(f=>f.manual)?`<div class="fan-row all" data-fan="__all"><div class="fan-name"><span>All manual fans</span><small>Sets every fan above at once</small></div><input type="range" min="0" max="100" step="10" value="0" aria-label="All manual fans speed"><output>0%</output></div>`:'')||'<p class="muted">No fans reported.</p>';}
  for(const f of fans){const row=[...box.querySelectorAll('.fan-row')].find(r=>r.dataset.fan===f.key);if(!row)continue;
-  const pct=fanShown(p,f),pending=!!fanPending[p.name+'|'+f.key];
-  row.querySelector('small').textContent=!f.manual?'Automatic (firmware)':pending?'Setting '+pct+'%…':pct===null?'Not reported':pct+'%';
+  const pct=fanShown(p,f),waiting=!!fanPending[p.name+'|'+f.key];row.classList.toggle('pending',waiting);
+  row.querySelector('small').textContent=!f.manual?'Automatic (firmware)':waiting?'Setting '+pct+'%…':pct===null?'Not reported':pct+'%';
   const input=row.querySelector('input');if(input&&input!==draggingFan){input.value=pct??0;row.querySelector('output').textContent=(pct??0)+'%';}}}
 $('fanList').addEventListener('input',e=>{if(e.target.type!=='range')return;draggingFan=e.target;e.target.closest('.fan-row').querySelector('output').textContent=e.target.value+'%';});
 // 'change' fires when the slider is released (or stepped with the keyboard): apply it then, no Set button.
@@ -97,7 +105,8 @@ $('fanList').addEventListener('change',async e=>{if(e.target.type!=='range')retu
  const p=devPrinter(),row=e.target.closest('.fan-row'),value=Number(e.target.value),all=row.dataset.fan==='__all';
  const targets=all?((p.limits||{}).fans||[]).filter(f=>f.manual):((p.limits||{}).fans||[]).filter(f=>f.key===row.dataset.fan);
  for(const f of targets)fanPending[p.name+'|'+f.key]={value,until:Date.now()+20000};renderFans(p);
- try{await sendControl(all?'fanall':'fan_'+row.dataset.fan,value);}catch{for(const f of targets)delete fanPending[p.name+'|'+f.key];renderFans(devPrinter());}});
+ if(all)row.classList.add('pending');
+ try{await sendControl(all?'fanall':'fan_'+row.dataset.fan,value);pollSoon();}catch{for(const f of targets)delete fanPending[p.name+'|'+f.key];renderFans(devPrinter());}});
 
 function jogSteps(p){return axisCtrl(p.data||{})?{xy:[1,10],z:[1]}:{xy:[1,10],z:[0.1,1]};}
 function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringify(steps);
@@ -111,13 +120,14 @@ function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringi
  else if(!armed)$('jogStatus').textContent='Tick the box above to unlock the movement buttons. Directions follow printer coordinates.';}
 $('jogSteps').addEventListener('click',e=>{const b=e.target.closest('[data-step]');if(!b)return;jogStep=Number(b.dataset.step);renderJog(devPrinter());});
 $('jogArm').onchange=()=>{clearTimeout(jogArmTimer);if($('jogArm').checked){jogArmTimer=setTimeout(()=>{$('jogArm').checked=false;renderJog(devPrinter());},5*60*1000);$('jogStatus').textContent='Unlocked for 5 minutes or until this panel closes.';}renderJog(devPrinter());};
-async function jog(axis,dir){const p=devPrinter(),steps=jogSteps(p),step=axis==='Z'?(steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1]):jogStep,value=dir*step;
+async function jog(axis,dir,button){button?.classList.add('pending');try{await jogMove(axis,dir);}finally{button?.classList.remove('pending');}}
+async function jogMove(axis,dir){const p=devPrinter(),steps=jogSteps(p),step=axis==='Z'?(steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1]):jogStep,value=dir*step;
  jogBusy=true;renderJog(p);$('jogStatus').textContent=`Moving ${axis} ${value>0?'+':''}${value} mm…`;
  try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/move',{value,axis,confirmed:true,homed:true});$('jogStatus').textContent=r.message;
   // The server allows one move every 3 seconds; wait it out instead of showing an error.
   jogReadyAt=Date.now()+3100;const tick=()=>{const left=Math.ceil((jogReadyAt-Date.now())/1000);if(left>0){$('jogCenter').textContent=left+' s';setTimeout(tick,250);}else renderJog(devPrinter());};tick();}
  catch(e){$('jogStatus').textContent=e.message;}finally{jogBusy=false;renderJog(devPrinter());}}
-document.querySelectorAll('#jogPad [data-axis],#jogZ [data-axis]').forEach(b=>b.onclick=()=>jog(b.dataset.axis,Number(b.dataset.dir)));
+document.querySelectorAll('#jogPad [data-axis],#jogZ [data-axis]').forEach(b=>b.onclick=()=>jog(b.dataset.axis,Number(b.dataset.dir),b));
 
 function swatch(t,active){const color=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6):null,empty=!t||!t.tray_type,remain=num(t?.remain);
  return `<div class="slot${empty?' is-empty':''}${active?' active':''}" title="${esc(empty?'Empty':t.tray_type+(remain!==null&&remain>=0?' · '+remain+'%':''))}"><span class="swatch"${color&&!empty?` data-color="${color}"`:''}></span><strong>${empty?'Empty':esc(t.tray_type)}</strong><small>${empty?'—':remain!==null&&remain>=0?remain+'%':'?'}</small>${!empty&&remain!==null&&remain>=0?`<i class="remain" data-width="${Math.max(0,Math.min(100,remain))}"></i>`:''}</div>`;}
@@ -139,12 +149,14 @@ function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},pro
  const left=num(d.mc_remaining_time);$('detailRemaining').textContent=left===null?'— remaining':(left>=60?Math.floor(left/60)+' h '+left%60+' min':left+' min')+' remaining';
  $('detailError').hidden=!p.error_text;$('detailError').textContent=p.error_text||'';
  $('devPause').hidden=p.state!=='RUNNING'&&p.state!=='PREPARE';$('devResume').hidden=p.state!=='PAUSE';$('devStop').hidden=!active;
- const lt=lightShown(p);$('devLight').setAttribute('aria-pressed',String(lt.on));$('devLight').classList.toggle('busy',lt.busy);
+ const lt=lightShown(p);$('devLight').setAttribute('aria-pressed',String(lt.on));$('devLight').classList.toggle('pending',lt.busy);
+ for(const a of ['pause','resume','stop'])$('dev'+a[0].toUpperCase()+a.slice(1)).classList.toggle('pending',isPending(a+'|'+p.name,p));
  renderTiles(p);renderSpeed(p);renderFans(p);renderJog(p);renderAms(p);}
 document.querySelector('#detailDialog .now-actions').addEventListener('click',async e=>{const b=e.target.closest('[data-dev]');if(!b)return;const name=selectedPrinter,action=b.dataset.dev;
- if(action==='stop'){confirmAction('Stop this print?',printerLabel(name)+' — this cancels the current job.','I want to cancel this print.',()=>api('printers/'+encodeURIComponent(name)+'/stop',{confirmed:true}));return;}
+ if(action==='stop'){confirmStop(name);return;}
  if(action==='pause'){confirmPause(name);return;}
  if(action==='light'){await toggleLight(name);return;}
+ if(action==='resume'){try{await printAction(name,'resume');}catch(err){notice(err.message);}return;}
  const target=action;
  b.disabled=true;try{await api('printers/'+encodeURIComponent(name)+'/'+target,{});notice('Command submitted. Waiting for printer telemetry.');await refresh();}catch(err){notice(err.message);}finally{b.disabled=false;}});
 $('devFiles').onclick=()=>downloadFileListing(selectedPrinter,$('devFiles'));
