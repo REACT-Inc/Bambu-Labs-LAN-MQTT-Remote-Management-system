@@ -26,11 +26,8 @@ function render(){
  $('mode').textContent=state.demo?'DEMO MODE':'LIVE';$('mode').classList.toggle('demo',state.demo);
  $('discordState').textContent=state.discord?'Discord connected':'Discord offline · Dashboard available';
  $('stats').innerHTML=[['Printers online',p.filter(x=>x.connected).length+' / '+p.length],['Printing now',p.filter(x=>x.state==='RUNNING').length],['Waiting in queue',j.filter(x=>x.status==='queued').length],['Need attention',p.filter(x=>x.error||!x.connected).length+j.filter(x=>x.status==='needs_review').length]].map(([label,n],i)=>`<div class="stat"><small>${label}</small><strong class="${i===1?'green':''}">${n}</strong></div>`).join('');
- $('printers').innerHTML=p.map(x=>{
-  const d=x.data||{},n=`data-printer="${esc(x.name)}"`,progress=Math.max(0,Math.min(100,Number(d.mc_percent)||0));
-  const waiting=j.filter(v=>v.printer===x.name&&v.status==='queued').length;
-  return `<article class="printer-card"><div class="printer-top"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${statusClass(x.state,x.connected)}">${esc(x.connected?x.state:'OFFLINE')}</span></div><div class="printer-body"><div class="printer-symbol">▤</div><div class="filename">${esc(d.subtask_name||'Ready for the next job')}</div><div class="progress-label"><span>${progress}% complete</span><span>${esc(d.mc_remaining_time??'—')} min left</span></div><div class="progress"><progress value="${progress}" max="100"></progress></div><div class="temps"><div><small>NOZZLE</small><strong>${esc(d.nozzle_temper??'—')}°C</strong></div><div><small>BED</small><strong>${esc(d.bed_temper??'—')}°C</strong></div></div>${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}<div class="card-actions">${actionButton('details','Details & camera',n)}${actionButton('files','Printer files',n)}${actionButton('pause','Pause',n)}${actionButton('resume','Resume',n)}${actionButton('lighton','Light on',n)}${actionButton('lightoff','Light off',n)}${actionButton('stop','Stop',n,'danger')}${actionButton('printerQueue',`${waiting} queued →`,n)}</div></div></article>`;
- }).join('')||'<div class="empty">No printers configured.</div>';
+ $('printers').innerHTML=p.map(printerCard).join('')||'<div class="empty">No printers configured.</div>'
+ applyStyles($('printers'));
  const names=p.map(x=>x.name);
  for(const id of ['jobPrinter','queueFilter']){
   const element=$(id),value=element.value;
@@ -58,20 +55,59 @@ function renderJobs(){
 }
 async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;$('connectionBanner').hidden=true;render();}catch(e){if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
 function confirmAction(title,text,label,callback){$('confirmTitle').textContent=title;$('confirmText').textContent=text;$('confirmLabel').textContent=label;$('confirmCheck').checked=false;pendingConfirmation=callback;$('confirmDialog').showModal();}
-function renderDetails(){const p=state.printers.find(x=>x.name===selectedPrinter);if(!p)return;const d=p.data||{};$('detailTitle').textContent=p.display_name||p.name;let units=Array.isArray(d.ams)?d.ams:(d.ams?.ams||[]);let trays=units.map(u=>`<h3>AMS ${esc(u.id)}</h3><p class="muted">Humidity: ${esc(u.humidity??'—')} · ${esc(u.temp??'—')}°C</p>`+(u.tray||[]).map(t=>`<p>Slot ${esc(t.id)} · ${esc(t.tray_type||'Empty')} · ${esc(t.remain??'?')}% · #${esc(t.tray_color||'?')}</p>`).join('')).join('');if(d.vt_tray)trays+=`<h3>External spool</h3><p>${esc(d.vt_tray.tray_type||'Unknown')} · ${esc(d.vt_tray.remain??'?')}% remaining</p>`;$('detailContent').innerHTML=`<p>${esc(d.subtask_name||'No file reported')}</p><div class="detail-grid"><div><small>STATE</small>${esc(p.state)}</div><div><small>PROGRESS</small>${esc(d.mc_percent??0)}%</div><div><small>LAYERS</small>${esc(d.layer_num??'?')} / ${esc(d.total_layer_num??'?')}</div><div><small>LAST TELEMETRY</small>${p.last_seen?esc(new Date(p.last_seen*1000).toLocaleTimeString()):'—'}</div></div><h2>Temperature & speed</h2><p>Nozzle: ${esc(d.nozzle_temper??"—")} °C → target ${esc(d.nozzle_target_temper??"—")} °C<br>Bed: ${esc(d.bed_temper??"—")} °C → target ${esc(d.bed_target_temper??"—")} °C<br>Speed profile: ${esc(({1:"Silent",2:"Standard",3:"Sport",4:"Ludicrous"})[d.spd_lvl]||"Not reported")}</p><h2>Filaments</h2>${trays||'<p class="muted">No filament data reported.</p>'}`;}
+function renderDetails(){if(typeof renderDevice==='function')renderDevice();}
+function fmtMinutes(v){const n=Number(v);if(v===null||v===undefined||v===''||!Number.isFinite(n))return '';return n>=60?Math.floor(n/60)+' h '+n%60+' min':n+' min';}
+function miniSwatches(d){const ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),trays=(ams.ams||[]).flatMap(u=>(u.tray||[]).map(t=>t));if(d.vt_tray)trays.push(d.vt_tray);
+ return trays.slice(0,17).map(t=>{const c=/^[0-9a-f]{6}/i.test(t.tray_color||'')&&t.tray_type?'#'+t.tray_color.slice(0,6):'';return `<i class="mini-swatch${c?'':' is-empty'}"${c?` data-color="${c}"`:''} title="${esc(t.tray_type||'Empty')}"></i>`;}).join('');}
+// The Content-Security-Policy blocks inline style attributes, so colours and widths are applied through the DOM.
+function applyStyles(root){root.querySelectorAll('[data-color]').forEach(e=>e.style.background=e.dataset.color);root.querySelectorAll('[data-width]').forEach(e=>e.style.width=e.dataset.width+'%');}
+function printerCard(x){
+ const d=x.data||{},n=`data-printer="${esc(x.name)}"`,progress=Math.max(0,Math.min(100,Number(d.mc_percent)||0)),active=['RUNNING','PAUSE','PREPARE'].includes(x.state);
+ const waiting=state.jobs.filter(v=>v.printer===x.name&&v.status==='queued').length,left=fmtMinutes(d.mc_remaining_time);
+ const round=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?'—':Math.round(Number(v));
+ const temp=(now,target)=>`<b>${round(now)}°</b>${Number(target)?`<em>→ ${round(target)}°</em>`:''}`;
+ const light=(d.lights_report||[]).find(l=>l.node==='chamber_light')?.mode==='on';
+ let actions='';
+ if(x.state==='RUNNING'||x.state==='PREPARE')actions+=actionButton('pause','⏸ Pause',n);
+ if(x.state==='PAUSE')actions+=actionButton('resume','▶ Resume',n,'primary');
+ if(active)actions+=actionButton('stop','■ Stop',n,'danger');
+ actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':''));
+ return `<article class="printer-card${x.connected?'':' offline'}" ${n} tabindex="0" role="button" aria-label="Open ${esc(x.display_name||x.name)}">
+<div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${statusClass(x.state,x.connected)}">${esc(x.connected?x.state:'OFFLINE')}</span></div>
+<div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
+${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
+<div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
+${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}
+<div class="pc-actions">${actions}<span class="spacer"></span>${actionButton('printerQueue',waiting?`${waiting} queued →`:'Queue →',n,'ghost')}</div></article>`;}
+async function downloadFileListing(printer,button){if(button)button.disabled=true;notice('Reading printer storage…');
+ try{const r=await api('files/'+encodeURIComponent(printer),undefined,'GET'),url=URL.createObjectURL(new Blob([r.text],{type:'text/plain'})),a=document.createElement('a');
+  a.href=url;a.download='printer-files.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('Printer file listing downloaded.');}
+ catch(e){notice(e.message);}finally{if(button)button.disabled=false;}}
+function openPrinter(printer){selectedPrinter=printer;loadSwapSettings();$('cameraImage').hidden=true;$('cameraMessage').textContent='';
+ $('detailDialog').querySelector('.drawer-body').scrollTop=0;renderDetails();if(!$('detailDialog').open)$('detailDialog').showModal();}
+// Popups: click outside or press Esc to close, with a short animation.
+function closeDialog(d){if(!d.open||d.dataset.closing)return;d.dataset.closing='1';
+ const done=()=>{if(!d.dataset.closing)return;delete d.dataset.closing;d.classList.remove('closing');d.close();};
+ if(matchMedia('(prefers-reduced-motion: reduce)').matches){done();return;}
+ d.classList.add('closing');d.addEventListener('animationend',done,{once:true});setTimeout(done,320);}
+function outsideDialog(d,e){const r=d.getBoundingClientRect();return e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom;}
+document.querySelectorAll('dialog').forEach(d=>{let downOutside=false;
+ d.addEventListener('pointerdown',e=>{downOutside=e.target===d&&outsideDialog(d,e);});
+ d.addEventListener('click',e=>{if(e.target===d&&downOutside&&outsideDialog(d,e))closeDialog(d);downOutside=false;});
+ d.addEventListener('cancel',e=>{e.preventDefault();closeDialog(d);});});
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginError').textContent='';try{const r=await api('login',{password:$('loginPassword').value});csrf=r.csrf;$('loginPassword').value='';await refresh();}catch(e){$('loginError').textContent=e.message;}});
 $('logout').onclick=async()=>{try{await api('logout',{});showLogin();}catch(e){notice(e.message);}};
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
-document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>$(b.dataset.close).close());
+document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog($(b.dataset.close)));
 $('queueFilter').onchange=renderJobs;
 $('addJob').onclick=()=>{$('jobError').textContent='';$('jobDialog').showModal();};
 $('source').onchange=()=>{$('uploadLabel').hidden=$('source').value!=='upload';$('remoteLabel').hidden=$('source').value!=='remote';};
 $('jobFile').onchange=()=>{if(!$('jobLabel').value&&$('jobFile').files[0])$('jobLabel').value=$('jobFile').files[0].name.slice(0,120);};
 $('jobForm').onsubmit=async e=>{e.preventDefault();$('jobError').textContent='';$('submitJob').disabled=true;try{const data={printer:$('jobPrinter').value,label:$('jobLabel').value,plate:Number($('jobPlate').value),use_ams:$('jobAms').checked,mapping:$('jobMapping').value,bed:$('jobBed').value};if($('source').value==='upload'){const f=$('jobFile').files[0];if(!f)throw new Error('Select a sliced .3mf file.');if(f.size>256*1024*1024)throw new Error('Maximum upload is 256 MiB.');$('submitJob').textContent='Uploading…';const form=new FormData();form.append('file',f);const uploaded=await api('upload',form);data.asset=uploaded.asset;}else data.remote=$('jobRemote').value;await api('jobs',data);$('jobDialog').close();$('jobForm').reset();$('source').onchange();notice('Added to the shared queue.');tab('queue');await refresh();}catch(e){$('jobError').textContent=e.message;}finally{$('submitJob').disabled=false;$('submitJob').textContent='Add to shared queue';}};
 $('confirmForm').onsubmit=async e=>{e.preventDefault();const callback=pendingConfirmation;pendingConfirmation=null;$('confirmDialog').close();if(callback){try{await callback();await refresh();}catch(e){notice(e.message);}}};
-document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b)return;const {action,printer,job,outcome}=b.dataset;try{
- if(action==='files'){b.disabled=true;notice('Reading printer storage…');try{const r=await api('files/'+encodeURIComponent(printer),undefined,'GET');const blob=new Blob([r.text],{type:'text/plain'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='printer-files.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('Printer file listing downloaded.');}finally{b.disabled=false;}return;}
- if(action==='details'){selectedPrinter=printer;loadSwapSettings();$('cameraImage').hidden=true;$('cameraMessage').textContent='Request a snapshot below.';renderDetails();$('detailDialog').showModal();return;}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b){const card=e.target.closest('.printer-card[data-printer]');if(card)openPrinter(card.dataset.printer);return}const {action,printer,job,outcome}=b.dataset;try{
+ if(action==='files'){await downloadFileListing(printer,b);return}
+ if(action==='details'){openPrinter(printer);return}
  if(action==='printerQueue'){$('queueFilter').value=printer;tab('queue');renderJobs();return;}
  if(['pause','resume','lighton','lightoff'].includes(action)){await api('printers/'+encodeURIComponent(printer)+'/'+action,{});notice('Command submitted. Waiting for printer telemetry.');}
  if(action==='stop'){confirmAction('Stop this print?',printer+' — this cancels the current job.','I want to cancel this print.',()=>api('printers/'+encodeURIComponent(printer)+'/stop',{confirmed:true}));return;}
@@ -96,3 +132,6 @@ async function loadIssueSettings(){try{const r=await api('report/settings',undef
 $('issueReportForm').onsubmit=e=>{e.preventDefault();confirmAction('Send problem report?','Title: '+$('issueTitle').value,'I checked the description and understand the report may be public.',async()=>{$('issueReportStatus').textContent='Sending…';try{const r=await api('report',{title:$('issueTitle').value,description:$('issueDescription').value});$('issueReportStatus').innerHTML='Sent: <a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.url)+'</a>';$('issueTitle').value='';$('issueDescription').value='';}catch(err){$('issueReportStatus').textContent=err.message;}});};
 $('saveIssueSettings').onclick=async()=>{try{await api('report/settings',{destination:$('issueDestination').value,repository:$('issueRepository').value,token:$('issueToken').value,clear_token:$('issueClearToken').checked});$('issueToken').value='';$('issueClearToken').checked=false;notice('Report destination saved.');loadIssueSettings();}catch(e){notice(e.message);}};
 const tabWithErrors=tab;tab=function(name){tabWithErrors(name);if(name==='settings')loadIssueSettings();};
+
+// Keyboard: Enter or Space on a focused printer card opens it.
+$('printers').addEventListener('keydown',e=>{const card=e.target.closest?.('.printer-card[data-printer]');if(card&&e.target===card&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openPrinter(card.dataset.printer);}});
