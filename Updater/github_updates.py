@@ -149,9 +149,9 @@ class GitHubUpdates:
         async with self.lock:await self.check()
         return web.json_response(self.public())
 
-    async def install(self,automatic=False,expected=None):
+    async def install(self,automatic=False,expected=None,force=False,who='dashboard'):
         async with self.updater.lock:
-            self.updater.idle_check(automatic)
+            self.updater.idle_check(automatic,force)
             release=await self.check()
             if expected and release['version']!=expected:raise ValueError('Latest release changed. Review it and confirm again.')
             if semver(release['version'])<=semver(VERSION):raise ValueError(f'No newer release on the {self.channel} channel.')
@@ -170,16 +170,16 @@ class GitHubUpdates:
                 preview=await asyncio.to_thread(inspect_package,path)
                 if preview['version'].lstrip('v')!=release['version']:raise ValueError('Release tag and package version do not match.')
                 # Recheck printer state after network I/O, before creating the request.
-                self.updater.idle_check(automatic)
+                self.updater.idle_check(automatic,force)
                 self.config['attempted']=release['version'];self.save()
-                self.updater.queue_package(token,digest,automatic)
+                self.updater.queue_package(token,digest,automatic,force=force,who=who)
                 self.message='Installation queued; sign in again after restart.'
             except BaseException:path.unlink(missing_ok=True);raise
 
     async def install_route(self,request):
         data=await request.json()
         if data.get('confirmed') is not True or not data.get('version'):raise ValueError('Check and confirm the release version first.')
-        async with self.lock:await self.install(expected=data['version'])
+        async with self.lock:await self.install(expected=data['version'],force=data.get('force') is True,who=f'dashboard ({request.remote or "?"})')
         return web.json_response(self.public())
 
     async def loop(self):
