@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.3.0-beta.2)
+## 1.4.0-beta.1
+
+Built on 1.3.0-beta.1. Fixes the dashboard and printer controls becoming unresponsive on 1.3.0-beta.1 (#40).
 
 ### Fixed
 - **Dashboard unresponsive with A1-family cameras (#40).** 1.3.0-beta.1 kept every printer's camera streaming while the dashboard was open. A1 and A1 mini cameras that didn't answer left browser requests waiting up to 25 seconds each, which used up the browser's connections to the Pi. Control clicks and page refreshes then queued behind them, so buttons stayed purple and nothing reached the printers. Cameras now use staggered still snapshots: one camera at a time, only while the dashboard is open, and the browser never waits on a camera. Live view waits at most 10 seconds for a frame.
