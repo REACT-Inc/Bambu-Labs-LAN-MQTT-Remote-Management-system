@@ -15,6 +15,7 @@ from ftcTeamManagement.team import Team
 from ftcTeamManagement.team_discord import install as install_team
 from discord_Intergration.server_discord import install as install_server
 from backupDiscordBot import heartbeat
+from loop_watchdog import LoopWatchdog
 
 
 async def main():
@@ -49,6 +50,8 @@ async def main():
     stopped=asyncio.Event()
     for sig in (signal.SIGINT,signal.SIGTERM):
         asyncio.get_running_loop().add_signal_handler(sig,stopped.set)
+    watchdog=LoopWatchdog(core.log,stall_file=diagnostics.log_dir(core.DATA_DIR)/'stalls.log')
+    watchdog.start()
 
     async def discord_task():
         if not core.DISCORD_BOT_TOKEN:
@@ -64,6 +67,7 @@ async def main():
     try:
         await stopped.wait()
     finally:
+        await watchdog.stop()
         scheduler.cancel();beat.cancel()
         await asyncio.gather(scheduler,beat,return_exceptions=True)
         for t in list(engine.tasks):t.cancel()

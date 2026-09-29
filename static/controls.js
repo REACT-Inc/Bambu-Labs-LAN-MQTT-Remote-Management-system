@@ -17,28 +17,21 @@ async function fetchLiveFrame(generation,version=0,feed=''){
  if(generation===liveGeneration)liveTimer=setTimeout(()=>fetchLiveFrame(generation,version,feed),750);
 }
 function startLiveView(){stopLive();livePrinter=selectedPrinter;$('liveStatus').textContent='Connecting to printer camera…';$('startLive').disabled=true;fetchLiveFrame(liveGeneration);}
-// Opening a printer starts its camera, if it has one. The ▶ button restarts it after Stop.
-function autoStartLive(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
- $('cameraHint').textContent=p?.has_camera?'About one frame per second. Nothing is recorded.':state?.demo?'No camera in demo mode.':'No camera configured for this printer (camera_type in config.json).';
- if(p?.has_camera){if(livePrinter!==p.name&&!document.hidden)startLiveView();}
- else{stopLive();$('liveStatus').textContent=state?.demo?'No camera in demo mode.':'No camera configured for this printer.';}}
-$('startLive').onclick=startLiveView;
-$('stopLive').onclick=stopLive;
+// The panel shows the latest still snapshot straight away; ▶ starts live view only when asked (#40).
+const snapshotUrl=p=>'/api/snapshot/'+encodeURIComponent(p.name)+'?t='+p.snapshot.time;
+function renderStill(p){const still=$('stillImage'),snap=p?.snapshot||{};
+ if(!p?.has_camera||livePrinter||!snap.time){still.hidden=true;return;}
+ const url=snapshotUrl(p);if(still.dataset.url!==url){still.dataset.url=url;still.src=url;}still.hidden=false;}
+function showCamera(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
+ const snap=p?.snapshot||{};
+ $('cameraHint').textContent=!p?.has_camera?(state?.demo?'No camera in demo mode.':'No camera configured for this printer (camera_type in config.json).')
+  :snap.error&&!snap.time?snap.error:'Live view: about one frame per second. Nothing is recorded.';
+ if(!livePrinter)$('liveStatus').textContent=!p?.has_camera?'No camera.':snap.time?'Snapshot from '+new Date(snap.time*1000).toLocaleTimeString()+' · ▶ for live view':(snap.error||'Waiting for the first snapshot…');
+ renderStill(p);}
+$('startLive').onclick=()=>{$('stillImage').hidden=true;startLiveView();};
+$('stopLive').onclick=()=>{stopLive();showCamera();};
 $('detailDialog').addEventListener('close',stopLive);
-document.addEventListener('visibilitychange',()=>{if(document.hidden)stopLive();else if($('detailDialog').open)autoStartLive();});
-const thumbBusy={},thumbRetry={};
-async function refreshThumb(name){
- if(thumbBusy[name]||Date.now()<(thumbRetry[name]||0))return;thumbBusy[name]=true;
- const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
- try{const r=await fetch('/api/liveframe/'+encodeURIComponent(name)+'?after=0',{signal:controller.signal,cache:'no-store'});
-  if(!r.ok)throw new Error('camera unavailable');
-  const url=URL.createObjectURL(await r.blob()),old=camThumbs[name];camThumbs[name]=url;
-  document.querySelectorAll('img[data-cam]').forEach(img=>{if(img.dataset.cam===name){img.src=url;img.hidden=false;}});
-  if(old)setTimeout(()=>URL.revokeObjectURL(old),2000);}
- catch{thumbRetry[name]=Date.now()+30000;}  // camera off or unreachable: try again in 30 s
- finally{clearTimeout(timeout);thumbBusy[name]=false;}}
-// Card cameras refresh every few seconds, only while the Overview tab is on screen.
-setInterval(()=>{if(!state||document.hidden||$('overview').hidden)return;for(const p of state.printers)if(p.has_camera&&p.connected)refreshThumb(p.name);},4000);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)stopLive();});
 $('logout').addEventListener('click',stopLive);
 setInterval(()=>{if(livePrinter&&(!state||!$('detailDialog').open))stopLive();},1000);
 // ---- Printer panel (Bambu Handy style) ----------------------------------------------------
@@ -196,7 +189,7 @@ function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},pro
  $('devPause').hidden=p.state!=='RUNNING'&&p.state!=='PREPARE';$('devResume').hidden=p.state!=='PAUSE';$('devStop').hidden=!active;
  const lt=lightShown(p);$('devLight').setAttribute('aria-pressed',String(lt.on));$('devLight').classList.toggle('pending',lt.busy);
  for(const a of ['pause','resume','stop'])$('dev'+a[0].toUpperCase()+a.slice(1)).classList.toggle('pending',isPending(a+'|'+p.name,p));
- renderTiles(p);renderNozzle(p);renderSpeed(p);renderFans(p);renderJog(p);renderAms(p);}
+ showCamera();renderTiles(p);renderNozzle(p);renderSpeed(p);renderFans(p);renderJog(p);renderAms(p);}
 document.querySelector('#detailDialog .now-actions').addEventListener('click',async e=>{const b=e.target.closest('[data-dev]');if(!b)return;const name=selectedPrinter,action=b.dataset.dev;
  if(action==='stop'){confirmStop(name);return;}
  if(action==='pause'){confirmPause(name);return;}

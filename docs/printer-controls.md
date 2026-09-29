@@ -138,9 +138,13 @@ Set `camera_type` on each printer in [config.json](configuration.md#printer-entr
 | `rtsp` | H2D and other RTSP cameras | RTSP on port 322, decoded by **ffmpeg** (limited to 5 fps at 960 px wide to spare the Pi) |
 
 - **Snapshots:** `/printer`, notifications, and **Snapshot → Refresh camera snapshot** in the dashboard.
-- **Live view:** starts automatically when you open a printer's panel, and shows about one frame per second. The Overview cards also show a camera image that refreshes every few seconds. It isn't full-motion video, and nothing is recorded.
-  - **One shared connection:** all viewers and snapshots share one camera connection per printer. It reconnects automatically after errors, and closes when nobody is watching.
-  - **When it stops:** closing the panel, hiding the browser tab or signing out stops your live view. Card images only refresh while the Overview tab is on screen.
+- **Still snapshots (cards and panel):** while someone has the dashboard open, the Pi takes **one still at a time**, printer after printer, spaced at least 5 seconds apart (each printer about every 30–40 s). Each still is one short connection: connect, one frame, disconnect.
+  - **Failing cameras:** a camera that doesn't answer is skipped for about 2 minutes, and its card says so.
+  - **No hanging requests:** the browser only downloads the last saved still, so a slow camera can't hold up the dashboard.
+  - **When it stops:** nothing is captured when no dashboard is open.
+- **Live view:** press **▶** in a printer's panel. It shows about one frame per second, isn't full-motion video, and nothing is recorded.
+  - **One shared connection:** all viewers and snapshots share one camera connection per printer. While live view is open, that printer's still is taken from the live stream instead of a second connection (A1-family cameras accept one client at a time).
+  - **When it stops:** closing the panel, hiding the browser tab or signing out stops your live view.
 - **Login required:** camera access needs a dashboard login, and the session is re-checked while streaming.
 - **Other clients:** if the printer won't accept another camera connection, close other camera clients (Bambu Studio, Handy).
 - **Printer settings:** firmware LAN settings and the access code still decide whether the camera is available. Camera errors are logged with the access code removed.

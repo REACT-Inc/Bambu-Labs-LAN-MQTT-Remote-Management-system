@@ -2,7 +2,7 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.3.0-beta.2)
+## Unreleased (1.5.0)
 
 ### Added
 - **Backup Discord bot (`backupDiscordBot/`).** An optional second, team-only bot, running as its own `pm-backup-bot` service with its own bot token.
@@ -26,6 +26,14 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   Each `/ftcteam` subcommand has its own permission level in **Settings → Discord command permissions**, and saved permissions for the old names carry over. `/archive`, `/unarchive`, `/dm`, `/laptops`, `/laptop`, `/server` and `/reboot` keep their names.
 - **Code layout.** The team code moved into the `ftcTeamManagement/` folder (`team.py`, `team_discord.py`). The server and admin commands moved to `discord_Intergration/server_discord.py`.
 
+## 1.4.0-beta.1
+
+Built on 1.3.0-beta.1. Fixes the dashboard and printer controls becoming unresponsive on 1.3.0-beta.1 (#40).
+
+### Fixed
+- **Dashboard unresponsive with A1-family cameras (#40).** 1.3.0-beta.1 kept every printer's camera streaming while the dashboard was open. A1 and A1 mini cameras that didn't answer left browser requests waiting up to 25 seconds each, which used up the browser's connections to the Pi. Control clicks and page refreshes then queued behind them, so buttons stayed purple and nothing reached the printers. Cameras now use staggered still snapshots: one camera at a time, only while the dashboard is open, and the browser never waits on a camera. Live view waits at most 10 seconds for a frame.
+- **Whole-service stalls (#40).** An independent thread detects when the shared dashboard and Discord event loop stops making progress. It writes thread stacks to the service journal after 15 seconds and exits after 60 seconds so systemd restarts the service. Uncertain queue jobs still require review after a restart.
+
 ## 1.3.0-beta.1
 
 Includes the 1.2.1-beta.1 fixes (commands-channel replies and update checks).
@@ -37,7 +45,7 @@ Includes the 1.2.1-beta.1 fixes (commands-channel replies and update checks).
 - **Edit AMS filament and nozzle.** In the printer panel, click an AMS slot or the external spool to set its material and colour, as Bambu Studio's *Edit filament* does. A new **Nozzle** row sets the fitted nozzle's diameter and type.
 - **Homing.** **⌂ Home** in the dashboard's printer panel and a new admin-only `/home` command home X, Y and Z on an idle printer. It uses Bambu Studio's `back_to_center` where the printer supports MQTT homing, otherwise `G28`.
 - **Faster dashboard controls (#37).** In the web dashboard only **Pause** and **Stop** ask for confirmation. Temperatures, speed, fans, light and resume apply straight away, with the same server-side limits. Discord keeps its confirmation cards.
-- **Camera on by default (#37).** Opening a printer starts its live camera, and the Overview cards show a camera image that refreshes every few seconds. The printer panel's camera area no longer collapses to nothing.
+- **Camera stills (#37, #40).** Printer cards and the panel show still snapshots. The Pi takes them one printer at a time, only while the dashboard is open. Live view is started with **▶**. The printer panel's camera area no longer collapses to nothing.
 - **Waiting feedback (#37).** A dashboard control you've clicked pulses purple until the printer reports the result, then shows the real state (for example, amber for light on). This covers light, pause/resume/stop, temperature, speed, fans and movement. Purple is only used for waiting.
 - **Fans (#37).** Fans are set when you let go of the slider, with no **Set** button, and the slider no longer snaps back. Fans on older firmware (for example the A1 family) show their current speed.
 - **Updates only wait for printing (#32).** Updates used to need every printer idle, connected and reporting, and no active or needs-review queue jobs. Now only a printer that's printing (or paused mid-print) or a file being sent to a printer holds an update back. Offline or switched-off printers and waiting queue jobs no longer block updates, manual or automatic. The message names the printer that's blocking.

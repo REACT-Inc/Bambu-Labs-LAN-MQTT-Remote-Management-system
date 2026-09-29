@@ -185,6 +185,9 @@ def build_report(core, store=None, log_bytes=6 * 1024 * 1024):
             archive.writestr(name, json.dumps(redact(value), indent=2, default=str))
         folder = log_dir(core.DATA_DIR)
         logs = sorted(folder.glob(LOG_NAME + '*'), key=lambda p: p.stat().st_mtime, reverse=True) if folder.is_dir() else []
+        # Stack dumps from event-loop stalls (loop_watchdog.py): small, and the best evidence for a freeze.
+        for path in (sorted(folder.glob('stalls.log*')) if folder.is_dir() else []):
+            archive.writestr('logs/' + path.name, redact_text(tail(path, 512 * 1024).decode('utf-8', 'replace')))
         remaining = log_bytes
         for path in logs:
             if remaining <= 0:
