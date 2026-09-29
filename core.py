@@ -103,8 +103,8 @@ def save_settings(updated):
 
 
 # Commands whose replies contain private details stay private even in the commands channel.
-PRIVATE_COMMANDS = {'dm', 'publiccommands', 'assign report', 'meeting report assign', 'diagnostics', 'reportissue',
-                    'notattending', 'attendance'}
+PRIVATE_COMMANDS = {'dm', 'publiccommands', 'ftcteam report assign', 'diagnostics', 'reportissue',
+                    'ftcteam notattending', 'ftcteam attendance'}
 
 
 def commands_channel():
@@ -225,8 +225,25 @@ def resolve_name(query):
 ADMIN_COMMANDS = {
     'adminhelp','diagnostics','reportissue','temperature','chamber','move','home','plateswap','rename','dm',
     'laptops','laptop','server','reboot','setnotificationchannel','setcommandschannel',
-    'publiccommands','archive','unarchive','assign','meeting',
+    'publiccommands','archive','unarchive','ftcteam report',
 }
+# Groups whose subcommands each get their own permission level (e.g. /ftcteam attending vs /ftcteam report assign).
+PER_SUBCOMMAND_GROUPS = {'ftcteam'}
+# Team commands moved under /ftcteam: saved permission overrides for the old names still apply to the new ones.
+LEGACY_PERMISSION_KEYS = {
+    'ftcteam links': ('ftc', 'website', 'management'), 'ftcteam note': ('rememberthis', 'remember', 'forget'),
+    'ftcteam remind': ('remindme',), 'ftcteam reminders': ('reminders',), 'ftcteam cancelreminder': ('cancelreminder',),
+    'ftcteam attending': ('attending',), 'ftcteam notattending': ('notattending',), 'ftcteam attendance': ('attendance',),
+    'ftcteam report': ('assign', 'meeting'),
+}
+
+
+def permission_key(qualified_name):
+    """The name permissions are set on: the top-level command, or 'group sub' for PER_SUBCOMMAND_GROUPS."""
+    parts = str(qualified_name).split()
+    if len(parts) > 1 and parts[0] in PER_SUBCOMMAND_GROUPS:
+        return ' '.join(parts[:2])
+    return parts[0] if parts else ''
 # Permission levels, most to least open.
 LEVELS = ('everyone', 'role', 'admin', 'disabled')
 LEVEL_LABELS = {'everyone': 'Everyone', 'role': 'Allowed roles + admins', 'admin': 'Admins only', 'disabled': 'Off'}
@@ -264,8 +281,11 @@ def default_level(root):
 
 
 def command_level(root):
-    """Effective permission level for a top-level command name (e.g. 'plateswap' for /plateswap check)."""
-    level = (settings.get('command_permissions') or {}).get(root, default_level(root))
+    """Effective permission level for a permission key (e.g. 'plateswap' for /plateswap check, 'ftcteam note')."""
+    overrides = settings.get('command_permissions') or {}
+    level = overrides.get(root)
+    if level is None:
+        level = next((overrides[old] for old in LEGACY_PERMISSION_KEYS.get(root, ()) if old in overrides), default_level(root))
     if level not in LEVELS:
         level = default_level(root)
     if root in LOCKED_COMMANDS and level in ('everyone', 'role'):
@@ -325,7 +345,7 @@ class PrinterTree(app_commands.CommandTree):
                 embed=card('Unavailable', 'Use this bot in an authorized server.', RED), ephemeral=ephemeral(interaction))
             return False
         command = interaction.command
-        if command and not await require(interaction, command.qualified_name.split()[0]):
+        if command and not await require(interaction, permission_key(command.qualified_name)):
             return False
         log.info('%s ran %s in channel %s', who(interaction), command_summary(interaction), interaction.channel_id)
         return True
@@ -723,7 +743,7 @@ def help_embed(admin=False):
         ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'View, add, start and manage jobs. Starts and changes ask for confirmation and are logged.'),
         ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
         ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),
-        ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','attending','notattending','attendance','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes, reminders and meeting attendance.'),
+        ('🗓️ FTC team (/ftcteam)', {'ftcteam'}, 'Assign meeting-report writers.' if admin else 'Meeting attendance, shared notes, reminders and team links.'),
         ('💻 Laptops & server', {'laptops','laptop','server','reboot'}, 'MeshCentral laptops and commands, Pi status and reboot.'),
     ]
     commands = []
@@ -734,7 +754,7 @@ def help_embed(admin=False):
                 collect(child, root)
         else:
             # /help lists what everyone (or allowed roles) can use; /adminhelp lists admin-only commands. Off commands are hidden.
-            level = command_level(root)
+            level = command_level(permission_key(command.qualified_name))
             if level != 'disabled' and (level == 'admin') == admin:
                 commands.append((root, command.qualified_name))
     for command in bot.tree.get_commands():

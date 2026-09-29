@@ -80,7 +80,7 @@ class MeshHTTPTests(unittest.IsolatedAsyncioTestCase):
         from aiohttp.test_utils import TestClient,TestServer
         from dashboard import Dashboard,password_hash
         from queueing import Engine
-        from team import Team
+        from ftcTeamManagement.team import Team
         self.tmp=tempfile.TemporaryDirectory();d=Path(self.tmp.name);self.store=Store(d/'db')
         core=SimpleNamespace(DATA_DIR=d,CONFIG={},ALLOWED_GUILD_IDS={123},EXAMPLE_MODE=True,log=logging.getLogger('test'))
         self.dashboard=Dashboard(core,self.store,Engine(core,self.store));self.team=Team(core,self.store,self.dashboard)

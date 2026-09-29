@@ -102,20 +102,19 @@ Limits and safety rules: [Printer controls](printer-controls.md).
 
 Details: [Swapmod](swapmod.md).
 
-### Team
+### FTC team (`/ftcteam`)
+
+Every team-facing command is under `/ftcteam`. Each subcommand has its own permission level in the dashboard.
 
 | Command | Who | What it does |
 |---|---|---|
-| `/ftc` · `/website` · `/management` | E | Links configured in dashboard Team tools |
-| `/rememberthis title text` · `/remember query?` | E | Save / search shared notes for this server |
-| `/forget note_id` | E | Delete your own note (admins can delete any) |
-| `/remindme minutes text` · `/reminders` · `/cancelreminder reminder_id` | E | Personal DM reminders |
-| `/attending meeting?` · `/notattending reason? meeting?` | E | Say whether you'll be at the next meeting, or a chosen meeting date |
-| `/attendance meeting?` | E | Who is attending, not attending and hasn't replied (only admins see reasons) |
-| `/assign report member? announce?` | A | Assign a practice report writer (chosen, or picked from the roster) |
-| `/meeting report assign member? announce?` | A | Same as `/assign report` |
-| `/archive channel` · `/unarchive channel` | A | Make a text channel read-only and move it to Archive, or restore it |
-| `/dm user message` | A | Send a DM from the bot after a private preview. The recipient isn't told who sent it. |
+| `/ftcteam links` | E | FTC invite, team website and dashboard links configured in dashboard Team tools |
+| `/ftcteam note save title text` · `/ftcteam note find query?` | E | Save / search shared notes for this server |
+| `/ftcteam note delete note_id` | E | Delete your own note (admins can delete any) |
+| `/ftcteam remind minutes text` · `/ftcteam reminders` · `/ftcteam cancelreminder reminder_id` | E | Personal DM reminders |
+| `/ftcteam attending meeting?` · `/ftcteam notattending reason? meeting?` | E | Say whether you'll be at the next meeting, or a chosen meeting date |
+| `/ftcteam attendance meeting?` | E | Who is attending, not attending and hasn't replied (only admins see reasons) |
+| `/ftcteam report assign member? announce?` | A | Assign a meeting-report writer (chosen, or picked from the roster) |
 
 Details: [Team tools](team-tools.md).
 
@@ -123,6 +122,8 @@ Details: [Team tools](team-tools.md).
 
 | Command | Who | What it does |
 |---|---|---|
+| `/archive channel` · `/unarchive channel` | A | Make a text channel read-only and move it to Archive, or restore it |
+| `/dm user message` | A | Send a DM from the bot after a private preview. The recipient isn't told who sent it. |
 | `/adminhelp` | A | Admin command guide |
 | `/setnotificationchannel` · `/setcommandschannel` | A | Use the current channel for notifications or commands |
 | `/rename new_name name?` | A | Change a printer's display name (dashboard and Discord only; history is kept) |
@@ -160,9 +161,9 @@ How repeats are handled:
 - **Always private, even in the commands channel:**
   - `/dm`
   - `/publiccommands`
-  - `/assign report` and `/meeting report assign` (the optional `announce` posts separately in the practice channel)
+  - `/ftcteam report assign` (the optional `announce` posts separately in the practice channel)
   - `/diagnostics` and `/reportissue`
-  - `/notattending` and `/attendance`
+  - `/ftcteam notattending` and `/ftcteam attendance`
 - **Unchanged:** printer notifications still go to the **notification channel**.
 
 **Hiding the commands in other channels (optional):** the bot can't remove its commands from Discord's command list. A server admin can do that in **Server Settings → Integrations → *the bot* → Channels**, by allowing only the commands channel.

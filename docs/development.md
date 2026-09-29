@@ -23,11 +23,11 @@ How the code is organised, how to run it locally, and how changes are tested and
 | `printer_errors.py`, `bambu_error_catalog.json` | Offline Bambu HMS and print-error descriptions. See [ERROR_SOURCES.md](../ERROR_SOURCES.md). |
 | `camera_capture.py`, `live_camera.py` | Single-frame capture and shared live camera connections |
 | `progress_notifications.py` | Progress milestone de-duplication |
-| `team.py` | Team notes, reminders, assignments, practice scheduler, channel archive, server status/reboot |
+| `ftcTeamManagement/` | FTC team management: `team.py` (notes, reminders, attendance, report assignments, practice scheduler, plus the archive/MeshCentral/server backend) and `team_discord.py` (the `/ftcteam` Discord commands) |
 | `diagnostics.py` | Rotating log file, error IDs, redacted diagnostic ZIP, `/diagnostics` |
 | `issue_reports.py` | Problem reports sent as GitHub issues, `/reportissue` |
 | `configure.py` | Creates `config.json` at install time (imports the old bot) and the initial password |
-| `discord_Intergration/` | Discord commands: queue (`discord_queue.py`), controls, team tools, DMs/rename/file browsing (`extra_discord.py`) |
+| `discord_Intergration/` | Discord commands: queue (`discord_queue.py`), controls, server and admin tools (`server_discord.py`: archive, laptops, server, reboot), DMs/rename/file browsing (`extra_discord.py`) |
 | `swapMod/` | Swapmod A1m plate-swap logic and its Discord commands |
 | `laptopManagement_Intergration/` | MeshCentral client and [LAPTOPS.md](../laptopManagement_Intergration/LAPTOPS.md) |
 | `Updater/` | Version (`version.py`), GitHub and ZIP updates, package validation, the root-owned worker, `update.sh`, `install-web-updater.sh` |

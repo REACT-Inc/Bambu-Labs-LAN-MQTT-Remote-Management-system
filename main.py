@@ -11,8 +11,9 @@ from discord_Intergration.discord_queue import install
 from discord_Intergration.extra_discord import install as install_extras
 from discord_Intergration.controls_discord import install as install_controls
 from swapMod.plate_swap_discord import install as install_plate_swap
-from team import Team
-from discord_Intergration.team_discord import install as install_team
+from ftcTeamManagement.team import Team
+from ftcTeamManagement.team_discord import install as install_team
+from discord_Intergration.server_discord import install as install_server
 from loop_watchdog import LoopWatchdog
 
 
@@ -29,6 +30,7 @@ async def main():
     install(core,store,engine,dashboard)
     team=Team(core,store,dashboard)
     install_team(core,team)
+    install_server(core,team)
     install_extras(core,store)
     install_controls(core,dashboard.controls)
     install_plate_swap(core,engine)
