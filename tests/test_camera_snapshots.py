@@ -1,6 +1,6 @@
 import asyncio,time,unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from camera_snapshots import SnapshotRotation
 
 
@@ -24,6 +24,8 @@ class SnapshotRotationTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(task,return_exceptions=True)
 
     async def test_nothing_happens_while_nobody_is_viewing(self):
+        with patch('camera_snapshots.time.monotonic', return_value=1.0):
+            self.assertFalse(self.rotation.viewing())  # even just after the Pi boots
         await self.run_for(0.3)
         self.assertEqual(self.calls,[])
 

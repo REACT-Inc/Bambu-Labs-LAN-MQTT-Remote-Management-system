@@ -23,7 +23,7 @@ class SnapshotRotation:
         self.images = {}      # name -> (jpeg bytes, unix time taken)
         self.errors = {}      # name -> (message, unix time)
         self.retry_at = {}    # name -> monotonic time before which the camera is skipped
-        self.viewed = 0.0
+        self.viewed = None
         self.task = None
 
     def touch(self):
@@ -31,7 +31,7 @@ class SnapshotRotation:
         self.viewed = time.monotonic()
 
     def viewing(self):
-        return time.monotonic() - self.viewed < self.idle_after
+        return self.viewed is not None and time.monotonic() - self.viewed < self.idle_after
 
     def has_camera(self, name):
         config = getattr(self.core, 'printer_config', lambda n: None)(name) or {}
