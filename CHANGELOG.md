@@ -6,6 +6,7 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 
 ### Fixed
 - **Dashboard unresponsive with A1-family cameras (#40).** 1.3.0-beta.1 kept every printer's camera streaming while the dashboard was open. A1 and A1 mini cameras that didn't answer left browser requests waiting up to 25 seconds each, which used up the browser's connections to the Pi. Control clicks and page refreshes then queued behind them, so buttons stayed purple and nothing reached the printers. Cameras now use staggered still snapshots: one camera at a time, only while the dashboard is open, and the browser never waits on a camera. Live view waits at most 10 seconds for a frame.
+- **Whole-service stalls (#40).** An independent thread detects when the shared dashboard and Discord event loop stops making progress. It writes thread stacks to the service journal after 15 seconds and exits after 60 seconds so systemd restarts the service. Uncertain queue jobs still require review after a restart.
 
 ## 1.3.0-beta.1
 
