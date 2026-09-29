@@ -2,6 +2,22 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.3.0-beta.2)
+
+### Changed
+- **Team commands moved under `/ftcteam`.** All team-facing Discord commands are now subcommands of `/ftcteam`, and the old names are gone:
+
+  | Old | New |
+  |---|---|
+  | `/ftc`, `/website`, `/management` | `/ftcteam links` (all three in one reply) |
+  | `/attending`, `/notattending`, `/attendance` | `/ftcteam attending`, `/ftcteam notattending`, `/ftcteam attendance` |
+  | `/rememberthis`, `/remember`, `/forget` | `/ftcteam note save`, `/ftcteam note find`, `/ftcteam note delete` |
+  | `/remindme`, `/reminders`, `/cancelreminder` | `/ftcteam remind`, `/ftcteam reminders`, `/ftcteam cancelreminder` |
+  | `/assign report`, `/meeting report assign` | `/ftcteam report assign` |
+
+  Each `/ftcteam` subcommand has its own permission level in **Settings → Discord command permissions**, and saved permissions for the old names carry over. `/archive`, `/unarchive`, `/dm`, `/laptops`, `/laptop`, `/server` and `/reboot` keep their names.
+- **Code layout.** The team code moved into the `ftcTeamManagement/` folder (`team.py`, `team_discord.py`). The server and admin commands moved to `discord_Intergration/server_discord.py`.
+
 ## 1.3.0-beta.1
 
 Includes the 1.2.1-beta.1 fixes (commands-channel replies and update checks).
