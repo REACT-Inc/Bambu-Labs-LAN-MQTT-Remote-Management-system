@@ -102,7 +102,9 @@ class Dashboard:
         except Exception as exc:
             error_id = diagnostics.log_error(self.core.log, f'Dashboard request {request.method} {request.path} failed', exc)
             response = web.json_response({'error':f'Request failed (error ID {error_id}). Download a diagnostic report under Settings.'}, status=500)
-        response.headers.update({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
+        # Default to no-store, but keep a handler's own caching (cached camera stills are reloaded by the cards every 5 s).
+        response.headers.setdefault('Cache-Control','no-store')
+        response.headers.update({'X-Content-Type-Options':'nosniff',
             'Referrer-Policy':'same-origin', 'Content-Security-Policy':"default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
         return response
 
