@@ -14,6 +14,7 @@ from swapMod.plate_swap_discord import install as install_plate_swap
 from ftcTeamManagement.team import Team
 from ftcTeamManagement.team_discord import install as install_team
 from discord_Intergration.server_discord import install as install_server
+from backupDiscordBot import heartbeat
 
 
 async def main():
@@ -58,11 +59,13 @@ async def main():
             core.log.exception('Discord stopped. Dashboard remains available; correct token/access and restart the service.')
     task=asyncio.create_task(discord_task())
     scheduler=asyncio.create_task(team.scheduler())
+    # Tells the backup Discord bot (backupDiscordBot/) that this service is alive and its bot is connected.
+    beat=asyncio.create_task(heartbeat.run(core,core.DATA_DIR,dashboard.release))
     try:
         await stopped.wait()
     finally:
-        scheduler.cancel()
-        await asyncio.gather(scheduler,return_exceptions=True)
+        scheduler.cancel();beat.cancel()
+        await asyncio.gather(scheduler,beat,return_exceptions=True)
         for t in list(engine.tasks):t.cancel()
         await asyncio.gather(*engine.tasks,return_exceptions=True)
         await core.bot.close()

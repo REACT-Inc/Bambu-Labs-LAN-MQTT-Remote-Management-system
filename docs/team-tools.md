@@ -1,6 +1,6 @@
 # Team tools
 
-All team-facing Discord commands are under **`/ftcteam`** (FTC team management). The code lives in the `ftcTeamManagement/` folder.
+All team-facing Discord commands are under **`/ftcteam`** (FTC team management). The code lives in the `ftcTeamManagement/` folder. An optional [backup bot](../backupDiscordBot/BACKUP_BOT.md) keeps `/ftcteam` working while the main bot is offline.
 
 Robotics-team helpers shared between Discord and the dashboard's **Team tools** tab. Records are kept per Discord server (only servers in `guild_ids`).
 

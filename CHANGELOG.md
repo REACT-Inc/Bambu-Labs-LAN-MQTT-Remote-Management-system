@@ -4,6 +4,14 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 
 ## Unreleased (1.3.0-beta.2)
 
+### Added
+- **Backup Discord bot (`backupDiscordBot/`).** An optional second, team-only bot, running as its own `pm-backup-bot` service with its own bot token.
+  - **Taking over:** when the main service stops, crashes or freezes, or its Discord bot disconnects, for 90 s, the backup logs in and serves `/ftcteam`, including reminders and report assignments.
+  - **Handing back:** it removes its commands and logs out once the main bot has been back for 30 s.
+  - **How it knows:** the main service now writes a heartbeat file every 15 s.
+  - **Scope:** no printer commands.
+  - **Setup:** see [BACKUP_BOT.md](backupDiscordBot/BACKUP_BOT.md).
+
 ### Changed
 - **Team commands moved under `/ftcteam`.** All team-facing Discord commands are now subcommands of `/ftcteam`, and the old names are gone:
 

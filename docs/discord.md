@@ -24,6 +24,8 @@ The bot runs inside the same service as the dashboard and uses the same printers
 
    It doesn't need the Administrator permission.
 
+
+**Backup bot (optional):** a second, team-only Discord bot can take over the `/ftcteam` commands automatically while this bot is offline, and hand them back when it returns. See [BACKUP_BOT.md](../backupDiscordBot/BACKUP_BOT.md).
 ## Who can use what
 
 - **Allowed servers:** commands only work in servers listed in `guild_ids`, never in DMs.

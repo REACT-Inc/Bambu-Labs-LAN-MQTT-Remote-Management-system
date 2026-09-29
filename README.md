@@ -53,6 +53,7 @@ The guides below are in the `docs/` folder of the [GitHub repository](https://gi
 | [Printer controls & camera](docs/printer-controls.md) | Temperatures, speed, fans, chamber, movement, lights, live view |
 | [Swapmod A1m](docs/swapmod.md) | Plate-swap batches for equipped A1 minis |
 | [Team tools](docs/team-tools.md) | `/ftcteam` commands: attendance, report writers, notes, reminders, links; practice schedule, archiving, server and reboot |
+| [Backup Discord bot](backupDiscordBot/BACKUP_BOT.md) *(in release)* | A second, team-only bot that serves `/ftcteam` while the main bot is offline |
 | [Laptops (MeshCentral)](laptopManagement_Intergration/LAPTOPS.md) *(in release)* | Connecting MeshCentral and running approved laptop commands |
 | [Updates & releases](docs/updates.md) | Dashboard and GitHub updates, release channels, manual updates, publishing releases |
 | [Troubleshooting](docs/troubleshooting.md) | Logs, error IDs, diagnostic reports, problem reports, common problems |
