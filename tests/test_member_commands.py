@@ -143,15 +143,21 @@ class MemberCommandTests(unittest.IsolatedAsyncioTestCase):
             dash=Dashboard(self.core,store,Engine(self.core,store))
             from discord_Intergration.controls_discord import install
             from swapMod.plate_swap_discord import install as install_swap
-            from discord_Intergration.team_discord import install as install_team
-            from team import Team
-            install(self.core,dash.controls);install_swap(self.core,SimpleNamespace(plate_swap=MagicMock()));install_team(self.core,Team(self.core,store,dash))
+            from ftcTeamManagement.team_discord import install as install_team
+            from ftcTeamManagement.team import Team
+            from discord_Intergration.server_discord import install as install_server
+            team=Team(self.core,store,dash)
+            install(self.core,dash.controls);install_swap(self.core,SimpleNamespace(plate_swap=MagicMock()));install_team(self.core,team);install_server(self.core,team)
             class Request:
                 def __init__(self,data):self.data=data
                 async def json(self):return self.data
             state=dash.permission_state();rows={r['command']:r for r in state['commands']}
             self.assertEqual((rows['pause']['level'],rows['move']['level'],rows['reboot']['locked']),('everyone','admin',True))
             self.assertIn('plateswap check',rows['plateswap']['subcommands'])
+            # /ftcteam: one row per subcommand, each with its own level.
+            self.assertNotIn('ftcteam',rows)
+            self.assertEqual((rows['ftcteam attending']['level'],rows['ftcteam report']['level']),('everyone','admin'))
+            self.assertEqual(rows['ftcteam note']['subcommands'],['ftcteam note save','ftcteam note find','ftcteam note delete'])
             for bad in [{'levels':{'nope':'admin'}},{'levels':{'pause':'sometimes'}},{'levels':{'reboot':'everyone'}},{'levels':{},'member_role_ids':'-5'}]:
                 with self.assertRaises(ValueError):await dash.save_permissions(Request(bad))
             response=await dash.save_permissions(Request({'levels':{'move':'role','pause':'everyone','fan':'admin'},'member_role_ids':'555\n777'}))

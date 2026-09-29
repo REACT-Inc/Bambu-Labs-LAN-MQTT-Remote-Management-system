@@ -260,10 +260,14 @@ class Dashboard:
     def permission_state(self):
         """Every top-level Discord command with its default and current permission level."""
         core=self.core;rows=[]
+        leaves=lambda c:[x.qualified_name for x in c.walk_commands() if not hasattr(x,'commands')] if hasattr(c,'walk_commands') else [c.qualified_name]
         for command in sorted(core.bot.tree.get_commands(),key=lambda c:c.name):
-            names=[c.qualified_name for c in command.walk_commands() if not hasattr(c,'commands')] if hasattr(command,'walk_commands') else [command.name]
-            rows.append({'command':command.name,'subcommands':names,'description':command.description,
-                'default':core.default_level(command.name),'level':core.command_level(command.name),'locked':command.name in core.LOCKED_COMMANDS})
+            # Groups like /ftcteam get one row per subcommand (or subcommand group), each with its own level.
+            parts=sorted(command.commands,key=lambda c:c.name) if command.name in core.PER_SUBCOMMAND_GROUPS else [command]
+            for part in parts:
+                key=core.permission_key(part.qualified_name)
+                rows.append({'command':key,'subcommands':leaves(part),'description':part.description,
+                    'default':core.default_level(key),'level':core.command_level(key),'locked':key in core.LOCKED_COMMANDS})
         return {'commands':rows,'levels':core.LEVEL_LABELS,'member_role_ids':[str(r) for r in core.settings.get('member_role_ids') or []]}
 
     async def permissions(self,request):

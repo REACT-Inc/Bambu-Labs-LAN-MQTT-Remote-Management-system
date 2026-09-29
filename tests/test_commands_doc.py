@@ -29,16 +29,18 @@ class CommandsDocTests(unittest.IsolatedAsyncioTestCase):
     def registered(self):
         from queueing import Store,Engine
         from dashboard import Dashboard
-        from team import Team
+        from ftcTeamManagement.team import Team
         from discord_Intergration.discord_queue import install as install_queue
         from discord_Intergration.extra_discord import install as install_extras
-        from discord_Intergration.team_discord import install as install_team
+        from ftcTeamManagement.team_discord import install as install_team
         from discord_Intergration.controls_discord import install as install_controls
         from swapMod.plate_swap_discord import install as install_swap
         store=Store(Path(self.tmp.name)/'doc.sqlite');self.store=store
         engine=Engine(self.core,store);dashboard=Dashboard(self.core,store,engine)
         # Same installers as main.py.
-        install_queue(self.core,store,engine,dashboard);install_team(self.core,Team(self.core,store,dashboard))
+        from discord_Intergration.server_discord import install as install_server
+        team=Team(self.core,store,dashboard)
+        install_queue(self.core,store,engine,dashboard);install_team(self.core,team);install_server(self.core,team)
         install_extras(self.core,store);install_controls(self.core,dashboard.controls);install_swap(self.core,engine)
         for extra in ('diagnostics','issue_reports'):
             if (ROOT/(extra+'.py')).exists():
@@ -50,7 +52,7 @@ class CommandsDocTests(unittest.IsolatedAsyncioTestCase):
             root=root or command.name
             if isinstance(command,discord.app_commands.Group):
                 for child in command.commands:walk(child,root)
-            else:result[command.qualified_name]='Admin' if root in self.core.ADMIN_COMMANDS else 'Everyone'
+            else:result[command.qualified_name]='Admin' if self.core.permission_key(command.qualified_name) in self.core.ADMIN_COMMANDS else 'Everyone'
         for command in self.core.bot.tree.get_commands():walk(command)
         return result
 

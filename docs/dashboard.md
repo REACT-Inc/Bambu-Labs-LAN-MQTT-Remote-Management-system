@@ -75,7 +75,7 @@ Settings and records shared with Discord. See [Team tools](team-tools.md).
 
 - **Practice & report assignments:**
   - schedule settings: time zone, days, time, channel, role and roster
-  - team links used by `/ftc`, `/website` and `/management`
+  - team links used by `/ftcteam links`
   - **Assign now**, and the assignment history
 - **Meeting attendance:** who is attending, not attending or hasn't replied for the next six meetings (per server), with reasons. You can set or clear someone's reply by user ID.
 - **Remember this:** shared notes per server.
