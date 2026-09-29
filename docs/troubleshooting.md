@@ -114,6 +114,20 @@ Other destinations, such as a Discord webhook or email, can be added in `issue_r
 1. Check the H2D recognises its USB drive and reports free space. Don't reformat a drive that holds files you need.
 2. Send a problem report with the queue error, or attach the output of `sudo journalctl -u 3d-printer-management -n 100 --no-pager`.
 
+### The service restarted itself ("Event loop stalled")
+
+The dashboard and the Discord bot share one event loop. A watchdog thread checks it every second:
+- **After 15 seconds without progress:** it logs `Event loop has not run for … seconds` and writes every thread's stack to the service journal and to `logs/stalls.log`.
+- **After 60 seconds:** it exits, and systemd restarts the service about 10 seconds later.
+- **Jobs that were running:** they become **needs review** after the restart. They're never resubmitted.
+
+**Where to find the evidence:** the stack dump shows where it was stuck.
+- `sudo journalctl -u 3d-printer-management -n 200 --no-pager`
+- `/var/lib/3d-printer-management/logs/stalls.log`
+- the **diagnostic report** ZIP, which includes `stalls.log`
+
+Attach it to a problem report or GitHub issue. If this repeats, it's a bug; please report it with that file.
+
 ### A job is stuck in "needs review"
 
 This is deliberate: the app couldn't confirm what the printer did. Look at the printer, then record what actually happened with **Mark finished / failed / cancelled**. See [Print queue](print-queue.md#when-a-job-needs-review).

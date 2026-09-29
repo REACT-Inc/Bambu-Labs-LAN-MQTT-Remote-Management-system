@@ -57,6 +57,14 @@ class DiagnosticsTests(unittest.TestCase):
             self.assertIn('Printer offline',z.read('logs/management.log').decode())
             self.assertEqual(len(json.loads(z.read('recent_errors.json'))),1)
 
+    def test_report_includes_stall_dumps(self):
+        (self.data/'logs').mkdir()
+        (self.data/'logs'/'stalls.log').write_text('=== Event loop stall ===\nThread 0x1 (most recent call first):\n  File "core.py", line 1 in snapshot access_code=12345678\n')
+        core=SimpleNamespace(DATA_DIR=self.data,CONFIG={},settings={},names=lambda:[])
+        with zipfile.ZipFile(io.BytesIO(diagnostics.build_report(core)[1])) as z:
+            text=z.read('logs/stalls.log').decode()
+        self.assertIn('Event loop stall',text);self.assertNotIn('12345678',text)
+
     def test_report_without_logs(self):
         core=SimpleNamespace(DATA_DIR=self.data,CONFIG={},settings={},names=lambda:[])
         with zipfile.ZipFile(io.BytesIO(diagnostics.build_report(core)[1])) as z:

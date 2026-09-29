@@ -132,6 +132,14 @@ class UpdateHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,200);self.assertTrue(self.core.update_pending())
         self.assertEqual((await self.client.post('/api/testnotification',json={},headers=h)).status,503)
         self.assertEqual((await self.client.get('/health')).status,200)
+    async def test_cached_snapshots_keep_their_caching_everything_else_no_store(self):
+        await self.login()
+        self.dashboard.snapshots.images['Test']=(b'\xff\xd8x\xff\xd9',123.0)
+        r=await self.client.get('/api/snapshot/Test?t=123.0')
+        self.assertEqual((r.status,r.headers['Cache-Control']),(200,'private, max-age=60'))
+        self.assertEqual((await self.client.get('/api/state')).headers['Cache-Control'],'no-store')
+        self.assertEqual((await self.client.get('/api/snapshot/Test')).headers['X-Content-Type-Options'],'nosniff')
+
     async def test_running_printer_blocks_update(self):
         h=await self.login();preview=await (await self.upload(h)).json();self.core.state_data=lambda n:('RUNNING',0,{},True)
         original=Path.exists
