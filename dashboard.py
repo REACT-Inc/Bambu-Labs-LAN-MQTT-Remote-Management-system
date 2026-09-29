@@ -14,6 +14,7 @@ from printer_errors import describe as describe_error
 from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits
 from live_camera import Cameras
+from camera_snapshots import SnapshotRotation
 from queueing import MAX_UPLOAD, options, validate_archive
 import diagnostics
 from issue_reports import IssueReports
@@ -45,6 +46,7 @@ class Dashboard:
         self.controls = Controls(core,store)
         self.cameras = Cameras(core)
         core.live_cameras = self.cameras
+        self.snapshots = SnapshotRotation(core, self.cameras)
         self.auth_file = core.DATA_DIR/'auth.json'
         self.uploads = core.DATA_DIR/'uploads'
         self.uploads.mkdir(exist_ok=True)
@@ -56,8 +58,10 @@ class Dashboard:
         try:self.release=json.loads((Path(__file__).parent/'release.json').read_text()).get('id','')
         except (OSError,ValueError):self.release=''
         self.app.on_shutdown.append(self.cameras.close)
+        self.app.on_startup.append(self.snapshots.start);self.app.on_shutdown.append(self.snapshots.stop)
         self.app.add_routes([
             web.get('/api/liveframe/{name}',self.cameras.frame_response),
+            web.get('/api/snapshot/{name}',self.snapshots.response),
             web.get('/api/live/{name}',self.cameras.stream),
             web.post('/api/plateswap/{name}/{action}',self.plate_swap),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
@@ -152,10 +156,11 @@ class Dashboard:
         response=web.json_response({'ok':True});response.del_cookie('pm_session');return response
 
     async def state(self, request):
+        self.snapshots.touch()
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=not getattr(self.core,'EXAMPLE_MODE',False) and (getattr(self.core,'printer_config',lambda n:None)(name) or {}).get('camera_type') in ('rtsp','jpeg_tcp'),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j.pop('asset',None)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,

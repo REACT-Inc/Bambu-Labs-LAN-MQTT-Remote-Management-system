@@ -3,7 +3,6 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let state=null, csrf='', selectedPrinter=null, cameraUrl=null, polling=false, settingsLoaded=false;
 let pendingConfirmation=null;
-const camThumbs={};  // latest camera still per printer, shown on the Overview cards
 const terminal=new Set(['finished','failed','cancelled']);
 async function api(path,body,method='POST'){
  const headers={'X-PM':'1'};
@@ -99,7 +98,7 @@ function printerCard(x){
  actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':'')+(lt.busy?' pending':''));
  return `<article class="printer-card${x.connected?'':' offline'}" ${n} tabindex="0" role="button" aria-label="Open ${esc(x.display_name||x.name)}">
 <div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${statusClass(x.state,x.connected)}">${esc(x.connected?x.state:'OFFLINE')}</span></div>
-${x.has_camera?`<div class="pc-cam"><img data-cam="${esc(x.name)}" alt="${esc(x.display_name||x.name)} camera"${camThumbs[x.name]?` src="${camThumbs[x.name]}"`:' hidden'}></div>`:''}
+${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/${encodeURIComponent(x.name)}?t=${x.snapshot.time}" alt="${esc(x.display_name||x.name)} camera"><small class="pc-cam-time">📷 ${new Date(x.snapshot.time*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</small>`:`<small class="pc-cam-msg">${esc(x.snapshot?.error||'Waiting for the first snapshot…')}</small>`}</div>`:''}
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
@@ -111,7 +110,7 @@ async function downloadFileListing(printer,button){if(button)button.disabled=tru
  catch(e){notice(e.message);}finally{if(button)button.disabled=false;}}
 function openPrinter(printer){selectedPrinter=printer;loadSwapSettings();$('cameraImage').hidden=true;$('cameraMessage').textContent='';
  $('detailDialog').querySelector('.drawer-body').scrollTop=0;renderDetails();if(!$('detailDialog').open)$('detailDialog').showModal();
- if(typeof autoStartLive==='function')autoStartLive();}
+ if(typeof showCamera==='function')showCamera();}
 // Popups: click outside or press Esc to close, with a short animation.
 function closeDialog(d){if(!d.open||d.dataset.closing)return;d.dataset.closing='1';
  const done=()=>{if(!d.dataset.closing)return;delete d.dataset.closing;d.classList.remove('closing');d.close();};
