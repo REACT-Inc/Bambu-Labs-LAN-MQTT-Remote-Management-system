@@ -159,7 +159,7 @@ class Cameras:
             except ValueError:pass
             # A new feed resets its counter; only use versions belonging to this feed.
             if request.query.get('feed')!=str(id(feed)):version=0
-            try:version,frame=await feed.next(version,25)
+            try:version,frame=await feed.next(version,10)
             except asyncio.TimeoutError:
                 raise web.HTTPServiceUnavailable(text=feed.error or 'No camera frames received. Check camera settings, access code and LAN connectivity.')
             return web.Response(body=frame,content_type='image/jpeg',headers={

@@ -13,6 +13,7 @@ from discord_Intergration.controls_discord import install as install_controls
 from swapMod.plate_swap_discord import install as install_plate_swap
 from team import Team
 from discord_Intergration.team_discord import install as install_team
+from loop_watchdog import LoopWatchdog
 
 
 async def main():
@@ -46,6 +47,8 @@ async def main():
     stopped=asyncio.Event()
     for sig in (signal.SIGINT,signal.SIGTERM):
         asyncio.get_running_loop().add_signal_handler(sig,stopped.set)
+    watchdog=LoopWatchdog(core.log,stall_file=diagnostics.log_dir(core.DATA_DIR)/'stalls.log')
+    watchdog.start()
 
     async def discord_task():
         if not core.DISCORD_BOT_TOKEN:
@@ -59,6 +62,7 @@ async def main():
     try:
         await stopped.wait()
     finally:
+        await watchdog.stop()
         scheduler.cancel()
         await asyncio.gather(scheduler,return_exceptions=True)
         for t in list(engine.tasks):t.cancel()

@@ -20,7 +20,7 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
   - **Status:** state (IDLE, RUNNING, PAUSE, FAILED, OFFLINE…), current file, progress, time left, and nozzle/bed temperatures.
   - **Errors:** any printer error, with the official Bambu description.
   - **Filaments:** small colour swatches for the loaded AMS slots.
-  - **Camera:** printers with a camera show an image that refreshes every few seconds while the Overview tab is on screen.
+  - **Camera:** printers with a camera show a **still snapshot** with the time it was taken. While the dashboard is open, the Pi takes one snapshot at a time, one printer after another, so each card updates about every 30–40 seconds. A camera that doesn't answer shows *Camera unavailable* and is retried a couple of minutes later.
   - **Buttons:** only the ones that apply right now: **Pause** and **Stop** (both ask for confirmation), **Resume**, the chamber **light** 💡, and **N queued →** (opens that printer's queue).
   - **Waiting for the printer:** a button you've clicked **pulses purple** until the printer reports the result, then shows the real state. For example, the light goes solid amber when it's on. Purple is only used for "waiting". If the printer doesn't report the change in time (10 s for the light, 20 s for other controls), the button goes back and a message says so.
   - **Opening a printer:** click anywhere else on the card (or focus it and press Enter or Space).
@@ -34,7 +34,7 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 | Part | What it shows / does |
 |---|---|
 | Header | Name, state, a progress ring with layers and time left, and **Pause / Resume / Stop / light** |
-| Live camera | Starts automatically when the panel opens (about 1 frame per second). **Stop live view** pauses it and **▶** restarts it. See [Printer controls & camera](printer-controls.md#camera). |
+| Camera | Shows the latest still snapshot straight away. **▶** starts live view (about 1 frame per second) and **Stop live view** stops it. See [Printer controls & camera](printer-controls.md#camera). |
 | Temperature | Tiles for nozzle, bed and chamber. Tap a tile to type a new target. |
 | Print speed | Silent, Standard, Sport, Ludicrous |
 | Fans | A slider per fan, plus all fans. The fan is set when you let go of the slider. It shows *Setting…* until the printer reports the new speed. |
