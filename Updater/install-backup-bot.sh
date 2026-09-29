@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Install (or refresh) the backup Discord bot service. Safe to run repeatedly. It idles until
-# config.json has "backup_bot": {"enabled": true, "token": "<second bot token>"}.
+# Install (or refresh) the backup Discord bot service on the backup Pi (called by install-backup-pi.sh).
+# Safe to run repeatedly. It idles until config.json has a complete "backup_bot" section (see BACKUP_BOT.md).
 set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo 'Run with sudo.'; exit 1; }
 cat > /etc/systemd/system/pm-backup-bot.service <<'UNIT'

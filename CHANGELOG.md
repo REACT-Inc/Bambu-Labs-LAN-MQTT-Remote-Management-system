@@ -5,10 +5,11 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased (1.5.0)
 
 ### Added
-- **Backup Discord bot (`backupDiscordBot/`).** An optional second, team-only bot, running as its own `pm-backup-bot` service with its own bot token.
-  - **Taking over:** when the main service stops, crashes or freezes, or its Discord bot disconnects, for 90 s, the backup logs in and serves `/ftcteam`, including reminders and report assignments.
-  - **Handing back:** it removes its commands and logs out once the main bot has been back for 30 s.
-  - **How it knows:** the main service now writes a heartbeat file every 15 s.
+- **Backup Discord bot (`backupDiscordBot/`).** An optional second, team-only bot that runs on a **separate Pi**, as its own `pm-backup-bot` service with its own bot token. Install it there with `install-backup-pi.sh`.
+  - **Taking over:** when the main Pi stops answering (stopped, crashed, frozen or off the network), or its Discord bot disconnects, for 90 s, the backup logs in and serves `/ftcteam`, including reminders and report assignments.
+  - **Handing back:** once the main bot has been back for 30 s, the backup logs out and sends the notes, reminders, attendance and report assignments it changed back to the main Pi.
+  - **How it knows:** it checks the main dashboard every 5 s over Tailscale or the LAN (`/backup-sync/state`, protected by a shared key, `backup_sync.key`), and keeps a copy of the team data for a take-over.
+  - **No double messages:** the main Pi holds its reminders and report assignments while the backup is serving them.
   - **Scope:** no printer commands.
   - **Setup:** see [BACKUP_BOT.md](backupDiscordBot/BACKUP_BOT.md).
 

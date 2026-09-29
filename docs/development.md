@@ -27,7 +27,7 @@ How the code is organised, how to run it locally, and how changes are tested and
 | `diagnostics.py` | Rotating log file, error IDs, redacted diagnostic ZIP, `/diagnostics` |
 | `issue_reports.py` | Problem reports sent as GitHub issues, `/reportissue` |
 | `configure.py` | Creates `config.json` at install time (imports the old bot) and the initial password |
-| `backupDiscordBot/` | Backup Discord bot (`pm-backup-bot` service): `heartbeat.py` (written by the main service, read by the backup) and `backup_bot.py` (take-over and hand-back, team commands only). See [BACKUP_BOT.md](../backupDiscordBot/BACKUP_BOT.md). |
+| `backupDiscordBot/` | Backup Discord bot for a separate Pi (`pm-backup-bot` service, installed by `install-backup-pi.sh`): `sync_api.py` (the main Pi's `/backup-sync` endpoints) and `backup_bot.py` (health checks, take-over, hand-back and merge, team commands only). See [BACKUP_BOT.md](../backupDiscordBot/BACKUP_BOT.md). |
 | `discord_Intergration/` | Discord commands: queue (`discord_queue.py`), controls, server and admin tools (`server_discord.py`: archive, laptops, server, reboot), DMs/rename/file browsing (`extra_discord.py`) |
 | `swapMod/` | Swapmod A1m plate-swap logic and its Discord commands |
 | `laptopManagement_Intergration/` | MeshCentral client and [LAPTOPS.md](../laptopManagement_Intergration/LAPTOPS.md) |
