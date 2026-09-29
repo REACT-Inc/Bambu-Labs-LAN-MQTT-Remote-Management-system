@@ -1,6 +1,7 @@
 import asyncio
 import time
 import unittest
+import unittest.mock
 from unittest.mock import Mock
 
 from loop_watchdog import LoopWatchdog
@@ -50,6 +51,19 @@ class LoopWatchdogTests(unittest.IsolatedAsyncioTestCase):
         watcher._check()
         self.assertEqual(dump.call_count, 2)
 
+
+    def test_stall_dump_is_also_saved_for_diagnostic_reports(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'stalls.log'
+            watcher = LoopWatchdog(Mock(), clock=lambda: 100.0, exit_process=Mock(), stall_file=path)
+            watcher.last_beat = 80.0
+            with unittest.mock.patch('loop_watchdog.faulthandler.dump_traceback') as dump:
+                watcher._check()
+            self.assertTrue(path.read_text().startswith('\n=== Event loop stall at '))
+            self.assertEqual(dump.call_count, 2)          # journal and file
+            self.assertEqual(dump.call_args.kwargs['all_threads'], True)
 
 if __name__ == '__main__':
     unittest.main()

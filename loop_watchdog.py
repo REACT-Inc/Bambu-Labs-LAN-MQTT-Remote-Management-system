@@ -13,12 +13,14 @@ import time
 
 class LoopWatchdog:
     def __init__(self, log, interval=1, warn_after=15, restart_after=60,
-                 clock=time.monotonic, exit_process=os._exit, dump=None):
+                 clock=time.monotonic, exit_process=os._exit, dump=None, stall_file=None):
         if not 0 < interval < warn_after < restart_after:
             raise ValueError('Watchdog deadlines must be increasing and positive.')
         self.log, self.interval = log, interval
         self.warn_after, self.restart_after = warn_after, restart_after
         self.clock, self.exit_process = clock, exit_process
+        # Also keep the stacks in a file under logs/, so diagnostic reports include them (not only the journal).
+        self.stall_file = stall_file
         self.dump = dump or self._dump_stacks
         self.last_beat = self.clock()
         self.reported = False
@@ -26,10 +28,21 @@ class LoopWatchdog:
         self.thread = None
         self.task = None
 
-    @staticmethod
-    def _dump_stacks():
+    def _dump_stacks(self):
         # stderr goes to the service journal; this shows code locations, not locals.
         faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        if self.stall_file:
+            try:
+                path = str(self.stall_file)
+                # Keep the file small: start over once it passes 256 KB.
+                if os.path.exists(path) and os.path.getsize(path) > 256 * 1024:
+                    os.replace(path, path + '.1')
+                with open(path, 'a', encoding='utf-8') as stream:
+                    stream.write(f'\n=== Event loop stall at {time.strftime("%Y-%m-%d %H:%M:%S %z")} ===\n')
+                    stream.flush()
+                    faulthandler.dump_traceback(file=stream, all_threads=True)
+            except OSError as exc:
+                self.log.warning('Could not write the stall report file: %s', exc)
 
     async def _heartbeat(self):
         while not self.stopped.is_set():
