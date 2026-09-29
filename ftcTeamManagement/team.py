@@ -21,6 +21,7 @@ class Team:
     def __init__(self,core,store,dashboard):
         self.core,self.store,self.dashboard=core,store,dashboard
         self.db=store.db
+        self.hold=lambda:False
         self.config_file=core.DATA_DIR/'team.json'
         self.config=json.loads(self.config_file.read_text()) if self.config_file.exists() else dict(
             ftc_url='',website_url='',management_url='',practice_enabled=False,
@@ -285,7 +286,8 @@ class Team:
     async def scheduler(self):
         while True:
             try:
-                if self.core.bot.is_ready() and not getattr(self.core,'update_pending',lambda:False)():
+                # hold(): the backup Discord bot on another Pi is (or was just) sending these instead (backupDiscordBot/).
+                if self.core.bot.is_ready() and not getattr(self.core,'update_pending',lambda:False)() and not self.hold():
                     for row in list(self.db.execute("SELECT * FROM reminders WHERE status='pending' AND due<=? ORDER BY due LIMIT 10",(time.time(),))):
                         with self.db:self.db.execute("UPDATE reminders SET status='sending' WHERE id=?",(row['id'],))
                         try:

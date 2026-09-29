@@ -1,5 +1,7 @@
 # Team tools
 
+All team-facing Discord commands are under **`/ftcteam`** (FTC team management). The code lives in the `ftcTeamManagement/` folder. An optional [backup bot](../backupDiscordBot/BACKUP_BOT.md) keeps `/ftcteam` working while the main bot is offline.
+
 Robotics-team helpers shared between Discord and the dashboard's **Team tools** tab. Records are kept per Discord server (only servers in `guild_ids`).
 
 - [Team links](#team-links)
@@ -13,15 +15,15 @@ Robotics-team helpers shared between Discord and the dashboard's **Team tools** 
 
 ## Team links
 
-`/ftc`, `/website` and `/management` reply with links you set in **Team tools**: the FTC Discord invite, the team website and the dashboard URL. Nothing is guessed. If a link isn't set, the command says so.
+`/ftcteam links` replies with the links you set in **Team tools**: the FTC Discord invite, the team website and the dashboard URL. Nothing is guessed. If a link isn't set, the command says so.
 
 ## Shared notes
 
 | Command | Who | Effect |
 |---|---|---|
-| `/rememberthis title text` | everyone | Save a note for this server |
-| `/remember query?` | everyone | Show the 5 newest notes matching the search (all notes if empty) |
-| `/forget note_id` | owner, or admins | Delete a note |
+| `/ftcteam note save title text` | everyone | Save a note for this server |
+| `/ftcteam note find query?` | everyone | Show the 5 newest notes matching the search (all notes if empty) |
+| `/ftcteam note delete note_id` | owner, or admins | Delete a note |
 
 The dashboard can view, add and delete notes for every allowed server.
 
@@ -29,9 +31,9 @@ The dashboard can view, add and delete notes for every allowed server.
 
 | Command | Effect |
 |---|---|
-| `/remindme minutes text` | The bot DMs you after that many minutes (up to one year) |
-| `/reminders` | Your reminders and whether they were delivered |
-| `/cancelreminder reminder_id` | Cancel one of your pending reminders |
+| `/ftcteam remind minutes text` | The bot DMs you after that many minutes (up to one year) |
+| `/ftcteam reminders` | Your reminders and whether they were delivered |
+| `/ftcteam cancelreminder reminder_id` | Cancel one of your pending reminders |
 
 - **Surviving restarts:** reminders are saved, so a service restart doesn't lose them.
 - **DMs must be open:** the recipient must allow DMs from server members. A failed delivery is recorded; it **never** falls back to posting in a public channel.
@@ -44,19 +46,19 @@ Meetings are on the same days as the practice/report schedule (the **Practice da
 
 | Command | Who | Effect |
 |---|---|---|
-| `/attending meeting?` | everyone | Mark yourself as attending |
-| `/notattending reason? meeting?` | everyone | Mark yourself as not attending, with an optional reason (up to 300 characters) |
-| `/attendance meeting?` | everyone | Who is attending, not attending, and which roster members haven't replied |
+| `/ftcteam attending meeting?` | everyone | Mark yourself as attending |
+| `/ftcteam notattending reason? meeting?` | everyone | Mark yourself as not attending, with an optional reason (up to 300 characters) |
+| `/ftcteam attendance meeting?` | everyone | Who is attending, not attending, and which roster members haven't replied |
 
 - **Which meeting:** without `meeting:`, the reply is for the **next meeting**. On a meeting day that's **today**; otherwise it's the next practice day. Discord suggests the upcoming dates, or you can type one as `YYYY-MM-DD` (up to 120 days ahead).
 - **Changing your mind:** run the other command for the same date. Your latest reply replaces the earlier one.
-- **Privacy:** replies are private (only you see them). Reasons are shown only to admins, in `/attendance` and the dashboard.
+- **Privacy:** replies are private (only you see them). Reasons are shown only to admins, in `/ftcteam attendance` and the dashboard.
 - **Report writers:** people marked **not attending** today are skipped when a report writer is picked from the roster. If everyone on the roster said they're not coming, the whole roster is used.
 - **Dashboard:** **Team tools → Meeting attendance** lists the next six meetings for the chosen server, and admins can set or clear someone's reply by Discord user ID. Every change is recorded in the Activity feed.
 
 ## Report-writer assignments and practice schedule
 
-- **Assign a writer:** `/assign report` (or `/meeting report assign`) picks someone to write the practice/meeting report. Admins only; the reply is private.
+- **Assign a writer:** `/ftcteam report assign` picks someone to write the practice/meeting report. Admins only; the reply is private.
   - **`member:`** assigns that person. Otherwise the bot picks from the **roster**, **least-used members first**, so everyone gets a turn before anyone repeats. People who said they're [not attending](#meeting-attendance) today are skipped.
   - **`announce:true`** also posts the assignment in the practice channel. Without it, the assignment is only saved (no post, no DM).
 - **Automatic practice schedule** (dashboard **Team tools → Practice & report assignments**):

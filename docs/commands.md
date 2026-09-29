@@ -24,7 +24,7 @@ The tables below show the **default** level of each command.
 **Locked commands (🔒):** `/reboot`, `/laptop`, `/laptops`, `/dm`, `/setnotificationchannel`, `/setcommandschannel`, `/archive` and `/unarchive`. These restart the Pi, run commands on laptops, message people as the server, or change channels, so they can only be **Admins only** or **Off**, never opened to everyone or to a role.
 
 **How the check works:**
-- Every command goes through one function, `core.command_allowed`. The default levels come from `ADMIN_COMMANDS` in `core.py`, and dashboard settings override them. For groups such as `/plateswap`, the top-level name counts.
+- Every command goes through one function, `core.command_allowed`. The default levels come from `ADMIN_COMMANDS` in `core.py`, and dashboard settings override them. For groups such as `/plateswap`, the top-level name counts. The exception is `/ftcteam`: each of its subcommands (or subgroups, like `/ftcteam note`) has its own level, so `/ftcteam attending` can be open to everyone while `/ftcteam report assign` stays admin-only. Permissions saved for the old team command names (for example `attending`, `remindme`, `assign`) carry over to the new `/ftcteam` ones.
 - The check runs when the command starts. Most commands run it again when their confirmation button is pressed.
 - Confirmation buttons can only be pressed by the person who ran the command, and they expire after 60 seconds. For admin commands, admin access is checked again when the button is pressed.
 
@@ -35,7 +35,7 @@ The tables below show the **default** level of each command.
 
 **Other rules for every command:**
 - Commands are refused while a management software update is being installed.
-- Replies are **public only in the commands channel** (set with `/setcommandschannel` or in dashboard **Settings**). In any other channel the command works but replies privately, and with no commands channel set every reply is private. `/dm`, `/publiccommands`, `/assign report`, `/meeting report assign`, `/diagnostics`, `/reportissue`, `/notattending` and `/attendance` always reply privately. "Not allowed" replies follow the same rule. See [Reply visibility](discord.md#reply-visibility).
+- Replies are **public only in the commands channel** (set with `/setcommandschannel` or in dashboard **Settings**). In any other channel the command works but replies privately, and with no commands channel set every reply is private. `/dm`, `/publiccommands`, `/ftcteam report assign`, `/diagnostics`, `/reportissue`, `/ftcteam notattending` and `/ftcteam attendance` always reply privately. "Not allowed" replies follow the same rule. See [Reply visibility](discord.md#reply-visibility).
 
 Parameters marked `?` are optional. `name?` is a printer name, with autocomplete. When it's left out, the bot shows printer selection buttons.
 
@@ -51,18 +51,23 @@ Parameters marked `?` are optional. `name?` is a printer name, with autocomplete
 | `/queueadd` | `name?` `file?` `remote?` `label?` `plate?` `use_ams?` `mapping?` `bed?` | Add a sliced `.3mf` upload, or a file already on the printer, to the queue | Only adds to the queue. Start it with `/queuestart` |
 | `/file list` | `name?` `path?` | List printable `.3mf`/`.gcode` files on the printer | Read-only |
 | `/file system` | `name?` `path?` | List printer folders and files, with a downloadable listing | Read-only |
-| `/ftc` | | FTC Discord invite link | |
-| `/website` | | Team website link | |
-| `/management` | | Link to the management dashboard | |
-| `/rememberthis` | `title` `text` | Save a shared team note | |
-| `/remember` | `query?` | Search shared team notes | |
-| `/forget` | `note_id` | Delete a note | Only your own notes. **Admins** can delete any note |
-| `/remindme` | `minutes` `text` | DM yourself a reminder later | Your DMs must be open to the bot |
-| `/reminders` | | Your reminders and their delivery status | Only shows your own |
-| `/cancelreminder` | `reminder_id` | Cancel a pending reminder | Only your own |
-| `/attending` | `meeting?` | Mark yourself as attending the next meeting, or a chosen meeting date | Private reply. Meetings are the practice days. See [Team tools](team-tools.md#meeting-attendance) |
-| `/notattending` | `reason?` `meeting?` | Mark yourself as not attending | Private reply. Only admins see the reason. You're skipped when that day's report writer is picked |
-| `/attendance` | `meeting?` | Who is attending, not attending, and hasn't replied | Private reply. Reasons shown to admins only |
+
+### FTC team (`/ftcteam`)
+
+All team-facing commands are under **`/ftcteam`**. Each subcommand (or group, like `/ftcteam note`) has its own permission level in the dashboard. Meetings are on the practice days set in Team tools. See [Team tools](team-tools.md).
+
+| Command | Parameters | What it does | Notes / limits |
+|---|---|---|---|
+| `/ftcteam links` | | FTC Discord invite, team website and dashboard links | Set in dashboard Team tools |
+| `/ftcteam attending` | `meeting?` | Mark yourself as attending the next meeting, or a chosen meeting date | Follows the channel reply rule |
+| `/ftcteam notattending` | `reason?` `meeting?` | Mark yourself as not attending | Private reply. Only admins see the reason. You're skipped when that day's report writer is picked |
+| `/ftcteam attendance` | `meeting?` | Who is attending, not attending, and hasn't replied | Private reply. Reasons shown to admins only |
+| `/ftcteam note save` | `title` `text` | Save a shared team note | |
+| `/ftcteam note find` | `query?` | Search shared team notes | |
+| `/ftcteam note delete` | `note_id` | Delete a note | Only your own notes. **Admins** can delete any note |
+| `/ftcteam remind` | `minutes` `text` | DM yourself a reminder later | Your DMs must be open to the bot |
+| `/ftcteam reminders` | | Your reminders and their delivery status | Only shows your own |
+| `/ftcteam cancelreminder` | `reminder_id` | Cancel a pending reminder | Only your own |
 
 ### Printer actions and queue (Everyone, with confirmation)
 
@@ -116,8 +121,12 @@ Every command in this table shows a confirmation card first. Only the person who
 | `/dm` | `user` `message` | Send a DM from the bot to a member | Shows a private preview first. The recipient sees "Message from \<server\>" |
 | `/archive` | `channel` | Make a channel read-only and move it to Archive | Asks for confirmation. No messages are deleted |
 | `/unarchive` | `channel` | Restore an archived channel's category and permissions | Asks for confirmation |
-| `/assign report` | `member?` `announce?` | Assign a practice report writer (chosen, or random from the roster) | Private reply. `announce` posts in the practice channel |
-| `/meeting report assign` | `member?` `announce?` | Same as `/assign report` | Private reply |
+
+### FTC team (admin)
+
+| Command | Parameters | What it does | Notes / limits |
+|---|---|---|---|
+| `/ftcteam report assign` | `member?` `announce?` | Assign a meeting-report writer (chosen, or random from the roster) | Private reply. `announce` posts in the practice channel. Replaces `/assign report` and `/meeting report assign` |
 
 ### Laptops and the Pi
 
@@ -139,7 +148,7 @@ Invite the bot with the `bot` and `applications.commands` scopes. In the channel
 | Attach Files | Camera snapshots (`/printer`, notifications) and the `/file system` listing |
 | Manage Channels, Manage Roles | `/archive` and `/unarchive`, in the channel and the Archive category |
 
-The bot doesn't need the Administrator permission. `/dm` and `/remindme` only work if the recipient allows DMs from server members.
+The bot doesn't need the Administrator permission. `/dm` and `/ftcteam remind` only work if the recipient allows DMs from server members.
 
 ## Changing who counts as Admin
 

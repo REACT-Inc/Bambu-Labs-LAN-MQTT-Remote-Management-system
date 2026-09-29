@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from aiohttp import web
 from queueing import Store
-from team import Team
+from ftcTeamManagement.team import Team
 
 class TeamTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

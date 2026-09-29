@@ -2,6 +2,31 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.5.0)
+
+### Added
+- **Backup Discord bot (`backupDiscordBot/`).** An optional second, team-only bot that runs on a **separate Pi**, as its own `pm-backup-bot` service with its own bot token. Install it there with `install-backup-pi.sh`.
+  - **Taking over:** when the main Pi stops answering (stopped, crashed, frozen or off the network), or its Discord bot disconnects, for 90 s, the backup logs in and serves `/ftcteam`, including reminders and report assignments.
+  - **Handing back:** once the main bot has been back for 30 s, the backup logs out and sends the notes, reminders, attendance and report assignments it changed back to the main Pi.
+  - **How it knows:** it checks the main dashboard every 5 s over Tailscale or the LAN (`/backup-sync/state`, protected by a shared key, `backup_sync.key`), and keeps a copy of the team data for a take-over.
+  - **No double messages:** the main Pi holds its reminders and report assignments while the backup is serving them.
+  - **Scope:** no printer commands.
+  - **Setup:** see [BACKUP_BOT.md](backupDiscordBot/BACKUP_BOT.md).
+
+### Changed
+- **Team commands moved under `/ftcteam`.** All team-facing Discord commands are now subcommands of `/ftcteam`, and the old names are gone:
+
+  | Old | New |
+  |---|---|
+  | `/ftc`, `/website`, `/management` | `/ftcteam links` (all three in one reply) |
+  | `/attending`, `/notattending`, `/attendance` | `/ftcteam attending`, `/ftcteam notattending`, `/ftcteam attendance` |
+  | `/rememberthis`, `/remember`, `/forget` | `/ftcteam note save`, `/ftcteam note find`, `/ftcteam note delete` |
+  | `/remindme`, `/reminders`, `/cancelreminder` | `/ftcteam remind`, `/ftcteam reminders`, `/ftcteam cancelreminder` |
+  | `/assign report`, `/meeting report assign` | `/ftcteam report assign` |
+
+  Each `/ftcteam` subcommand has its own permission level in **Settings → Discord command permissions**, and saved permissions for the old names carry over. `/archive`, `/unarchive`, `/dm`, `/laptops`, `/laptop`, `/server` and `/reboot` keep their names.
+- **Code layout.** The team code moved into the `ftcTeamManagement/` folder (`team.py`, `team_discord.py`). The server and admin commands moved to `discord_Intergration/server_discord.py`.
+
 ## 1.4.0-beta.1
 
 Built on 1.3.0-beta.1. Fixes the dashboard and printer controls becoming unresponsive on 1.3.0-beta.1 (#40).

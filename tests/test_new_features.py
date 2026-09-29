@@ -73,9 +73,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_help_single_reply_with_all_features(self):
         from queueing import Store, Engine
         from dashboard import Dashboard
-        from team import Team
+        from ftcTeamManagement.team import Team
         from discord_Intergration.discord_queue import install as install_queue
-        from discord_Intergration.team_discord import install as install_team
+        from ftcTeamManagement.team_discord import install as install_team
         from discord_Intergration.controls_discord import install as install_controls
         from swapMod.plate_swap_discord import install as install_swap
         store=Store(Path(self.tmp.name)/'help.sqlite')
@@ -83,7 +83,9 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             engine=Engine(self.core,store)
             dashboard=Dashboard(self.core,store,engine)
             install_queue(self.core,store,engine,dashboard)
-            install_team(self.core,Team(self.core,store,dashboard))
+            team=Team(self.core,store,dashboard);install_team(self.core,team)
+            from discord_Intergration.server_discord import install as install_server
+            install_server(self.core,team)
             install_controls(self.core,dashboard.controls)
             install_swap(self.core,engine)
             self.core.settings['commands_channel_id']=789
@@ -102,7 +104,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
                     for child in command.commands:check(child)
                 else:
                     name='`/'+command.qualified_name+'`'
-                    if command.qualified_name.split()[0] in self.core.ADMIN_COMMANDS:self.assertNotIn(name,text)
+                    if self.core.permission_key(command.qualified_name) in self.core.ADMIN_COMMANDS:self.assertNotIn(name,text)
                     else:self.assertIn(name,text)
             for command in self.core.bot.tree.get_commands():check(command)
             self.i.response.send_message.reset_mock()
@@ -163,7 +165,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         for name in ('help','rename','status','adminhelp','pause','queuestart','attending'):
             self.i.command=self.core.bot.tree.get_command(name) or SimpleNamespace(qualified_name=name)
             self.assertFalse(self.core.ephemeral(self.i),name)
-        for name in ('dm','publiccommands','assign report','meeting report assign','diagnostics','reportissue','notattending','attendance'):
+        for name in ('dm','publiccommands','ftcteam report assign','diagnostics','reportissue','ftcteam notattending','ftcteam attendance'):
             self.i.command=SimpleNamespace(qualified_name=name)
             self.assertTrue(self.core.ephemeral(self.i),name)
         # Any other channel: every reply is private, including buttons pressed there.
@@ -284,8 +286,8 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         from datetime import date
         from aiohttp import web
         from queueing import Store
-        from team import Team
-        from discord_Intergration.team_discord import install
+        from ftcTeamManagement.team import Team
+        from ftcTeamManagement.team_discord import install
         store=Store(Path(self.tmp.name)/'attendance.sqlite')
         try:
             team=Team(self.core,store,SimpleNamespace(app=web.Application()))
@@ -294,32 +296,32 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             tree=self.core.bot.tree
             self.core.public_channels[(123,789)]=float('inf')
             self.i.user=SimpleNamespace(id=7,display_name='Sam')
-            self.i.command=tree.get_command('notattending')
-            await tree.get_command('notattending').callback(self.i,'Dentist appointment','')
+            self.i.command=tree.get_command('ftcteam').get_command('notattending')
+            await tree.get_command('ftcteam').get_command('notattending').callback(self.i,'Dentist appointment','')
             reply=self.i.response.send_message.call_args.kwargs
             self.assertTrue(reply['ephemeral']);self.assertIn('not attending',reply['embed'].description);self.assertIn('Today',reply['embed'].description)
-            await tree.get_command('attending').callback(self.i,'2026-10-02')
+            await tree.get_command('ftcteam').get_command('attending').callback(self.i,'2026-10-02')
             self.assertIn('Friday October 2',self.i.response.send_message.call_args.kwargs['embed'].description)
-            await tree.get_command('attending').callback(self.i,'2026-10-01')
+            await tree.get_command('ftcteam').get_command('attending').callback(self.i,'2026-10-01')
             self.assertIn('no meeting',self.i.response.send_message.call_args.kwargs['embed'].description)
-            self.i.command=tree.get_command('attendance')
-            await tree.get_command('attendance').callback(self.i,'')
+            self.i.command=tree.get_command('ftcteam').get_command('attendance')
+            await tree.get_command('ftcteam').get_command('attendance').callback(self.i,'')
             member_view=self.i.response.send_message.call_args.kwargs
             self.assertTrue(member_view['ephemeral']);self.assertIn('<@7>',member_view['embed'].description);self.assertNotIn('Dentist',member_view['embed'].description)
             self.assertIn('No reply yet (1)',member_view['embed'].description)
             self.i.user=SimpleNamespace(id=42,display_name='Admin')
-            self.i.command=tree.get_command('attendance')
-            await tree.get_command('attendance').callback(self.i,'')
+            self.i.command=tree.get_command('ftcteam').get_command('attendance')
+            await tree.get_command('ftcteam').get_command('attendance').callback(self.i,'')
             self.assertIn('Dentist',self.i.response.send_message.call_args.kwargs['embed'].description)
         finally:
             store.db.close()
 
     async def test_meeting_specific_assignment_private_during_override(self):
-        from discord_Intergration.team_discord import install
+        from ftcTeamManagement.team_discord import install
         team=SimpleNamespace(assign=AsyncMock(return_value={'id':'abc','member':'88','status':'assigned_private'}))
         install(self.core,team)
         self.core.public_channels[(123,789)]=float('inf')
-        command=self.core.bot.tree.get_command('meeting').get_command('report').get_command('assign')
+        command=self.core.bot.tree.get_command('ftcteam').get_command('report').get_command('assign')
         await command.callback(self.i,SimpleNamespace(id=88),False)
         self.assertEqual(team.assign.call_args.kwargs['member_id'],88)
         self.assertFalse(team.assign.call_args.kwargs['announce'])

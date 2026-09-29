@@ -44,6 +44,8 @@ sudo python3 -m json.tool /etc/3d-printer-management/config.json >/dev/null && e
 | `listen` | list of IPs | `["127.0.0.1", "<chosen IP>"]` | Addresses the dashboard listens on. Set by the installer. |
 | `port` | number | `8080` | Dashboard port |
 | `allow_host_reboot` | boolean | `false` | Allow `/reboot` and **Server → Reboot Pi…**. Set with `install.sh --enable-reboot`. See [Installation](installation.md#optional-allow-rebooting-the-pi-from-discord-or-the-dashboard). |
+| `backup_sync` | object | off | **Main Pi.** Lets the [backup bot](../backupDiscordBot/BACKUP_BOT.md) on another Pi check this service and copy the team data: `{"key": "..."}`, at least 24 characters, the same as the backup Pi's `backup_bot.sync_key`. |
+| `backup_bot` | object | disabled | **Backup Pi only.** `{"enabled": true, "token": "...", "main_url": "http://100.x.y.z:8080", "sync_key": "...", "failover_after": 90, "failback_after": 30}`. The token must be a **different** Discord bot. See [BACKUP_BOT.md](../backupDiscordBot/BACKUP_BOT.md). |
 | `issue_reports` | object | GitHub, this repo | Default destination for problem reports: `{"destination": "github", "repository": "owner/name", "token": "..."}`. Dashboard settings override it. See [Troubleshooting](troubleshooting.md#sending-a-problem-report). |
 
 Example:
