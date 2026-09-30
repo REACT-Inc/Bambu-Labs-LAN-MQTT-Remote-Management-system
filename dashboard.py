@@ -13,6 +13,7 @@ from Updater.github_updates import GitHubUpdates
 from printer_errors import describe as describe_error
 from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits
+import filament_sides
 from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
 from queueing import MAX_UPLOAD, options, validate_archive
@@ -162,7 +163,7 @@ class Dashboard:
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,sides=filament_sides.summary(data),last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j.pop('asset',None)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
