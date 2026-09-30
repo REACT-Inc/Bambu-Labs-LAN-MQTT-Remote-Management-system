@@ -103,6 +103,8 @@ $('fanList').addEventListener('change',async e=>{if(e.target.type!=='range')retu
  if(all)row.classList.add('pending');
  try{await sendControl(all?'fanall':'fan_'+row.dataset.fan,value);pollSoon();}catch{for(const f of targets)delete fanPending[p.name+'|'+f.key];renderFans(devPrinter());}});
 
+// Axes the printer reports as not homed (home_flag bits 0-2 = X, Y, Z; 0 = unknown). The firmware ignores jogs on them.
+function unhomed(d){const f=Number(d.home_flag||0);return f?['X','Y','Z'].filter((a,i)=>!((f>>i)&1)):[];}
 function jogSteps(p){return axisCtrl(p.data||{})?{xy:[1,10],z:[1]}:{xy:[1,10],z:[0.1,1]};}
 function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringify(steps);
  if(box.dataset.steps!==key){box.dataset.steps=key;if(!steps.xy.includes(jogStep))jogStep=steps.xy[0];
@@ -110,11 +112,13 @@ function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringi
  box.querySelectorAll('button').forEach(b=>b.classList.toggle('active',Number(b.dataset.step)===jogStep));
  const zStep=steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1];if(Date.now()>=jogReadyAt)$('jogCenter').textContent=jogStep+' mm';$('jogZStep').textContent='Z '+zStep+' mm';
  const idle=['IDLE','FINISH'].includes(p.state)&&p.connected&&!p.error,armed=$('jogArm').checked;
- const cooling=Date.now()<jogReadyAt;document.querySelectorAll('#jogPad button,#jogZ button').forEach(b=>b.disabled=!armed||!idle||jogBusy||cooling);
+ const cooling=Date.now()<jogReadyAt,notHomed=unhomed(p.data||{});
+ document.querySelectorAll('#jogPad button,#jogZ button').forEach(b=>b.disabled=!armed||!idle||jogBusy||cooling||notHomed.includes(b.dataset.axis));
  // Homing doesn't need the "already homed" checkbox, only an idle printer.
  $('jogHome').disabled=!idle||jogBusy||cooling;
  if(Date.now()<jogNote.until)$('jogStatus').textContent=jogNote.text;
  else if(!idle)$('jogStatus').textContent='Movement is only available while the printer is idle, connected and error-free.';
+ else if(notHomed.length)$('jogStatus').textContent=`The printer reports ${notHomed.join(', ')} not homed, so it would ignore those moves. Press Home first.`;
  else if(!armed)$('jogStatus').textContent='Tick the box above to unlock the movement buttons. Directions follow printer coordinates.';}
 $('jogSteps').addEventListener('click',e=>{const b=e.target.closest('[data-step]');if(!b)return;jogStep=Number(b.dataset.step);renderJog(devPrinter());});
 $('jogArm').onchange=()=>{clearTimeout(jogArmTimer);if($('jogArm').checked){jogArmTimer=setTimeout(()=>{$('jogArm').checked=false;renderJog(devPrinter());},5*60*1000);$('jogStatus').textContent='Unlocked for 5 minutes or until this panel closes.';}renderJog(devPrinter());};
