@@ -17,7 +17,9 @@ It replaces the earlier Infinity Flow integration. When you update, old Infinity
 ## Supported hardware
 
 - **Supported:** A1 mini with the Swapmod A1m kit installed.
-- **Not supported:** the full-size A1 and the H2D.
+- **Only shown for A-series printers (A1 / A1 mini).** Other printers (H2D, X1, P1, P2…) don't show the Swapmod settings in the dashboard, aren't offered in `/plateswap` autocomplete, and the server refuses Swapmod on them. The full-size A1 shows the settings, but the Swapmod A1m kit can only be enabled on an A1 mini.
+- **How the model is detected:** the printer's `"model"` in config.json (for example `"A1 mini"`). Without one, the serial number (`030…` = A1 mini, `039…` = A1). Without a serial, the printer's name. If an A1 mini doesn't get the Swapmod settings, set its `"model"`.
+- **Settings saved earlier** for a printer that isn't A-series are switched off when the service starts, with a note in the Activity feed.
 - **Other printers** keep the normal manual queue workflow.
 
 ## 1. Enable the kit on a printer

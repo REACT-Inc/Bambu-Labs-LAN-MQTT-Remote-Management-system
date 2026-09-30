@@ -27,6 +27,24 @@ class SwapTests(unittest.IsolatedAsyncioTestCase):
     def test_wrong_models_and_count(self):
         for name,model,count in [('BOB H2D','A1 Mini',2),('A1','A1 Mini',2),('A1 Mini','A1 Mini',-1),('A1 Mini','A1 Mini',True)]:
             with self.assertRaises(ValueError):self.swap.configure(name,True,model,count,True,'admin')
+    def test_only_a_series_printers(self):
+        from swapMod.plate_swap import a_series_model
+        configs={'Shop 1':{'model':'A1 mini'},'Shop 2':{'model':'H2D'},'Shop 3':{'serial':'030ABC'},'Shop 4':{'serial':'039ABC'},
+                 'Shop 5':{'serial':'094ABC'},'Shop 6':{'serial':'01PABC'},'A1 Mini desk':{},'Mystery':{},'X1 Carbon':{},'P1S':{},'Lab A1':{'model':'P1S'}}
+        core=SimpleNamespace(printer_config=configs.get)
+        self.assertEqual({n:a_series_model(core,n) for n in configs},{'Shop 1':'A1 mini','Shop 2':None,'Shop 3':'A1 mini','Shop 4':'A1',
+            'Shop 5':None,'Shop 6':None,'A1 Mini desk':'A1 mini','Mystery':None,'X1 Carbon':None,'P1S':None,'Lab A1':None})
+        self.assertEqual((self.swap.state('A1 Mini')['available'],self.swap.state('A1')['available'],self.swap.state('BOB H2D')['available']),(True,True,False))
+        with self.assertRaisesRegex(ValueError,'only available for Bambu Lab A-series'):self.swap.configure('BOB H2D',True,'A1 mini',2,True,'admin')
+        with self.assertRaisesRegex(ValueError,'only available for Bambu Lab A-series'):self.swap.verify('BOB H2D',True,'admin')
+        self.swap.configure('BOB H2D',False,'',0,True,'admin')    # turning it off is always allowed
+        with self.assertRaisesRegex(ValueError,'not the full-size A1'):self.swap.configure('A1',True,'A1 mini',2,True,'admin')
+    def test_saved_settings_on_other_printers_are_switched_off(self):
+        with self.store.db:self.store.db.execute("INSERT OR REPLACE INTO plate_swap(printer,enabled,model,spares,verified,revision,provider) VALUES('BOB H2D',1,'A1 mini',3,0,0,'swapmod_a1m')")
+        self.enable()
+        swap=PlateSwap(self.core,self.store)
+        self.assertFalse(swap.state('BOB H2D')['enabled']);self.assertTrue(swap.state('A1 Mini')['enabled'])
+        self.assertIn('only available for A-series',self.store.events()[0]['detail'])
     def test_checks_required(self):
         self.enable();job=self.job()
         with self.assertRaises(ValueError):self.swap.check(job)
