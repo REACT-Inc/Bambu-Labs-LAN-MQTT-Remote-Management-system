@@ -22,8 +22,22 @@ class ControlsTests(unittest.TestCase):
         self.controls.apply('A1 Mini','move',-1,'Z',True,True)
         data=json.loads(self.client.publish.call_args.args[1])['print']
         self.assertEqual(data['command'],'gcode_line')
-        self.assertEqual(data['param'],'M211 S\nM211 X1 Y1 Z1\nM1002 push_ref_mode\nG91\nG1 Z-1.0 F300\nM1002 pop_ref_mode\nM211 R\n')
+        # Byte for byte what Bambu Studio sends (DevAxis::Ctrl_Axis, Z at F900).
+        self.assertEqual(data['param'],'M211 S \nM211 X1 Y1 Z1\nM1002 push_ref_mode\nG91 \nG1 Z-1.0 F900\nM1002 pop_ref_mode\nM211 R\n')
         with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',-1,'Z',True,True)
+        self.controls.moved.clear();self.controls.apply('A1 Mini','move',10,'X',True,True)
+        self.assertIn('G1 X10.0 F3000\n',json.loads(self.client.publish.call_args.args[1])['print']['param'])
+    def test_unhomed_axis_is_refused_instead_of_silently_ignored(self):
+        from printer_controls import unhomed_axes
+        self.assertEqual(unhomed_axes({}),[]);self.assertEqual(unhomed_axes({'home_flag':0}),[])   # unknown: allowed, like Bambu Studio
+        self.assertEqual(unhomed_axes({'home_flag':0b011}),['Z']);self.assertEqual(unhomed_axes({'home_flag':'garbage'}),[])
+        self.assertEqual(unhomed_axes({'home_flag':-1064}),['X','Y','Z'])   # signed report with bits 0-2 clear
+        self.assertEqual(unhomed_axes({'home_flag':-1}),[])
+        self.core.state_data=lambda n:('IDLE',0,{'home_flag':0b011},True)
+        with self.assertRaisesRegex(ValueError,'Z is not homed.*Home'):self.controls.apply('A1 Mini','move',1,'Z',True,True)
+        self.client.publish.assert_not_called()
+        self.controls.apply('A1 Mini','move',1,'X',True,True)   # X and Y are homed
+        self.client.publish.assert_called_once()
     def test_axis_ctrl_firmware_uses_xyz_ctrl(self):
         # Bit 38 of "fun" marks firmware (e.g. H2D) that jogs via xyz_ctrl instead of G-code.
         self.core.state_data=lambda n:('IDLE',0,{'fun':format(1<<38,'x')},True)
