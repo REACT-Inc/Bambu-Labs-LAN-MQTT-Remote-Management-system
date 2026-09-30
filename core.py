@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import ssl
 import subprocess
 import tempfile
@@ -443,15 +444,24 @@ async def choose_printer(interaction, action, name):
     await respond(interaction, embed, PrinterPicker(interaction.user.id, action, suggestion))
 
 
+def low_priority(command):
+    """Run camera ffmpeg below the service and the rest of the Pi (#54): decoding the H2D's 1080p stream is the
+    heaviest thing the service does, and at normal priority it can starve the Pi."""
+    nice = shutil.which('nice')
+    return [nice, '-n', '10', *command] if nice else list(command)
+
+
 def snapshot_bytes(printer):
     if not printer:
         return None
     try:
         if printer.get('camera_type') == 'rtsp':
             url = f"rtsps://bblp:{printer['access_code']}@{printer['ip']}:322/streaming/live/1"
-            result = subprocess.run(['ffmpeg', '-loglevel', 'error', '-rtsp_transport', 'tcp',
-                                     '-i', url, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1'],
-                                    capture_output=True, timeout=15)
+            # One still, as cheaply as possible (#54): one decoder thread, only keyframes decoded, scaled down.
+            result = subprocess.run(low_priority(['ffmpeg', '-nostdin', '-loglevel', 'error', '-threads', '1', '-skip_frame', 'nokey',
+                                     '-rtsp_transport', 'tcp', '-i', url, '-frames:v', '1', '-vf', 'scale=960:-2',
+                                     '-f', 'image2pipe', '-vcodec', 'mjpeg', '-q:v', '5', 'pipe:1']),
+                                    capture_output=True, timeout=20)
             return result.stdout if result.returncode == 0 and result.stdout else None
         if printer.get('camera_type') == 'jpeg_tcp':
             from camera_capture import capture_jpeg
@@ -462,17 +472,38 @@ def snapshot_bytes(printer):
     return None
 
 
-async def snapshot(name):
-    if globals().get("live_cameras"):
-        return await live_cameras.snapshot(name)
-    if EXAMPLE_MODE or not state_data(name)[3]:
-        return None
+async def capture_still(name, timeout=25):
+    """One camera still. Concurrent callers for the same printer share one capture, so a camera never has two
+    snapshot connections (or two ffmpeg decodes) at once, whether they come from Discord or the dashboard."""
     task = camera_tasks.get(name)
     if task is None or task.done():
         task = asyncio.create_task(asyncio.to_thread(snapshot_bytes, printer_config(name)))
         camera_tasks[name] = task
+    return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+
+
+def recent_picture(name, max_age=60):
+    """A picture that's already on hand: a frame from an open live view, or the dashboard's latest still."""
+    feed = getattr(globals().get('live_cameras'), 'feeds', {}).get(name)
+    if feed and feed.frame and time.time() - feed.updated < 5:
+        return feed.frame
+    still = getattr(globals().get('snapshot_rotation'), 'images', {}).get(name)
+    if still and time.time() - still[1] < max_age:
+        return still[0]
+    return None
+
+
+async def snapshot(name, timeout=25):
+    # Never start a continuous live feed just for one picture (#54): reuse one on hand, else take a single still.
+    if EXAMPLE_MODE:
+        return None
+    picture = recent_picture(name)
+    if picture:
+        return picture
+    if not state_data(name)[3] or (printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
+        return None
     try:
-        return await asyncio.wait_for(asyncio.shield(task), timeout=25)
+        return await capture_still(name, timeout)
     except asyncio.TimeoutError:
         # Concurrent callers share this capture; cancellation never spawns duplicates.
         log.warning('Camera capture timed out for %s', name)
@@ -486,6 +517,16 @@ def progress(value):
         return 'Unknown'
     filled = round(percent / 10)
     return '🟦' * filled + '⬜' * (10 - filled) + f' **{percent:g}%**'
+
+
+def printer_reply(embed, picture):
+    """The /printer embed with its camera picture attached, or a note that there isn't one."""
+    if picture:
+        embed.set_image(url='attachment://printer.jpg')
+        return dict(embed=embed, file=discord.File(io.BytesIO(picture), filename='printer.jpg'))
+    field(embed, 'Camera', 'No camera in demo mode' if EXAMPLE_MODE else
+          'Unavailable. Check the camera settings (LAN live view on the printer, `camera_type` in config.json).', False)
+    return dict(embed=embed)
 
 
 def printer_embed(name):
@@ -625,15 +666,21 @@ async def run_action(interaction, action, name):
     if action == 'printer':
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=ephemeral(interaction))
+        # Reply with the status straight away; the camera picture is added when it arrives (#44, #54).
         embed = printer_embed(name)
-        picture = await snapshot(name)
-        kwargs = dict(embed=embed, ephemeral=ephemeral(interaction))
-        if picture:
-            embed.set_image(url='attachment://printer.jpg')
-            kwargs['file'] = discord.File(io.BytesIO(picture), filename='printer.jpg')
-        else:
-            field(embed, 'Camera', 'Unavailable' if not EXAMPLE_MODE else 'No camera in demo mode', False)
-        await interaction.followup.send(**kwargs)
+        picture = recent_picture(name) if not EXAMPLE_MODE else None
+        if picture or EXAMPLE_MODE:
+            await interaction.followup.send(**printer_reply(embed, picture), ephemeral=ephemeral(interaction))
+            return
+        field(embed, 'Camera', '📷 Getting a picture…', False)
+        message = await interaction.followup.send(embed=embed, ephemeral=ephemeral(interaction), wait=True)
+        picture = await snapshot(name, timeout=20)
+        embed.remove_field(len(embed.fields) - 1)
+        reply = printer_reply(embed, picture)
+        try:
+            await message.edit(embed=reply['embed'], attachments=[reply['file']] if 'file' in reply else [])
+        except discord.HTTPException as error:
+            log.warning('Could not add the camera picture to /printer for %s (%s)', name, type(error).__name__)
     elif action == 'filaments':
         await respond(interaction, filament_embed(name))
     elif action in CONFIRMED_ACTIONS:

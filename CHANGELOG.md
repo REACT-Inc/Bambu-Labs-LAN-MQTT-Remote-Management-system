@@ -2,7 +2,16 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## 1.4.0-beta.1
+## Unreleased (1.5.0)
+
+### Fixed
+- **Pi crash after `/printer` on the H2D (#54).** `/printer` started a **full live ffmpeg decode** of the H2D's 1080p camera stream, using every CPU core at normal priority, just to get one picture. If the dashboard was open, it could run alongside another full-resolution capture of the same camera. On a Raspberry Pi this could exhaust RAM, CPU or power. Now:
+  - **Reuse first:** `/printer` reuses a picture already on hand (an open live view, or the dashboard's still from the last minute).
+  - **Otherwise one cheap still:** it takes a single frame: keyframe only, one thread, 960 px, at lower priority.
+  - **One capture per camera:** Discord and the dashboard share captures, so a camera never has two at once.
+  - **Live view is lighter too:** it runs at lower priority with at most 2 decoder threads.
+  - **Reply first:** `/printer` sends the status card straight away and adds the picture when it arrives, instead of waiting up to 25 seconds (part of #44).
+
 
 Built on 1.3.0-beta.1. Fixes the dashboard and printer controls becoming unresponsive on 1.3.0-beta.1 (#40).
 
