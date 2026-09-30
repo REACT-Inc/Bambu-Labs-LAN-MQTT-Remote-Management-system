@@ -134,6 +134,7 @@ This is deliberate: the app couldn't confirm what the printer did. Look at the p
 
 ### A Discord command doesn't appear or is refused
 
+- **Bot offline after an internet outage:** the dashboard stays available while the bot reconnects. Escaped connection failures retry after 5, 10, 20, 40, then at most 60 seconds. An invalid token or missing required permissions needs an administrator to correct the configuration; check `sudo journalctl -u 3d-printer-management -n 100 --no-pager`.
 - **New commands** can take a minute to sync after the bot connects.
 - **"Use this bot in an authorized server":** the server's ID isn't in `guild_ids`.
 - **"Administrators and approved user IDs only":** add the user under **Settings → Approved user IDs**.
