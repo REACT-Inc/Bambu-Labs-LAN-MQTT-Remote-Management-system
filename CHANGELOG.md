@@ -2,7 +2,15 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## 1.4.0-beta.1
+## Unreleased (1.5.0)
+
+### Changed
+- **Swapmod is only offered for A-series printers (#17).**
+  - **What's hidden:** the dashboard's Swapmod settings and the `/plateswap configure` / `check` printer choices appear only for A1 and A1 mini printers.
+  - **Detection:** the configured `model`, or the serial number (`030` = A1 mini, `039` = A1), or the name.
+  - **Server checks:** the server refuses to enable or check Swapmod on other printers.
+  - **Old settings:** settings saved earlier for a non-A-series printer are switched off at start-up, with a note in the Activity feed.
+
 
 Built on 1.3.0-beta.1. Fixes the dashboard and printer controls becoming unresponsive on 1.3.0-beta.1 (#40).
 

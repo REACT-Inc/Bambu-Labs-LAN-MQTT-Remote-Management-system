@@ -1,6 +1,32 @@
 import json
 import time
 
+# Swapmod is only offered for Bambu Lab A-series printers (#17). First 3 characters of the serial number:
+A_SERIES_SERIALS={'030':'A1 mini','039':'A1'}
+OTHER_MODELS=('h2d','h2c','h2s','x1','p1','p2','a2l')
+NOT_A_SERIES=('Swapmod is only available for Bambu Lab A-series printers (A1 / A1 mini). If this is one, set its "model" '
+              'in config.json (for example "A1 mini").')
+
+
+def _model_from_text(text):
+    text=str(text).lower().replace(' ','').replace('_','').replace('-','')
+    if any(x in text for x in OTHER_MODELS):return None
+    if 'a1mini' in text or text.endswith('a1m'):return 'A1 mini'
+    return 'A1' if 'a1' in text else None
+
+
+def a_series_model(core,name):
+    """'A1 mini' or 'A1' for A-series printers, otherwise None.
+
+    The configured "model" decides; without one, the serial number's first 3 characters; without a serial, the name.
+    """
+    config=getattr(core,'printer_config',lambda n:None)(name) or {}
+    if config.get('model'):return _model_from_text(config['model'])
+    serial=str(config.get('serial') or '')[:3]
+    if serial in A_SERIES_SERIALS:return A_SERIES_SERIALS[serial]
+    if len(serial)==3:return None   # another model's serial
+    return _model_from_text(name)
+
 
 class PlateSwap:
     def __init__(self,core,store):
@@ -16,7 +42,15 @@ class PlateSwap:
         store.db.execute("UPDATE plate_swap SET provider='swapmod_a1m'")
         # A restart loses evidence of the physical plate state.
         store.db.execute('UPDATE plate_swap SET verified=0,revision=revision+1')
+        # Swapmod settings saved for a printer that isn't A-series (before #17) are switched off.
+        for row in list(store.db.execute('SELECT printer FROM plate_swap WHERE enabled=1')):
+            if row[0] in core.names() and not self.available(row[0]):
+                store.db.execute('UPDATE plate_swap SET enabled=0,model=\'\',verified=0,revision=revision+1 WHERE printer=?',(row[0],))
+                store.event(row[0],'Plate-swap settings','Disabled: Swapmod is only available for A-series printers (A1 / A1 mini).')
         store.db.commit()
+
+    def available(self,name):
+        return a_series_model(self.core,name) is not None
 
     def state(self,name):
         row=self.store.db.execute('SELECT * FROM plate_swap WHERE printer=?',(name,)).fetchone()
@@ -24,6 +58,8 @@ class PlateSwap:
         result['enabled']=bool(result['enabled']);result['verified']=bool(result['verified'])
         result['provider']='swapmod_a1m'
         result['mode']='Prepared Swaplist batch; confirm setup before each batch'
+        result['printer_model']=a_series_model(self.core,name)
+        result['available']=result['printer_model'] is not None
         return result
 
     def configure(self,name,enabled,model,spares,confirmed,author):
@@ -33,11 +69,9 @@ class PlateSwap:
         if confirmed is not True:raise ValueError('Confirm the installed kit and actual magazine plate count.')
         if self.store.active(name):raise ValueError('Finish or resolve the active job before changing plate-swap settings.')
         if enabled:
+            if not self.available(name):raise ValueError(NOT_A_SERIES)
             if model!='A1 mini':raise ValueError('Swapmod A1m supports the A1 mini only.')
-            p=self.core.printer_config(name) or {}
-            hint=str(p.get('model') or name).lower().replace(' ','')
-            if any(x in hint for x in ('h2d','x1','p1','a2l')):raise ValueError('This printer is not supported by Swapmod A1m.')
-            if 'a1' in hint and 'mini' not in hint:
+            if a_series_model(self.core,name)!='A1 mini':
                 raise ValueError('Swapmod A1m requires an A1 mini, not the full-size A1.')
         previous=self.state(name)
         with self.store.db:
@@ -61,6 +95,7 @@ class PlateSwap:
 
     def verify(self,name,confirmed,author):
         if confirmed is not True:raise ValueError('Check the printer starting setup and loaded magazine against the Swaplist instructions; clear the plate ejection path.')
+        if not self.available(name):raise ValueError(NOT_A_SERIES)
         if not self.state(name)['enabled']:raise ValueError('Plate-swap mode is disabled.')
         if self.store.active(name):raise ValueError('Finish or resolve the active job before checking the plate.')
         with self.store.db:self.store.db.execute('UPDATE plate_swap SET verified=1 WHERE printer=?',(name,))
