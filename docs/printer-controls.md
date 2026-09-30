@@ -117,7 +117,8 @@ In the dashboard's printer panel, **click an AMS slot** (or the external spool) 
   - PLA 190–230 °C, PETG 220–260, ABS/ASA 240–270, TPU 200–250, PC/PA 260–290, PVA 190–230.
 - **During a print:** you can edit any slot except the one feeding the current print.
 - **Waiting feedback:** the slot pulses purple until the printer reports the new material and colour.
-- **Hardware check needed:** the `ams_filament_setting` fields (including the external spool's `ams_id 255` / `tray_id 254`) follow Bambu Studio and still need checking on each model.
+- **Hardware check needed:** the `ams_filament_setting` fields (including the external spool's `ams_id 255` / `tray_id 254`, and the H2D's left external spool, `ams_id 254`) follow Bambu Studio and still need checking on each model.
+- **Dual-nozzle printers (H2D):** a slot that either nozzle has loaded can't be edited during a print.
 
 ## Nozzle diameter and type
 

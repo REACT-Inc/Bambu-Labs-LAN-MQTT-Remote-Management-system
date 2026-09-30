@@ -56,7 +56,7 @@ The bot runs inside the same service as the dashboard and uses the same printers
 | `/help` | E | Everyday command guide |
 | `/status` | E | Bot uptime and every printer's connection |
 | `/printer name?` | E | Status, temperatures, progress and a camera snapshot |
-| `/filaments name?` | E | AMS slots and external spool |
+| `/filaments name?` | E | AMS slots and external spool(s). On an H2D: which nozzle (left/right) each AMS and spool feeds, what each nozzle has loaded, and the nozzle in use |
 | `/file list name? path?` | E | Printable `.3mf`/`.gcode` files on the printer (read-only, with a text attachment) |
 | `/file system name? path?` | E | Every folder and file on the printer's storage (read-only) |
 

@@ -81,7 +81,7 @@ async function refresh(){if(polling)return;polling=true;try{state=await api('sta
 function confirmAction(title,text,label,callback){$('confirmTitle').textContent=title;$('confirmText').textContent=text;$('confirmLabel').textContent=label;$('confirmCheck').checked=false;pendingConfirmation=callback;$('confirmDialog').showModal();}
 function renderDetails(){if(typeof renderDevice==='function')renderDevice();}
 function fmtMinutes(v){const n=Number(v);if(v===null||v===undefined||v===''||!Number.isFinite(n))return '';return n>=60?Math.floor(n/60)+' h '+n%60+' min':n+' min';}
-function miniSwatches(d){const ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),trays=(ams.ams||[]).flatMap(u=>(u.tray||[]).map(t=>t));if(d.vt_tray)trays.push(d.vt_tray);
+function miniSwatches(d){const ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),trays=(ams.ams||[]).flatMap(u=>(u.tray||[]).map(t=>t));trays.push(...(Array.isArray(d.vir_slot)&&d.vir_slot.length?d.vir_slot:d.vt_tray?[d.vt_tray]:[]));
  return trays.slice(0,17).map(t=>{const c=/^[0-9a-f]{6}/i.test(t.tray_color||'')&&t.tray_type?'#'+t.tray_color.slice(0,6):'';return `<i class="mini-swatch${c?'':' is-empty'}"${c?` data-color="${c}"`:''} title="${esc(t.tray_type||'Empty')}"></i>`;}).join('');}
 // The Content-Security-Policy blocks inline style attributes, so colours and widths are applied through the DOM.
 function applyStyles(root){root.querySelectorAll('[data-color]').forEach(e=>e.style.background=e.dataset.color);root.querySelectorAll('[data-width]').forEach(e=>e.style.width=e.dataset.width+'%');}

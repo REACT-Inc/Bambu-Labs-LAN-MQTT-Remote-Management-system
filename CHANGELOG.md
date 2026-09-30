@@ -2,7 +2,16 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## 1.4.0-beta.1
+## Unreleased (1.5.0)
+
+### Added
+- **Left/right nozzle indicators for dual-nozzle printers (H2D) (#5).** The dashboard's **Filament** section and Discord `/filaments` now show:
+  - which nozzle each AMS and external spool feeds (**Left** / **Right**, or both through a filament switch)
+  - which slot each nozzle has loaded
+  - which nozzle is in use
+
+  Both external spools are listed and can be edited (the left one uses `ams_id 254`, as in Bambu Studio). The fields are decoded the same way as Bambu Studio (`device.extruder`, the AMS `info` bits and `vir_slot`). Single-nozzle printers look the same as before. The demo H2D shows an example.
+
 
 Built on 1.3.0-beta.1. Fixes the dashboard and printer controls becoming unresponsive on 1.3.0-beta.1 (#40).
 

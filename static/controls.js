@@ -131,13 +131,23 @@ $('jogHome').onclick=async()=>{const b=$('jogHome');b.classList.add('pending');j
   jogReadyAt=Date.now()+3100;setTimeout(()=>renderJog(devPrinter()),3200);}
  catch(e){jogNote={text:e.message,until:Date.now()+15000};}finally{jogBusy=false;b.classList.remove('pending');renderJog(devPrinter());}};
 
-function swatch(t,active,ams,slot,waiting){const color=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6):null,empty=!t||!t.tray_type,remain=num(t?.remain);
- return `<button type="button" class="slot${empty?' is-empty':''}${active?' active':''}${waiting?' pending':''}" data-ams="${esc(ams)}" data-slot="${esc(slot)}" title="${esc((empty?'Empty':t.tray_type+(remain!==null&&remain>=0?' · '+remain+'%':''))+' — click to edit')}"><span class="swatch"${color&&!empty?` data-color="${color}"`:''}></span><strong>${empty?'Empty':esc(t.tray_type)}</strong><small>${empty?'—':remain!==null&&remain>=0?remain+'%':'?'}</small>${!empty&&remain!==null&&remain>=0?`<i class="remain" data-width="${Math.max(0,Math.min(100,remain))}"></i>`:''}</button>`;}
+function swatch(t,active,ams,slot,waiting,tag=''){const color=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6):null,empty=!t||!t.tray_type,remain=num(t?.remain);
+ return `<button type="button" class="slot${empty?' is-empty':''}${active?' active':''}${waiting?' pending':''}" data-ams="${esc(ams)}" data-slot="${esc(slot)}" title="${esc((empty?'Empty':t.tray_type+(remain!==null&&remain>=0?' · '+remain+'%':''))+' — click to edit')}"><span class="swatch"${color&&!empty?` data-color="${color}"`:''}></span><strong>${empty?'Empty':esc(t.tray_type)}</strong><small>${empty?'—':remain!==null&&remain>=0?remain+'%':'?'}</small>${!empty&&remain!==null&&remain>=0?`<i class="remain" data-width="${Math.max(0,Math.min(100,remain))}"></i>`:''}${tag}</button>`;}
 function exists(bits,unit,slot){try{return bits==null||Number(unit)>=32||((BigInt('0x'+bits)>>BigInt(Number(unit)*4+Number(slot)))&1n)===1n;}catch{return true;}}
-function renderAms(p){const d=p.data||{},ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),units=ams.ams||[],now=num(ams.tray_now);
+// Dual-nozzle printers (H2D): p.sides (filament_sides.py) says which nozzle each AMS / external spool feeds
+// and what each nozzle has loaded (#5). Nozzle 0 is the right one, 1 the left.
+const sideName=n=>n===0?'Right':n===1?'Left':n==='both'?'Both':'';
+const externalKey=id=>Number(id)===254?'external_left':'external';
+function renderAms(p){const d=p.data||{},ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),units=ams.ams||[],now=num(ams.tray_now),sides=p.sides||{},dual=!!sides.dual;
  const wait=(a,s)=>isPending('fil|'+p.name+'|'+a+'|'+s,p);
- let html=units.map(u=>`<div class="ams-unit"><div class="ams-head"><strong>AMS ${esc(Number(u.id)+1||u.id)}</strong><small>💧 ${esc(u.humidity??'—')} · ${esc(u.temp??'—')}°C</small></div><div class="slots">${(u.tray||[]).map(t=>swatch(exists(ams.tray_exist_bits,u.id,t.id)?t:null,now===Number(u.id)*4+Number(t.id),u.id,t.id,wait(u.id,t.id))).join('')}</div></div>`).join('');
- if(d.vt_tray)html+=`<div class="ams-unit external"><div class="ams-head"><strong>External spool</strong></div><div class="slots">${swatch(d.vt_tray,now===254||now===255,'external',0,wait('external',0))}</div></div>`;
+ const loadedIn=(a,s)=>(sides.loaded||[]).find(l=>l.ams===Number(a)&&l.slot===Number(s));
+ const active=(a,s)=>dual?!!loadedIn(a,s):a>=254?now===254||now===255:now===Number(a)*4+Number(s);
+ const tag=(a,s)=>{const l=dual&&loadedIn(a,s);return l?`<em class="nozzle-tag">${sideName(l.nozzle)} nozzle</em>`:'';};
+ const badge=n=>dual&&sideName(n)?`<span class="side-badge">${sideName(n)}${n==='both'?' nozzles':' nozzle'}</span>`:'';
+ let html=dual&&sideName(sides.active)?`<p class="nozzle-now">Nozzle in use: <strong>${sideName(sides.active)}</strong></p>`:'';
+ html+=units.map(u=>`<div class="ams-unit"><div class="ams-head"><strong>AMS ${esc(Number(u.id)+1||u.id)} ${badge((sides.ams||{})[String(u.id)])}</strong><small>💧 ${esc(u.humidity??'—')} · ${esc(u.temp??'—')}°C</small></div><div class="slots">${(u.tray||[]).map(t=>swatch(exists(ams.tray_exist_bits,u.id,t.id)?t:null,active(u.id,t.id),u.id,t.id,wait(u.id,t.id),tag(u.id,t.id))).join('')}</div></div>`).join('');
+ const externals=sides.external||(d.vt_tray?[{ams:255,nozzle:null,tray:d.vt_tray}]:[]);
+ html+=externals.map(x=>`<div class="ams-unit external"><div class="ams-head"><strong>External spool ${badge(x.nozzle)}</strong></div><div class="slots">${swatch(x.tray,active(x.ams,0),externalKey(x.ams),0,wait(externalKey(x.ams),0),tag(x.ams,0))}</div></div>`).join('');
  $('amsView').innerHTML=html||'<p class="muted">No filament data reported yet.</p>';applyStyles($('amsView'));}
 
 // ---- Edit a slot's filament (material and colour) ----------------------------------------
@@ -147,11 +157,11 @@ let editingSlot=null;
 $('feType').innerHTML=MATERIALS.map(m=>`<option>${m}</option>`).join('');
 $('fePresets').innerHTML=PRESET_COLOURS.map(c=>`<button type="button" class="fe-preset" data-preset="${c}" data-color="#${c}" aria-label="Colour #${c}" title="#${c}"></button>`).join('');applyStyles($('fePresets'));
 $('fePresets').addEventListener('click',e=>{const b=e.target.closest('[data-preset]');if(b)$('feColor').value='#'+b.dataset.preset.toLowerCase();});
-function slotTray(p,ams,slot){const d=p.data||{};if(ams==='external')return d.vt_tray;const a=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{});
+function slotTray(p,ams,slot){const d=p.data||{};if(ams==='external'||ams==='external_left'){const id=ams==='external'?255:254;return ((p.sides||{}).external||[]).find(x=>x.ams===id)?.tray||(id===255?d.vt_tray:null);}const a=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{});
  return (a.ams||[]).find(u=>String(u.id)===String(ams))?.tray?.find(t=>String(t.id)===String(slot));}
 $('amsView').addEventListener('click',e=>{const b=e.target.closest('.slot[data-ams]');if(!b)return;const p=devPrinter(),t=slotTray(p,b.dataset.ams,b.dataset.slot);
  editingSlot={ams:b.dataset.ams,slot:b.dataset.slot};
- $('feTitle').textContent=b.dataset.ams==='external'?'External spool':`AMS ${Number(b.dataset.ams)+1} · slot ${Number(b.dataset.slot)+1}`;
+ $('feTitle').textContent=b.dataset.ams.startsWith('external')?'External spool'+((p.sides||{}).dual?(b.dataset.ams==='external'?' · right nozzle':' · left nozzle'):''):`AMS ${Number(b.dataset.ams)+1} · slot ${Number(b.dataset.slot)+1}`;
  $('feType').value=MATERIALS.includes(String(t?.tray_type||'').toUpperCase())?t.tray_type.toUpperCase():'PLA';
  $('feColor').value=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6).toLowerCase():'#ffffff';
  $('filamentEditor').hidden=false;$('filamentEditor').scrollIntoView({block:'nearest',behavior:'smooth'});});
@@ -160,7 +170,7 @@ $('filamentEditor').onsubmit=e=>{e.preventDefault();if(!editingSlot)return;const
  $('filamentEditor').hidden=true;editingSlot=null;
  setPending(key,20000,p=>{const t=slotTray(p,ams,slot);return String(t?.tray_type||'').toUpperCase()===type&&String(t?.tray_color||'').slice(0,6).toUpperCase()===color;},printerLabel(name)+' filament');
  renderAms(devPrinter());
- sendControl('filament',{ams:ams==='external'?'external':Number(ams),slot:Number(slot),type,color}).then(pollSoon,()=>{delete pending[key];renderAms(devPrinter());});};
+ sendControl('filament',{ams:ams.startsWith('external')?ams:Number(ams),slot:Number(slot),type,color}).then(pollSoon,()=>{delete pending[key];renderAms(devPrinter());});};
 $('detailDialog').addEventListener('close',()=>{$('filamentEditor').hidden=true;editingSlot=null;});
 
 // ---- Nozzle diameter and type -----------------------------------------------------------
