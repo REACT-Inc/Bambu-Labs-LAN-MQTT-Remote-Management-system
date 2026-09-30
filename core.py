@@ -40,6 +40,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands # pyright: ignore[reportMissingImports]
 import paho.mqtt.client as mqtt
+from printer_models import camera_type
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('printer-bot')
@@ -447,13 +448,13 @@ def snapshot_bytes(printer):
     if not printer:
         return None
     try:
-        if printer.get('camera_type') == 'rtsp':
+        if camera_type(printer) == 'rtsp':
             url = f"rtsps://bblp:{printer['access_code']}@{printer['ip']}:322/streaming/live/1"
             result = subprocess.run(['ffmpeg', '-loglevel', 'error', '-rtsp_transport', 'tcp',
                                      '-i', url, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1'],
                                     capture_output=True, timeout=15)
             return result.stdout if result.returncode == 0 and result.stdout else None
-        if printer.get('camera_type') == 'jpeg_tcp':
+        if camera_type(printer) == 'jpeg_tcp':
             from camera_capture import capture_jpeg
             return capture_jpeg(printer)
     except Exception as error:
@@ -966,5 +967,4 @@ async def on_ready():
                 clients.pop(printer['name'], None)
                 log.exception('Invalid connection configuration for %s', printer['name'])
     log.info('Ready as %s | %s | %s printers', bot.user, 'DEMO' if EXAMPLE_MODE else 'LIVE', len(names()))
-
 

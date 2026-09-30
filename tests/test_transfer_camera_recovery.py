@@ -19,6 +19,13 @@ class UploadTests(unittest.TestCase):
         self.ftp.size.assert_called_once_with('print.3mf');self.ftp.close.assert_called_once()
     def test_other_printers_keep_existing_close_behavior(self):
         self.printer['name']='A1 Mini';upload(self.printer,self.path,'print.3mf');self.assertFalse(self.factory.call_args.kwargs['unwrap'])
+    def test_h2d_pro_uses_family_default_and_override_is_respected(self):
+        self.printer.update(name='New printer',model='H2D Pro')
+        upload(self.printer,self.path,'print.3mf')
+        self.assertTrue(self.factory.call_args.kwargs['unwrap'])
+        self.printer['ftp_tls_unwrap']=False
+        upload(self.printer,self.path,'print.3mf')
+        self.assertFalse(self.factory.call_args.kwargs['unwrap'])
     def test_426_is_failure_even_if_all_bytes_sent(self):
         def transfer(cmd,stream,**kwargs):
             kwargs['callback'](stream.read());raise ftplib.error_temp('426 Failure reading network stream secret')

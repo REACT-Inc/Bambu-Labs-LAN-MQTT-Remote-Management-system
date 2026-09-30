@@ -9,7 +9,7 @@ Both share the same printer connections, print queues, files and history. Nothin
 
 | | |
 |---|---|
-| **Printers** | Built for the H2D, A1 and A1 mini. Other LAN-mode Bambu printers use the same protocol but haven't been verified. |
+| **Printers** | Profiles for A1/A1 mini/A2L, P1P/P1S/P2S, X1/X1C/X1E/X2D and H2S/H2D/H2D Pro/H2C. Common LAN monitoring, queue and controls use the same paths; camera, fan and file transfer depend on the printer's firmware and configuration. See [printer setup](docs/configuration.md#printer-entries). |
 | **Host** | Raspberry Pi 4/5 running Raspberry Pi OS, or another systemd-based Linux (Ubuntu 24.04+, Debian 12+, Fedora, Arch, openSUSE). Python 3.11+. See [Installation](docs/installation.md#ubuntu-and-other-linux-distributions). |
 | **Version** | See `Updater/version.py` and the [changelog](CHANGELOG.md) |
 

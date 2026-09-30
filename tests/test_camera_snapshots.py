@@ -49,6 +49,10 @@ class SnapshotRotationTests(unittest.IsolatedAsyncioTestCase):
         await self.run_for(0.4)
         self.assertEqual(self.calls,[])
 
+    async def test_auto_camera_profile_appears_as_available(self):
+        self.core.printer_config=lambda _: {'name':'X1C','model':'X1C','camera_type':'auto'}
+        self.assertTrue(self.rotation.has_camera('X1C'))
+
     async def test_response_never_waits_for_a_camera(self):
         request=SimpleNamespace(match_info={'name':'H2D'})
         self.assertEqual((await self.rotation.response(request)).status,204)

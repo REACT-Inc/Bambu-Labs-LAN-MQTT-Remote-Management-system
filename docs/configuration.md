@@ -71,19 +71,24 @@ Example:
 | `ip` | live | Printer's LAN IP address. Give it a fixed/reserved address in your router. |
 | `serial` | live | Printer serial number (MQTT topic and error-model detection). |
 | `access_code` | live | LAN access code from the printer's screen. |
-| `model` | recommended | E.g. `H2D`, `A1`, `A1 mini`. Sets temperature limits, chamber support and fan layout. If omitted, the **name** is used to guess, so name printers clearly or set this. |
-| `camera_type` | for camera | `rtsp` (H2D and other RTSP cameras; needs ffmpeg) or `jpeg_tcp` (A1 family). Omit to disable camera features for that printer. |
+| `model` | recommended | Set a model from the table below, e.g. `H2C`, `X1E`, `P2S`, `A2L`. Aliases such as `Bambu Lab X1 Carbon` and `A1 mini Combo` work. If omitted, the **name** is used to guess. Unknown models keep conservative control limits. |
+| `camera_type` | for camera | `auto` selects the model's suggested LAN camera protocol, `rtsp` or `jpeg_tcp` overrides it. Omit or set `none` to disable camera features. RTSPS requires ffmpeg and LAN live view enabled on the printer; a matching model does not guarantee camera access on every firmware. |
 | `error_model` | no | Forces which Bambu error catalog to use. Normally the first 3 characters of the serial pick it. |
-| `ftp_tls_unwrap` | no | `true`/`false` overrides how FTPS uploads close their data connection. It's enabled automatically for the H2D. See [Troubleshooting](troubleshooting.md#h2d-upload-fails-with-426). |
+| `ftp_tls_unwrap` | no | `true`/`false` overrides how FTPS uploads close their data connection. It's enabled automatically for the H2D and H2D Pro; for other H2 models test an upload and override this if necessary. See [Troubleshooting](troubleshooting.md#h2d-upload-fails-with-426). |
 
 **Limits derived from `model`:**
 
-| Model contains | Nozzle max | Bed max | Chamber |
+| Configured model | Nozzle max | Bed max | Active chamber |
 |---|---|---|---|
-| `h2d` | 350 °C | 120 °C | 40–65 °C (or off) |
-| `a1` + `mini` | 300 °C | 80 °C | — |
-| `a1` | 300 °C | 100 °C | — |
-| anything else | 300 °C | 80 °C | — |
+| H2S, H2D, H2D Pro, H2C | 350 °C | 120 °C | 40–65 °C (or off) |
+| X2D | 300 °C | 120 °C | 40–65 °C (or off) |
+| X1E | 320 °C | 110 °C | 40–60 °C (or off) |
+| X1, X1C, P2S | 300 °C | 110 °C | — |
+| P1P, P1S, A1 | 300 °C | 100 °C | — |
+| A1 mini, A2L | 300 °C | 80 °C | — |
+| Unknown | 300 °C | 80 °C | — |
+
+Limits are conservative software bounds; some printers have regional power-dependent bed limits. The firmware may reject a command below these bounds. Set `model` explicitly for a printer whose display name is a nickname. `camera_type: "auto"` is optional, so existing installations with no camera setting remain unchanged. Newer P2/X2/H2 models use the fan controls reported by their air-duct telemetry; fans stay hidden until the printer reports them. Laser, cutting, multiple-tool selection and proprietary firmware features are outside the shared LAN control paths. Queue each file only after slicing it for that exact printer and check the first print on the device.
 
 ## Files and folders
 
