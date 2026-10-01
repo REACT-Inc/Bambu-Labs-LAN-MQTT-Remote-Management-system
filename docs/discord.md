@@ -55,7 +55,7 @@ The bot runs inside the same service as the dashboard and uses the same printers
 |---|---|---|
 | `/help` | E | Everyday command guide |
 | `/status` | E | Bot uptime and every printer's connection |
-| `/printer name?` | E | Status, temperatures, progress and a camera snapshot |
+| `/printer name?` | E | Status, temperatures and progress straight away; a camera snapshot is added when it arrives |
 | `/filaments name?` | E | AMS slots and external spool |
 | `/file list name? path?` | E | Printable `.3mf`/`.gcode` files on the printer (read-only, with a text attachment) |
 | `/file system name? path?` | E | Every folder and file on the printer's storage (read-only) |

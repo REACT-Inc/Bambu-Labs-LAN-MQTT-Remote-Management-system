@@ -47,6 +47,7 @@ class Dashboard:
         self.cameras = Cameras(core)
         core.live_cameras = self.cameras
         self.snapshots = SnapshotRotation(core, self.cameras)
+        core.snapshot_rotation = self.snapshots   # Discord /printer reuses its recent stills (#54)
         self.auth_file = core.DATA_DIR/'auth.json'
         self.uploads = core.DATA_DIR/'uploads'
         self.uploads.mkdir(exist_ok=True)
