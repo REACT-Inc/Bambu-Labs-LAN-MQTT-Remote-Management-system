@@ -92,7 +92,7 @@ Other destinations, such as a Discord webhook or email, can be added in `issue_r
 
 ### Camera shows "Unavailable"
 
-- **Check the camera setting:** `camera_type` must be set (`jpeg_tcp` for A1-family, `rtsp` for H2D). RTSP needs `ffmpeg` installed.
+- **Check the camera setting:** set `camera_type` to `auto` for the configured model, or choose `jpeg_tcp`/`rtsp` manually. RTSP needs `ffmpeg` and the printer's LAN live-view option enabled. Camera protocol and availability may change with firmware.
 - **Close other camera clients:** Bambu Studio and Handy count as clients, and the printer may accept only one.
 - **Look at the log:**
   ```bash

@@ -7,6 +7,7 @@ import ssl
 import struct
 import time
 from aiohttp import web
+from printer_models import camera_type
 
 MAX_FRAME=8*1024*1024
 log=logging.getLogger(__name__)
@@ -91,7 +92,7 @@ class Feed:
         while True:
             try:
                 self.status='Connecting'
-                if self.printer.get('camera_type')=='rtsp':await self.rtsp()
+                if camera_type(self.printer)=='rtsp':await self.rtsp()
                 else:await self.tcp()
             except asyncio.CancelledError:raise
             except Exception as exc:
@@ -108,7 +109,7 @@ class Cameras:
         if name not in self.core.names():raise ValueError('Unknown printer.')
         if self.core.EXAMPLE_MODE:raise ValueError('No camera in demo mode.')
         p=self.core.printer_config(name)
-        if not p or p.get('camera_type') not in ('rtsp','jpeg_tcp'):raise ValueError('Camera type is not configured.')
+        if not p or camera_type(p) not in ('rtsp','jpeg_tcp'):raise ValueError('Camera type is not configured.')
         idle=self.idle.pop(name,None)
         if idle:idle.cancel()
         feed=self.feeds.get(name)

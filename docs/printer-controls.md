@@ -8,7 +8,7 @@ In demo mode, controls only change the simulated data.
 
 - [Pause, resume, stop and light](#pause-resume-stop-and-light)
 - [Temperatures](#temperatures)
-- [Chamber heating (H2D)](#chamber-heating-h2d)
+- [Chamber heating](#chamber-heating)
 - [Print speed](#print-speed)
 - [Fans](#fans)
 - [Moving the axes](#moving-the-axes)
@@ -43,21 +43,23 @@ Light control uses the standard `chamber_light` command. Whether it works depend
 
   | Model | Nozzle max | Bed max |
   |---|---|---|
-  | H2D | 350 °C | 120 °C |
-  | A1 | 300 °C | 100 °C |
-  | A1 mini | 300 °C | 80 °C |
-  | unknown | 300 °C | 80 °C |
+  | H2 series | 350 °C | 120 °C |
+  | X2D | 300 °C | 120 °C |
+  | X1E | 320 °C | 110 °C |
+  | X1/X1C/P2S | 300 °C | 110 °C |
+  | P1P/P1S/A1 | 300 °C | 100 °C |
+  | A1 mini/A2L/unknown | 300 °C | 80 °C |
 
   Set `model` on each printer so the right limits apply.
 - **Nozzle:** the *active* nozzle is changed. The app doesn't switch H2D tools.
 - **How it's sent:** as non-blocking `M104`/`M140` commands. The G-code of a running print can change the targets again.
 
-## Chamber heating (H2D)
+## Chamber heating
 
 `/chamber degrees:60`, `/temperature target:chamber degrees:60`, or the dashboard control *Heated chamber*.
 
-- **Range:** 0 turns chamber heating off; otherwise 40–65 °C.
-- **H2D only.** Other models refuse it.
+- **Range:** 0 turns chamber heating off; otherwise 40–65 °C on H2/X2D, or 40–60 °C on X1E.
+- **Heated-chamber models:** H2S, H2D, H2D Pro, H2C, X2D and X1E. Other models refuse it. Firmware may still reject a command; inspect its response and the device.
 - **Rejections:** the firmware refuses chamber heating while low-temperature filament (PLA/PETG/TPU) is loaded, and the app shows that reason.
 
 ## Print speed
@@ -71,7 +73,7 @@ Light control uses the standard `chamber_light` command. Whether it works depend
 
 How fans are controlled:
 - **Newer firmware:** uses the reported air-duct fan IDs, ranges and manual-control flags with `set_fan`.
-- **Older reports:** use the part, auxiliary and chamber `M106` channels.
+- **Older reports:** use the model's legacy part, auxiliary and chamber `M106` channels. Unrecognized models show only the part fan; newer models wait for reported air-duct capabilities.
 - **Firmware-managed fans:** the hotend heatbreak and electronics fans are never changed. Fans in automatic mode aren't forced either. Change the airflow mode on the printer if you need manual control.
 
 ## Moving the axes

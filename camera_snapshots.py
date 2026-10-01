@@ -14,6 +14,7 @@ import contextlib
 import time
 
 from aiohttp import web
+from printer_models import camera_type
 
 
 class SnapshotRotation:
@@ -35,7 +36,7 @@ class SnapshotRotation:
 
     def has_camera(self, name):
         config = getattr(self.core, 'printer_config', lambda n: None)(name) or {}
-        return not getattr(self.core, 'EXAMPLE_MODE', False) and config.get('camera_type') in ('rtsp', 'jpeg_tcp')
+        return not getattr(self.core, 'EXAMPLE_MODE', False) and camera_type(config) in ('rtsp', 'jpeg_tcp')
 
     def state(self, name):
         image, error = self.images.get(name), self.errors.get(name)

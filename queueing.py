@@ -157,8 +157,8 @@ def upload(printer, source, remote):
     # BambuTools supplies implicit FTPS with TLS session reuse for port 990.
     from bambulabs_api.ftp_client import ImplicitFTP_TLS
     context = ssl._create_unverified_context()
-    model=str(printer.get('model') or printer.get('name','')).lower().replace(' ','')
-    unwrap=printer.get('ftp_tls_unwrap','h2d' in model)
+    from printer_models import profile
+    unwrap=printer.get('ftp_tls_unwrap',profile(printer).ftp_tls_unwrap)
     if type(unwrap) is not bool:raise ValueError('ftp_tls_unwrap must be true or false.')
     ftp = ImplicitFTP_TLS(timeout=60, context=context, unwrap=unwrap)
     sent=0;expected=Path(source).stat().st_size;deadline=time.monotonic()+240
