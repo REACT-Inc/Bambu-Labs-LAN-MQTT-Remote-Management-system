@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.5.0)
+## 1.5.0-beta.1
+
+Built on 1.4.0-beta.1. Makes Discord `/printer` on the H2D much lighter on the Pi (#54).
 
 ### Fixed
 - **Pi crash after `/printer` on the H2D (#54).** `/printer` started a **full live ffmpeg decode** of the H2D's 1080p camera stream, using every CPU core at normal priority, just to get one picture. If the dashboard was open, it could run alongside another full-resolution capture of the same camera. On a Raspberry Pi this could exhaust RAM, CPU or power. Now:
