@@ -73,6 +73,7 @@ function renderJobs(){
   if(j.status==='queued'){if(state.printers.find(p=>p.name===j.printer)?.plate_swap?.enabled)buttons+=actionButton('swapapprove','Approve Swaplist batch…',q);const first=state.jobs.find(x=>x.printer===j.printer&&x.status==='queued');if(first?.id===j.id)buttons+=actionButton('start','Start next',q,'primary')+actionButton('startOverride','Start ignoring error',q,'danger');buttons+=actionButton('up','↑',q)+actionButton('down','↓',q)+actionButton('remove','Remove',q);}
   if(j.status==='needs_review')buttons+=['finished','failed','cancelled'].map(o=>actionButton('resolve','Mark '+o,`${q} data-outcome="${o}"`)).join('');
   if(terminal.has(j.status))buttons+=actionButton('reprint','Queue again',q);
+  if(terminal.has(j.status)&&j.has_file&&state.printers.length>1)buttons+=actionButton('sendto','Print on another printer…',q);
   return `<div class="job-row"><div class="job-info"><strong>${j.demo?'🧪 DEMO · ':''}${esc(j.label)}</strong><small>${esc(printerLabel(j.printer))} · Plate ${j.options.plate} · ${j.options.use_ams?'AMS '+esc(j.options.ams_mapping.join(', ')):'External spool'}</small><small>${esc(j.id)} · Added by ${esc(j.author)}</small>${j.note?`<div class="job-note">${esc(j.note)}</div>`:''}</div><span class="state ${statusClass(j.status)}">${esc(j.status.replaceAll('_',' '))}</span><div class="job-actions">${buttons}</div></div>`;};
  $('jobs').innerHTML=jobs.filter(j=>!terminal.has(j.status)).map(row).join('')||'<div class="empty">The queue is clear. Add a print here or use /queueadd in Discord.</div>';
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
@@ -140,6 +141,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  if(action==='resume'){await printAction(printer,'resume');return;}
  if(action==='stop'){confirmStop(printer);return;}
  if(action==='swapapprove'){openSwapApproval(job);return;}
+ if(action==='sendto'){openSendTo(job);return;}
  if(action==='startOverride'){const j=state.jobs.find(x=>x.id===job);confirmAction('Start ignoring reported error?',`${j.label} on ${printerLabel(j.printer)}. This bypasses the management error check and allows FAILED state. It does not clear the printer error or override firmware protections.`,'I inspected the printer, cleared the plate, and verified the material and sliced file. Start despite the reported error.',()=>api('jobs/'+job+'/start',{confirmed:true,override_error:true}));return;}
  if(action==='start'){const j=state.jobs.find(x=>x.id===job);confirmAction('Start next print?',`${j.label} on ${printerLabel(j.printer)}. Plate ${j.options.plate}. ${j.options.use_ams?'AMS mapping: '+j.options.ams_mapping.join(', '):'External spool'}.`,'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',()=>api('jobs/'+job+'/start',{confirmed:true}));return;}
  if(action==='resolve'){confirmAction('Record the verified outcome?',`Mark ${job} as ${outcome}. This records a result; it does not send any command to the printer.`,'I inspected the physical printer and verified this outcome.',()=>api('jobs/'+job+'/resolve',{confirmed:true,outcome}));return;}
@@ -171,3 +173,25 @@ const tabWithErrors=tab;tab=function(name){tabWithErrors(name);if(name==='settin
 
 // Keyboard: Enter or Space on a focused printer card opens it.
 $('printers').addEventListener('keydown',e=>{const card=e.target.closest?.('.printer-card[data-printer]');if(card&&e.target===card&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openPrinter(card.dataset.printer);}});
+
+// ---- Send a finished print to another printer's queue (#57) -----------------------------------
+// The server decides which printers suit the file (same model it was sliced for); unknown models need a tick.
+let sendJob=null,sendTargets=[];
+async function openSendTo(id){const j=state.jobs.find(x=>x.id===id);if(!j)return;sendJob=id;sendTargets=[];
+ $('sendToText').textContent=`${j.label} — printed on ${printerLabel(j.printer)}.`;$('sendToSliced').textContent='Checking the file…';
+ $('sendToTarget').innerHTML='';$('sendToAms').checked=!!j.options.use_ams;$('sendToMapping').value=(j.options.ams_mapping||[]).join(',');
+ $('sendToChecked').checked=false;updateSendTo();$('sendToDialog').showModal();
+ try{const r=await api('jobs/'+encodeURIComponent(id)+'/targets',undefined,'GET');if(sendJob!==id)return;sendTargets=r.targets;
+  $('sendToSliced').textContent=r.sliced_for?'Sliced for: '+r.sliced_for:"The file doesn't say which printer it was sliced for.";
+  $('sendToTarget').innerHTML=r.targets.map(t=>`<option value="${esc(t.name)}"${t.compatible===false?' disabled':''}>${esc(t.display)}${t.model?' ('+esc(t.model)+')':''}${t.compatible===false?' — not compatible':t.compatible===null?' — check first':''}</option>`).join('');
+  const first=r.targets.find(t=>t.compatible===true)||r.targets.find(t=>t.compatible===null);if(first)$('sendToTarget').value=first.name;updateSendTo();}
+ catch(e){$('sendToSliced').textContent='';$('sendToReason').textContent=e.message;}}
+function updateSendTo(){const t=sendTargets.find(x=>x.name===$('sendToTarget').value&&x.compatible!==false);
+ $('sendToReason').textContent=t?t.reason:(sendTargets.length?'No printer can take this file: '+(sendTargets[0]?.reason||''):'');
+ $('sendToCheckRow').hidden=!(t&&t.compatible===null);$('sendToCheckLabel').textContent=t?`I checked this file was sliced for ${t.display}.`:'';
+ $('sendToSubmit').disabled=!t;$('sendToMapping').disabled=!$('sendToAms').checked;}
+$('sendToTarget').onchange=updateSendTo;$('sendToAms').onchange=updateSendTo;
+$('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarget').value;$('sendToSubmit').classList.add('pending');
+ try{await api('jobs/'+encodeURIComponent(sendJob)+'/sendto',{printer:target,use_ams:$('sendToAms').checked,mapping:$('sendToAms').checked?$('sendToMapping').value:'',checked:$('sendToChecked').checked});
+  $('sendToDialog').close();notice(`Added to ${printerLabel(target)}'s queue. Start it from the queue when that printer is ready.`);await refresh();}
+ catch(e){$('sendToReason').textContent=e.message;}finally{$('sendToSubmit').classList.remove('pending');}};

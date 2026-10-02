@@ -100,6 +100,11 @@ Until it's resolved, no other job can start on that printer. **Uncertain starts 
 - **Stop during staging:** cancels the pending submission.
 - **Reprint:**
   - On the dashboard, **Queue again** on any job in history (finished, failed or cancelled) copies it back into the queue with the same file and options.
+  - **Print on another printer…** (dashboard only) copies a history job into a **different printer's** queue.
+    - **Which printers:** only printers of the model the file was sliced for. The app reads the model from the `.3mf`, and the printer's model from its `"model"` in config.json or its serial number. Other models are greyed out with "Re-slice it for the … in Bambu Studio". If either model is unknown, you have to tick that you checked the file suits that printer.
+    - **What carries over:** plate and bed type. Choose the AMS mapping again for the new printer's trays (the old one is pre-filled).
+    - **Starting:** the new job waits in that printer's queue for the normal **Start next** confirmation. The history entry stays as it was, and the Activity feed records the move.
+    - **Not possible for:** jobs that only name a file on the printer's own storage (`remote:` from `/queueadd`). That file isn't on the Pi, so upload it again for the other printer.
   - In Discord, `/reprint` does the same for the most recent finished job.
   - Either way the copy waits for a normal start. The app doesn't guess a file path from the printer's "last job" name.
 
