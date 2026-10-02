@@ -73,7 +73,7 @@ function renderJobs(){
   if(j.status==='queued'){if(state.printers.find(p=>p.name===j.printer)?.plate_swap?.enabled)buttons+=actionButton('swapapprove','Approve Swaplist batch…',q);const first=state.jobs.find(x=>x.printer===j.printer&&x.status==='queued');if(first?.id===j.id)buttons+=actionButton('start','Start next',q,'primary')+actionButton('startOverride','Start ignoring error',q,'danger');buttons+=actionButton('up','↑',q)+actionButton('down','↓',q)+actionButton('remove','Remove',q);}
   if(j.status==='needs_review')buttons+=['finished','failed','cancelled'].map(o=>actionButton('resolve','Mark '+o,`${q} data-outcome="${o}"`)).join('');
   if(terminal.has(j.status))buttons+=actionButton('reprint','Queue again',q);
-  if(terminal.has(j.status)&&j.has_file&&state.printers.length>1)buttons+=actionButton('sendto','Print on another printer…',q);
+  if(terminal.has(j.status)&&state.printers.length>1)buttons+=actionButton('sendto','Print on another printer…',q);
   return `<div class="job-row"><div class="job-info"><strong>${j.demo?'🧪 DEMO · ':''}${esc(j.label)}</strong><small>${esc(printerLabel(j.printer))} · Plate ${j.options.plate} · ${j.options.use_ams?'AMS '+esc(j.options.ams_mapping.join(', ')):'External spool'}</small><small>${esc(j.id)} · Added by ${esc(j.author)}</small>${j.note?`<div class="job-note">${esc(j.note)}</div>`:''}</div><span class="state ${statusClass(j.status)}">${esc(j.status.replaceAll('_',' '))}</span><div class="job-actions">${buttons}</div></div>`;};
  $('jobs').innerHTML=jobs.filter(j=>!terminal.has(j.status)).map(row).join('')||'<div class="empty">The queue is clear. Add a print here or use /queueadd in Discord.</div>';
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
@@ -176,13 +176,14 @@ $('printers').addEventListener('keydown',e=>{const card=e.target.closest?.('.pri
 
 // ---- Send a finished print to another printer's queue (#57) -----------------------------------
 // The server decides which printers suit the file (same model it was sliced for); unknown models need a tick.
-let sendJob=null,sendTargets=[];
-async function openSendTo(id){const j=state.jobs.find(x=>x.id===id);if(!j)return;sendJob=id;sendTargets=[];
+let sendJob=null,sendTargets=[],sendFrom=null;
+async function openSendTo(id){const j=state.jobs.find(x=>x.id===id);if(!j)return;sendJob=id;sendTargets=[];sendFrom=null;
  $('sendToText').textContent=`${j.label} — printed on ${printerLabel(j.printer)}.`;$('sendToSliced').textContent='Checking the file…';
  $('sendToTarget').innerHTML='';$('sendToAms').checked=!!j.options.use_ams;$('sendToMapping').value=(j.options.ams_mapping||[]).join(',');
  $('sendToChecked').checked=false;updateSendTo();$('sendToDialog').showModal();
  try{const r=await api('jobs/'+encodeURIComponent(id)+'/targets',undefined,'GET');if(sendJob!==id)return;sendTargets=r.targets;
-  $('sendToSliced').textContent=r.sliced_for?'Sliced for: '+r.sliced_for:"The file doesn't say which printer it was sliced for.";
+  sendFrom=r.remote?r.from:null;
+  $('sendToSliced').textContent=(r.sliced_for?r.how+': '+r.sliced_for+'.':"The file doesn't say which printer it was sliced for.")+(r.remote?` The file is on ${printerLabel(r.from)}; it's copied over when you send it, so that printer must be on.`:'');
   $('sendToTarget').innerHTML=r.targets.map(t=>`<option value="${esc(t.name)}"${t.compatible===false?' disabled':''}>${esc(t.display)}${t.model?' ('+esc(t.model)+')':''}${t.compatible===false?' — not compatible':t.compatible===null?' — check first':''}</option>`).join('');
   const first=r.targets.find(t=>t.compatible===true)||r.targets.find(t=>t.compatible===null);if(first)$('sendToTarget').value=first.name;updateSendTo();}
  catch(e){$('sendToSliced').textContent='';$('sendToReason').textContent=e.message;}}
@@ -192,6 +193,7 @@ function updateSendTo(){const t=sendTargets.find(x=>x.name===$('sendToTarget').v
  $('sendToSubmit').disabled=!t;$('sendToMapping').disabled=!$('sendToAms').checked;}
 $('sendToTarget').onchange=updateSendTo;$('sendToAms').onchange=updateSendTo;
 $('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarget').value;$('sendToSubmit').classList.add('pending');
+ if(sendFrom)$('sendToReason').textContent=`Copying the file from ${printerLabel(sendFrom)}…`;
  try{await api('jobs/'+encodeURIComponent(sendJob)+'/sendto',{printer:target,use_ams:$('sendToAms').checked,mapping:$('sendToAms').checked?$('sendToMapping').value:'',checked:$('sendToChecked').checked});
   $('sendToDialog').close();notice(`Added to ${printerLabel(target)}'s queue. Start it from the queue when that printer is ready.`);await refresh();}
  catch(e){$('sendToReason').textContent=e.message;}finally{$('sendToSubmit').classList.remove('pending');}};

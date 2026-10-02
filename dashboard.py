@@ -224,16 +224,24 @@ class Dashboard:
         elif action=='reprint': self.copy_job(job_id,'web administrator')
         elif action=='sendto':
             # Send a finished print to another printer's queue (#57). It still needs the normal start confirmation.
-            copy=job_transfer.send(self.core,self.store,job_id,data.get('printer'),data.get('use_ams',False),data.get('mapping',''),data.get('checked'),'web administrator')
-            return web.json_response({'ok':True,'id':copy['id']})
+            # A file that's only on the original printer is copied to the Pi first, then uploaded to the new one at start.
+            printer,checked=data.get('printer'),data.get('checked')
+            job=job_transfer.validate(self.core,self.store,job_id,printer,checked)
+            asset=await asyncio.to_thread(job_transfer.fetch,self.core,job,self.uploads) if job_transfer.needs_fetch(self.core,job) else None
+            try:copy=job_transfer.send(self.core,self.store,job_id,printer,data.get('use_ams',False),data.get('mapping',''),checked,'web administrator',asset)
+            except Exception:
+                if asset:Path(asset).unlink(missing_ok=True)
+                raise
+            return web.json_response({'ok':True,'id':copy['id'],'copied':bool(asset)})
         else: self.store.edit(job_id,action,'web administrator')
         return web.json_response({'ok':True})
 
     async def job_targets(self,request):
         job=self.store.get(request.match_info['id'])
-        sliced=await asyncio.to_thread(job_transfer.sliced_for,job['asset']) if job.get('asset') else ''
+        sliced,how=await asyncio.to_thread(job_transfer.file_model,self.core,job)
         targets=await asyncio.to_thread(job_transfer.targets,self.core,job)
-        return web.json_response({'job':job['id'],'from':job['printer'],'sliced_for':job_transfer.label(sliced) if sliced else '','targets':targets})
+        return web.json_response({'job':job['id'],'from':job['printer'],'sliced_for':job_transfer.label(sliced) if sliced else '','how':how,
+            'remote':not job.get('asset'),'targets':targets})
 
     async def control(self,request):
         name=request.match_info['name'];action=request.match_info['action'];data=await request.json()

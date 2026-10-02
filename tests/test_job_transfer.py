@@ -1,5 +1,6 @@
 """Send a finished print to another printer's queue (#57)."""
-import json,tempfile,unittest,zipfile
+import json,sys,tempfile,unittest,zipfile
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace
 from queueing import Store,options
@@ -55,11 +56,82 @@ class TransferTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Choose a printer'):job_transfer.send(self.core,self.store,self.job['id'],'Nope',False,'',True,'x')
         waiting=self.store.add('Mini 1','Other',self.mini_file,'',options(),'tester')
         with self.assertRaisesRegex(ValueError,'Only finished'):job_transfer.send(self.core,self.store,waiting['id'],'Mini 2',False,'',True,'x')
-        remote=self.store.add('Mini 1','On SD','', 'cache/part.gcode.3mf',options(),'tester');self.store.set_status(remote['id'],'finished')
-        with self.assertRaisesRegex(ValueError,'stored on the printer'):job_transfer.send(self.core,self.store,remote['id'],'Mini 2',False,'',True,'x')
         with self.assertRaisesRegex(ValueError,'AMS mapping'):job_transfer.send(self.core,self.store,self.job['id'],'Mini 2',True,'',True,'x')
         Path(self.mini_file).unlink()
         with self.assertRaisesRegex(ValueError,'no longer on the Pi'):job_transfer.send(self.core,self.store,self.job['id'],'Mini 2',False,'',True,'x')
+
+
+class RemoteFileTests(unittest.TestCase):
+    """A remote: job's file is only on the original printer: it's copied to the Pi, then queued like an upload."""
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();d=Path(self.tmp.name);(d/'uploads').mkdir()
+        configs={'Mini 1':{'name':'Mini 1','model':'A1 mini','ip':'192.0.2.1','access_code':'x'},'Mini 2':{'model':'A1 mini'},'H2D':{'model':'H2D'}}
+        self.core=SimpleNamespace(names=lambda:list(configs),printer_config=configs.get,display_name=lambda n:n,EXAMPLE_MODE=False)
+        self.store=Store(d/'db');self.uploads=d/'uploads'
+        self.job=self.store.add('Mini 1','On SD','','cache/part.gcode.3mf',options(),'tester');self.store.set_status(self.job['id'],'finished')
+    def tearDown(self):
+        self.store.db.close();self.tmp.cleanup()
+    def download_as(self,model):
+        calls=[]
+        def download(printer,remote,dest):calls.append((printer['name'],remote));sliced(dest,model)
+        return download,calls
+
+    def test_file_is_copied_from_the_original_printer_and_queued(self):
+        job=self.store.get(self.job['id'])
+        self.assertTrue(job_transfer.needs_fetch(self.core,job))
+        self.assertEqual(job_transfer.check(self.core,job,'Mini 2')['compatible'],True)      # printed on an A1 mini
+        self.assertEqual(job_transfer.check(self.core,job,'H2D')['compatible'],False)
+        download,calls=self.download_as('Bambu Lab A1 mini')
+        path=job_transfer.fetch(self.core,job,self.uploads,download)
+        self.assertEqual(calls,[('Mini 1','cache/part.gcode.3mf')]);self.assertTrue(Path(path).is_file())
+        copy=job_transfer.send(self.core,self.store,job['id'],'Mini 2',False,'',None,'x',asset=path)
+        self.assertEqual((copy['printer'],copy['asset'],copy['remote']),('Mini 2',path,f"pm_{copy['id']}.gcode.3mf"))  # uploaded at start
+        self.assertIn('file copied from that printer',self.store.events()[0]['detail'])
+
+    def test_the_real_file_is_checked_after_copying(self):
+        download,_=self.download_as('Bambu Lab H2D')
+        path=job_transfer.fetch(self.core,self.store.get(self.job['id']),self.uploads,download)
+        with self.assertRaisesRegex(ValueError,'Sliced for the H2D, not the A1 mini'):
+            job_transfer.send(self.core,self.store,self.job['id'],'Mini 2',False,'',None,'x',asset=path)
+
+    def test_a_failed_or_bad_copy_leaves_nothing_behind(self):
+        def offline(printer,remote,dest):raise RuntimeError("Couldn't copy the file from Mini 1")
+        with self.assertRaisesRegex(RuntimeError,"Couldn't copy"):job_transfer.fetch(self.core,self.store.get(self.job['id']),self.uploads,offline)
+        def not_sliced(printer,remote,dest):Path(dest).write_bytes(b'not a zip')
+        with self.assertRaisesRegex(ValueError,'sliced Bambu'):job_transfer.fetch(self.core,self.store.get(self.job['id']),self.uploads,not_sliced)
+        self.assertEqual(list(self.uploads.iterdir()),[])
+
+
+class DownloadTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.dest=Path(self.tmp.name)/'f.3mf'
+        self.printer={'name':'Mini 1','ip':'192.0.2.1','access_code':'secret99','model':'A1 mini'}
+    def tearDown(self):self.tmp.cleanup()
+    def ftp(self,data,reported=None):
+        class FTP:
+            def __init__(self,**kwargs):pass
+            def connect(self,*a):pass
+            def login(self,*a):pass
+            def prot_p(self):pass
+            def voidcmd(self,c):pass
+            def size(self,remote):return len(data) if reported is None else reported
+            def retrbinary(self,cmd,callback,blocksize):
+                assert cmd=='RETR cache/part.gcode.3mf'
+                for k in range(0,len(data),4):callback(data[k:k+4])
+            def close(self):pass
+        return patch.dict(sys.modules,{'bambulabs_api.ftp_client':SimpleNamespace(ImplicitFTP_TLS=FTP)})
+    def test_download(self):
+        import queueing
+        with self.ftp(b'0123456789'):queueing.download(self.printer,'cache/part.gcode.3mf',self.dest)
+        self.assertEqual(self.dest.read_bytes(),b'0123456789')
+    def test_size_mismatch_or_missing_file_leaves_nothing(self):
+        import queueing
+        with self.ftp(b'0123456789',reported=4),self.assertRaisesRegex(RuntimeError,"Couldn't copy the file from Mini 1"):
+            queueing.download(self.printer,'cache/part.gcode.3mf',self.dest)
+        self.assertFalse(self.dest.exists())
+        with self.ftp(b'',reported=0),self.assertRaisesRegex(RuntimeError,'missing on the printer') as error:
+            queueing.download(self.printer,'cache/part.gcode.3mf',self.dest)
+        self.assertNotIn('secret99',str(error.exception));self.assertFalse(self.dest.exists())
 
 
 if __name__=='__main__':

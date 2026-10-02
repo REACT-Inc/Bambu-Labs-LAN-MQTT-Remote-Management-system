@@ -9,6 +9,7 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Same model only:** only printers of the model the `.3mf` was sliced for are offered. A mismatch is refused, and an unknown model needs a confirmation tick.
   - **Settings:** the AMS mapping is chosen again for the new printer; plate and bed type carry over.
   - **Starting:** the new job still needs the normal start confirmation.
+  - **Files on the printer:** for jobs whose file is on the original printer's storage, the file is copied to the Pi when you send it, and uploaded to the new printer at start.
 
 ## 1.5.0-beta.1
 
