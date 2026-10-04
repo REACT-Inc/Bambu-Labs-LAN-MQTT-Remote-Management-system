@@ -31,7 +31,11 @@ class MeshCentral:
     def public(self):
         return {'configured':bool(self.config.get('url') and self.config.get('username') and self.config.get('password')),
             'url':self.config.get('url',''),'username':self.config.get('username',''),'prefix':self.config.get('prefix','REACT-'),
-            'error':self.error,'updated':self.updated or None,'commands':list(self.commands())}
+            'error':self.error,'updated':self.updated or None,'commands':list(self.commands()),'remote_desktop':self.remote_desktop()}
+
+    def remote_desktop(self):
+        """Remote desktop links in the dashboard (#61); on unless switched off in the MeshCentral settings."""
+        return self.config.get('remote_desktop',True) is not False
 
     def commands(self):
         result=self.config.get('commands',DEFAULT_COMMANDS)
@@ -50,7 +54,7 @@ class MeshCentral:
         if not username or not password or max(len(username),len(password))>2048:raise ValueError('Enter the MeshCentral login-token username and password.')
         prefix=str(data.get('prefix','REACT-')).strip()
         if not prefix or len(prefix)>80:raise ValueError('Enter a device-name prefix, such as REACT-.')
-        cfg=dict(self.config,url=url,username=username,password=password,prefix=prefix)
+        cfg=dict(self.config,url=url,username=username,password=password,prefix=prefix,remote_desktop=data.get('remote_desktop',True) is not False)
         fd,path=tempfile.mkstemp(dir=self.path.parent)
         try:
             with os.fdopen(fd,'w') as f:json.dump(cfg,f);f.flush();os.fsync(f.fileno())
@@ -95,7 +99,10 @@ class MeshCentral:
                 name=str(node.get('name',''));nid=node.get('_id','')
                 if not name.casefold().startswith(prefix) or not nid.startswith('node/'):continue
                 windows=(node.get('agent') or {}).get('id') in (1,2,3,4,43) or 'windows' in str(node.get('osdesc','')).lower()
-                result.append({'id':nid,'name':name,'online':bool(int(node.get('conn',0))&1),
+                # MeshCentral agent capabilities: bit 1 = remote desktop (older servers don't report caps).
+                caps=(node.get('agent') or {}).get('caps')
+                desktop=bool(int(caps)&1) if isinstance(caps,(int,str)) and str(caps).isdigit() else windows
+                result.append({'id':nid,'name':name,'online':bool(int(node.get('conn',0))&1),'desktop':desktop,
                     'report':{'hostname':node.get('host') or name,'platform':node.get('osdesc',''),
                     'commands':list(self.commands()) if windows else []}})
         return sorted(result,key=lambda n:n['name'].casefold())
@@ -114,6 +121,21 @@ class MeshCentral:
                 self.error=str(exc);self.cached=[]
                 if force:raise
             return self.cached
+
+    async def desktop_url(self,device):
+        """MeshCentral's own remote-desktop viewer for one listed, online laptop (#61). The browser opens it; the
+        user signs in to MeshCentral there with their own account, so no token or password leaves the Pi."""
+        if not self.remote_desktop():raise ValueError('Remote desktop links are switched off in the MeshCentral settings.')
+        nodes=await self.devices(force=True)
+        if self.error:raise ValueError(self.error)
+        node=next((d for d in nodes if d['id']==device),None)
+        if not node:raise ValueError('That laptop is not in the MeshCentral list.')
+        if not node['online']:raise ValueError(f"{node['name']} is offline in MeshCentral.")
+        if not node.get('desktop'):raise ValueError(f"{node['name']}'s MeshCentral agent doesn't offer remote desktop.")
+        short=device.rsplit('/',1)[-1]
+        if not re.fullmatch(r'[A-Za-z0-9@$_-]{8,128}',short):raise ValueError('Unexpected MeshCentral device ID.')
+        # viewmode=11 opens the Desktop tab; hide=31 hides MeshCentral's header, tabs, footer and title bar.
+        return node,f"{self.config['url']}/?gotonode={short}&viewmode=11&hide=31"
 
     async def command(self,device,action):
         cfg=self.config

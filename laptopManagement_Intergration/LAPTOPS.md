@@ -2,7 +2,7 @@
 
 Shows the team's Windows laptops and runs a small set of **approved commands** on them, from Discord or the dashboard's **Laptops** tab. It uses your existing **[MeshCentral](https://meshcentral.com/)** server and the MeshCentral agents already on the laptops. No other laptop software is needed.
 
-Use MeshCentral itself for remote desktop, enrolling devices and anything advanced.
+Use MeshCentral itself for enrolling devices and anything advanced. The dashboard can open a laptop's **remote desktop** in MeshCentral's viewer (see [Remote desktop](#remote-desktop)).
 
 - [Connecting MeshCentral](#connecting-meshcentral)
 - [Which laptops appear](#which-laptops-appear)
@@ -39,6 +39,16 @@ A laptop is listed when all of these hold:
 - it's in one of the listed device groups, if you add `"mesh_ids": ["mesh//…"]` to `meshcentral.json` to limit the groups
 
 Commands can only be sent to **online Windows** laptops.
+
+## Remote desktop
+
+Each online laptop whose MeshCentral agent supports remote desktop has a **🖥 Remote desktop** button in **Devices**.
+
+- **What it opens:** MeshCentral's own desktop viewer for that laptop, in a new browser tab (`<your MeshCentral URL>/?gotonode=…&viewmode=11&hide=31`).
+- **Signing in:** you sign in to MeshCentral there with **your own MeshCentral account**, if your browser isn't already signed in. The dashboard's login token is never sent to the browser, so what you can see and control is decided by your MeshCentral permissions.
+- **Activity:** every opened session is recorded, for example "Remote desktop opened · REACT-LAPTOP-3 · web administrator".
+- **Which laptops get the button:** laptops whose agent reports the remote-desktop capability. Offline laptops show it greyed out, and agents without desktop support don't show it.
+- **Turning it off:** untick **Show Remote desktop buttons** in the MeshCentral connection form and save.
 
 ## Running commands
 
