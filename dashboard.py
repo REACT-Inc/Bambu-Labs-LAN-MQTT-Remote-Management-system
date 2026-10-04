@@ -14,6 +14,7 @@ from printer_errors import describe as describe_error
 from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits
 import job_transfer
+import sliced_file
 from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
 from queueing import MAX_UPLOAD, options, validate_archive
@@ -72,6 +73,8 @@ class Dashboard:
             web.get('/api/state', self.state), web.post('/api/upload', self.upload),
             web.post('/api/jobs', self.add_job), web.post('/api/jobs/{id}/{action}', self.job_action),
             web.get('/api/jobs/{id}/targets', self.job_targets),
+            web.get('/api/uploads/{asset}/plate/{index}', self.upload_thumbnail),
+            web.get('/api/uploads/{asset}/suggest', self.upload_suggest),
             web.post('/api/printers/{name}/{action}', self.control),
             web.get('/api/camera/{name}', self.camera), web.post('/api/settings', self.settings),
             web.get('/api/permissions', self.permissions), web.post('/api/permissions', self.save_permissions),
@@ -186,9 +189,41 @@ class Dashboard:
                     total+=len(chunk)
                     if total>MAX_UPLOAD: raise ValueError('Maximum upload is 256 MiB.')
                     stream.write(chunk)
-            return web.json_response({'asset':token,'filename':Path(part.filename).name})
+            # Read the plates now, so the dialog can offer a plate picker and catch an unsliced file straight away (#7).
+            info=await asyncio.to_thread(sliced_file.inspect,path)
+            if not info['sliced']:
+                raise ValueError("This .3mf isn't sliced: it has no plate G-code. In Bambu Studio, slice it and use "
+                                 "File → Export → Export plate sliced file (or Export all sliced file), then upload that.")
+            return web.json_response({'asset':token,'filename':Path(part.filename).name,'plates':info['plates'],
+                'model':job_transfer.label(info['model']) if info['model'] else '','model_key':info['model']})
         except BaseException:
             path.unlink(missing_ok=True);raise
+
+    def upload_path(self,asset):
+        if not __import__('re').fullmatch('[0-9a-f]{32}',str(asset)): raise ValueError('Invalid upload.')
+        path=self.uploads/(asset+'.3mf')
+        if not path.is_file(): raise web.HTTPNotFound(text='Upload not found.')
+        return path
+
+    async def upload_thumbnail(self,request):
+        path=self.upload_path(request.match_info['asset'])
+        image=await asyncio.to_thread(sliced_file.plate_thumbnail,path,int(request.match_info['index']))
+        if not image: raise web.HTTPNotFound(text='No thumbnail for that plate.')
+        return web.Response(body=image,content_type='image/png',headers={'Cache-Control':'private, max-age=3600'})
+
+    async def upload_suggest(self,request):
+        """Suggested AMS mapping for one plate of an upload on one printer (#7)."""
+        path=self.upload_path(request.match_info['asset']);printer=request.query.get('printer','')
+        if printer not in self.core.names(): raise ValueError('Unknown printer.')
+        index=int(request.query.get('plate','1'))
+        info=await asyncio.to_thread(sliced_file.inspect,path)
+        plate=next((p for p in info['plates'] if p['index']==index),None)
+        if not plate: raise ValueError('That plate is not in the file.')
+        suggestion=sliced_file.suggest_mapping(plate,self.core.state_data(printer)[2])
+        printer_key=job_transfer.printer_model(self.core,printer)
+        mismatch=bool(info['model'] and printer_key and info['model']!=printer_key)
+        return web.json_response(dict(suggestion,model_warning=f"This file was sliced for the {job_transfer.label(info['model'])}, not the "
+            f"{job_transfer.label(printer_key)}. Re-slice it for this printer." if mismatch else ''))
 
     def add(self, data, author):
         printer=data.get('printer')
@@ -202,12 +237,35 @@ class Dashboard:
             path=str(self.uploads/(asset+'.3mf'))
             if not Path(path).is_file(): raise ValueError('Upload not found.')
             validate_archive(path,opts['plate'])
+            # G-code is model-specific: refuse a file sliced for a different printer model (#7, same check as #57).
+            sliced,model=job_transfer.sliced_for(path),job_transfer.printer_model(self.core,printer)
+            if sliced and model and sliced!=model:
+                raise ValueError(f'This file was sliced for the {job_transfer.label(sliced)}, not the {job_transfer.label(model)}. Re-slice it for {printer}.')
         return self.store.add(printer,str(data.get('label','')),path,remote,opts,author,self.core.EXAMPLE_MODE)
 
     async def add_job(self,request):
-        job=self.add(await request.json(),'web administrator')
+        data=await request.json()
+        if data.get('print_now'):
+            return web.json_response(await self.print_now(data,'web administrator'))
+        job=self.add(data,'web administrator')
         await self.core.notify(job['printer'],'📋 Job queued',job['label'],self.core.BLUE)
         return web.json_response({'id':job['id']})
+
+    async def print_now(self,data,author):
+        """Print straight away without waiting in the queue (#7): the job goes to the front and starts now, with the
+        usual checks and confirmation. If it can't start, it's cancelled, so nothing is left waiting in the queue."""
+        if data.get('confirmed') is not True: raise ValueError('Confirm the plate is clear and the file is sliced for this printer.')
+        printer=data.get('printer')
+        if printer in self.core.names():self.engine.ready(printer)   # fail fast before anything is added
+        job=self.add(data,author)
+        try:
+            self.store.move_to_front(job['id'])
+            await self.engine.start(job['id'],True,author)
+        except Exception as exc:
+            if self.store.get(job['id'])['status']=='queued':
+                self.store.set_status(job['id'],'cancelled',f'Print now could not start: {exc}'[:300])
+            raise ValueError(f'Not started: {exc} Nothing was left in the queue.') from exc
+        return {'id':job['id'],'started':True}
 
     def copy_job(self,job_id,author):
         job=self.store.get(job_id)

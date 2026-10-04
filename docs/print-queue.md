@@ -14,7 +14,7 @@ Each printer has its own first-in, first-out queue. The queue is shared by the d
 
 ## What you can queue
 
-- **A sliced `.3mf` from Bambu Studio or OrcaSlicer**, uploaded from your computer. It must contain the G-code for the selected plate (`Metadata/plate_N.gcode`) and be sliced for that exact printer, nozzle and material.
+- **A sliced `.3mf` from Bambu Studio or OrcaSlicer**, uploaded from your computer. It must contain the G-code for the selected plate (`Metadata/plate_N.gcode`) and be sliced for that exact printer, nozzle and material. The dashboard checks this as soon as you pick the file.
 - **A file already on the printer's storage**, given as a relative path ending in `.3mf`, for example `cache/part.gcode.3mf`. Use `/file list` or **Printer files** to find paths.
 
 What you can't queue:
@@ -30,9 +30,21 @@ What you can't queue:
 | Printer | The printer this file was sliced for |
 | Job name | 1–120 characters, shown in the queue and notifications |
 | File source | Upload a sliced `.3mf` (up to 256 MiB), or a path already on the printer |
-| Plate number | 1–100. For an upload, the plate is checked to exist in the file. |
+| Plate | **Upload:** pick a plate card (see below). **Path on the printer:** type the plate number, 1–100. |
 | Bed type | Textured PEI, Smooth/high temperature, Cool plate, or Engineering plate |
-| Use AMS / AMS mapping | Off = external spool. On = a comma-separated list that maps each sliced filament to an AMS tray: `0` for the first tray, `0,1` for two materials, and so on. |
+| Use AMS / AMS mapping | Off = external spool. On = a comma-separated list with one entry per filament in the project: the AMS tray (`0` = AMS 1 slot 1, `1` = AMS 1 slot 2, … `4` = AMS 2 slot 1) or `-1` for a filament this plate doesn't use. For uploads it's filled in for you (see below). |
+
+**What happens when you pick a file (dashboard):**
+- **It's checked straight away:** the file uploads and is read right away, before you submit anything.
+  - **Unsliced project:** you're told to slice it and use **File → Export → Export plate sliced file** in Bambu Studio.
+  - **Wrong model:** a file sliced for a different printer model (say an A1 mini file for the H2D) is flagged, and adding it is refused.
+- **Plate picker:** each plate in the file is shown as a card with its thumbnail, name, print time, weight and filament colours. Plates that weren't sliced are greyed out. A file with one sliced plate picks it for you.
+- **AMS suggestion:** for the chosen plate and printer, each filament is matched to a loaded AMS slot of the same material with the closest colour. **Use AMS** and the mapping are filled in, and the matches are listed, for example "Filament 2 (PETG) → AMS 1 slot 3". If something has no loaded slot of that material, the mapping is left for you. You can always edit it.
+
+**Print now (dashboard):** **Print now** instead of **Add to shared queue** prints straight away, without waiting in the queue.
+- **Same checks as Start next:** it asks the same "plate is clear" confirmation, and the printer must be idle with no active job.
+- **Jumps the queue:** it starts ahead of any waiting jobs for that printer.
+- **If it can't start:** the printer is busy, offline or reports an error. Then nothing is added, or the job is cancelled at once, so it never sits in the queue.
 
 **Discord:** `/queueadd` with an attached `.3mf` (`file:`) **or** a printer path (`remote:`), plus the same options. Discord may limit attachment size below 256 MiB.
 

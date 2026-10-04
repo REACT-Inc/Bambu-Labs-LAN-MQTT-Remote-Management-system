@@ -18,6 +18,7 @@ How the code is organised, how to run it locally, and how changes are tested and
 | `dashboard.py` | aiohttp web app: login/sessions/CSRF, the JSON API used by `static/`, settings |
 | `queueing.py` | Durable SQLite queue and activity log (`Store`), and the start/monitor/resolve logic (`Engine`), including FTPS upload |
 | `job_transfer.py` | Send a finished print to another printer of the same model (dashboard **Print on another printer…**) |
+| `sliced_file.py` | Reads a sliced `.3mf` for the Queue a print dialog: plates (name, time, weight, filaments, thumbnail), the model it was sliced for, and AMS mapping suggestions |
 | `printer_controls.py` | Validated printer controls (temperatures, speed, fans, chamber, movement) shared by Discord and the dashboard |
 | `thermal_controls.py` | Fan capability mapping (from Bambu Studio) and chamber control |
 | `printer_models.py` | Every supported Bambu Lab model: limits, chamber, fans, camera type, FTPS settings, serial prefix and Bambu Studio ID (from Bambu Studio). Everything model-specific reads it. |
