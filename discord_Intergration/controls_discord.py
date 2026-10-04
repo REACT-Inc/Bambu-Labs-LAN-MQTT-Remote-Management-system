@@ -44,9 +44,10 @@ def install(core,controls):
             view=Picker(i.user.id,kind,suggestion)
             view.message=await i.followup.send(embed=core.card('Choose printer','Select the printer to control.'),view=view,ephemeral=core.ephemeral(i),wait=True)
 
-    @core.bot.tree.command(name='temperature',description='Set bed or active nozzle temperature (admins/approved IDs)')
+    @core.bot.tree.command(name='temperature',description='Set a nozzle, bed or chamber temperature (admins/approved IDs)')
     @app_commands.guild_only()
-    @app_commands.choices(target=[app_commands.Choice(name=x,value=x) for x in ('nozzle','bed','chamber')])
+    # Dual-nozzle printers (H2D, H2C…) can set each nozzle on its own (multi-hotend).
+    @app_commands.choices(target=[app_commands.Choice(name=n,value=v) for n,v in (('nozzle (active)','nozzle'),('left nozzle','nozzle_left'),('right nozzle','nozzle_right'),('bed','bed'),('chamber','chamber'))])
     async def temperature(i:discord.Interaction,target:str,degrees:int,name:str=None):await choose(i,name,target,degrees,command='chamber' if target=='chamber' else 'temperature')
 
     @core.bot.tree.command(name='speed',description='Set a printer\'s print speed profile, with confirmation')

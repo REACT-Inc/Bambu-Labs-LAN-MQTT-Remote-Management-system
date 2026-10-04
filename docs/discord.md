@@ -56,7 +56,7 @@ The bot runs inside the same service as the dashboard and uses the same printers
 | `/help` | E | Everyday command guide |
 | `/status` | E | Bot uptime and every printer's connection |
 | `/printer name?` | E | Status, temperatures and progress straight away; a camera snapshot is added when it arrives |
-| `/filaments name?` | E | AMS slots and external spool |
+| `/filaments name?` | E | AMS slots and external spool(s). On an H2D: which nozzle (left/right) each AMS and spool feeds, what each nozzle has loaded, and the nozzle in use |
 | `/file list name? path?` | E | Printable `.3mf`/`.gcode` files on the printer (read-only, with a text attachment) |
 | `/file system name? path?` | E | Every folder and file on the printer's storage (read-only) |
 
@@ -82,7 +82,7 @@ Details: [Print queue](print-queue.md).
 | `/pause name?` · `/resume name?` | E | Pause or resume the current print |
 | `/stop name?` | E | Cancel the current print (confirmation) |
 | `/lighton name?` · `/lightoff name?` | E | Chamber light |
-| `/temperature target degrees name?` | A | `nozzle`, `bed` or `chamber` target in °C (0 = off) |
+| `/temperature target degrees name?` | A | `nozzle` (active), `left nozzle` / `right nozzle` (dual-nozzle printers), `bed` or `chamber` target in °C (0 = off) |
 | `/chamber degrees name?` | A | H2D chamber target: 0 = off or 40–65 °C |
 | `/speed mode name?` | E | `silent`, `standard`, `sport` or `ludicrous` |
 | `/fan percent name? target?` | E | One fan, 0–100 % (autocomplete lists the printer's fans) |

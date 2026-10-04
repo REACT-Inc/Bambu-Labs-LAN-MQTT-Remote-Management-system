@@ -6,6 +6,7 @@ import re
 import time
 from thermal_controls import fans,fan_commands
 import printer_models
+import filament_sides
 
 SPEEDS={'silent':1,'standard':2,'sport':3,'ludicrous':4}
 # Bambu generic filament presets: tray_info_idx and nozzle temperature range sent with ams_filament_setting.
@@ -14,6 +15,7 @@ FILAMENTS={'PLA':('GFL99',190,230),'PETG':('GFG99',220,260),'ABS':('GFB99',240,2
 NOZZLE_DIAMETERS=(0.2,0.4,0.6,0.8)
 NOZZLE_TYPES={'stainless_steel':'Stainless steel','hardened_steel':'Hardened steel','tungsten_carbide':'Tungsten carbide'}
 EXTERNAL_SPOOL=255
+EXTERNAL_LEFT=254
 
 
 def limits(core,name):
@@ -37,6 +39,12 @@ def prepare(core,name,kind,value,axis=None):
     if kind in ('nozzle','bed'):
         value=number(value,0,limits(core,name)[kind],True)
         return 'gcode_line',f'{"M104" if kind=="nozzle" else "M140"} S{value}\n',f'{kind.title()} target → {value} °C'
+    if kind in ('nozzle_left','nozzle_right'):
+        # Dual-nozzle printers: Bambu Studio's set_nozzle_temp with extruder_index 0 = right, 1 = left (multi-hotend).
+        if not dual_nozzle(core,name):raise ValueError('This printer has a single nozzle; set the Nozzle temperature instead.')
+        value=number(value,0,limits(core,name)['nozzle'],True)
+        side=filament_sides.RIGHT if kind=='nozzle_right' else filament_sides.LEFT
+        return 'batch',[{'command':'set_nozzle_temp','extruder_index':side,'target_temp':value}],f'{filament_sides.SIDES[side]} nozzle target → {value} °C'
     if kind=='speed':
         if value not in SPEEDS:raise ValueError('Choose silent, standard, sport or ludicrous.')
         return 'print_speed',str(SPEEDS[value]),f'Print speed → {value}'
@@ -72,6 +80,8 @@ def prepare(core,name,kind,value,axis=None):
         if not re.fullmatch(r'[0-9A-F]{6}',color):raise ValueError('Colour must be a hex colour like #FF8800.')
         ams=value.get('ams')
         if ams in ('external',EXTERNAL_SPOOL,str(EXTERNAL_SPOOL)):ams_id,slot,tray_id,where=EXTERNAL_SPOOL,0,254,'External spool'
+        # Left external spool of a dual-nozzle printer (H2D); Bambu Studio sends ams_id 254, tray_id 254.
+        elif ams in ('external_left',EXTERNAL_LEFT,str(EXTERNAL_LEFT)):ams_id,slot,tray_id,where=EXTERNAL_LEFT,0,254,'Left external spool'
         else:
             ams_id=number(ams,0,7,True);slot=number(value.get('slot'),0,3,True);tray_id=slot
             where=f'AMS {ams_id+1} slot {slot+1}'
@@ -88,6 +98,13 @@ def prepare(core,name,kind,value,axis=None):
         return 'batch',[{'_root':'system','command':'set_accessories','accessory_type':'nozzle','nozzle_diameter':diameter,'nozzle_type':nozzle}],\
             f'Nozzle → {diameter:g} mm {NOZZLE_TYPES[nozzle].lower()}'
     raise ValueError('Unknown control.')
+
+
+def dual_nozzle(core,name):
+    """True for printers with two nozzles: known from the model, or reported by the printer (device.extruder)."""
+    if printer_models.printer(core,name)['dual_nozzle']:return True
+    try:return filament_sides.is_dual(core.state_data(name)[2])
+    except Exception:return False
 
 
 def mqtt_homing_supported(data):
@@ -166,16 +183,25 @@ class Controls:
         if kind=='filament' and state in ('RUNNING','PAUSE','PREPARE'):
             item=param[0];ams=data.get('ams') if isinstance(data.get('ams'),dict) else {}
             active=ams.get('tray_now')
-            in_use=(active in (254,255,'254','255')) if item['ams_id']==EXTERNAL_SPOOL else str(active)==str(item['ams_id']*4+item['slot_id'])
+            in_use=(active in (254,255,'254','255')) if item['ams_id'] in (EXTERNAL_SPOOL,EXTERNAL_LEFT) else str(active)==str(item['ams_id']*4+item['slot_id'])
+            # Dual-nozzle printers report what each nozzle has loaded (filament_sides.py).
+            in_use=in_use or (item['ams_id'],item['slot_id']) in filament_sides.loaded_slots(data)
             if in_use:raise ValueError('That slot is feeding the current print. Change it after the print.')
         if self.core.EXAMPLE_MODE:
             d=self.core.EXAMPLE_DATA[name]
             if kind in ('nozzle','bed'):d[kind+'_target_temper']=int(value)
+            elif kind in ('nozzle_left','nozzle_right'):
+                side=param[0]['extruder_index']
+                for item in ((d.get('device') or {}).get('extruder') or {}).get('info') or []:
+                    if item.get('id')==side:item['temp']=(int(value)<<16)|(int(item.get('temp') or 0)&0xFFFF)
             elif kind=='speed':d['spd_lvl']=SPEEDS[value]
             elif kind=='chamber':d['ctt']=int(value)
             elif kind=='filament':
                 item=param[0];tray={'tray_type':item['tray_type'],'tray_color':item['tray_color'],'remain':100}
-                if item['ams_id']==EXTERNAL_SPOOL:d['vt_tray']={**d.get('vt_tray',{}),**tray}
+                if item['ams_id'] in (EXTERNAL_SPOOL,EXTERNAL_LEFT) and d.get('vir_slot'):
+                    for spool in d['vir_slot']:
+                        if filament_sides.external_id(spool.get('id'))==item['ams_id']:spool.update(tray)
+                elif item['ams_id']==EXTERNAL_SPOOL:d['vt_tray']={**d.get('vt_tray',{}),**tray}
                 else:
                     units=d.get('ams');units=units.get('ams',[]) if isinstance(units,dict) else units
                     for unit in units:

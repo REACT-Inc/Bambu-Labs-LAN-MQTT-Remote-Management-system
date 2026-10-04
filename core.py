@@ -13,11 +13,19 @@ SETTINGS_FILE = str(DATA_DIR / 'settings.json')
 PRINTERS = CONFIG.get('printers', [])
 EXAMPLE_DATA = CONFIG.get('example_data') or {
     p['name']: {'state':'IDLE','error':0,'connected':True,'mc_percent':0,
-                'ams':{'ams':[{'id':'0','humidity':'4','temp':'24.5','tray':[
+                'ams':{'ams':[{'id':'0','humidity':'4','temp':'24.5',**({'info':'101'} if 'h2d' in (p.get('model') or p['name']).lower() else {}),'tray':[
                     {'id':str(i),'tray_type':t,'tray_color':c,'remain':r} for i,(t,c,r) in enumerate(
                     [('PLA','161616FF',80),('PLA','F2F2F2FF',45),('PETG','2E7DD1FF',100),('TPU','E8412CFF',20)])]}],'tray_now':'0'},
                 'nozzle_diameter':'0.4','nozzle_type':'stainless_steel',
-                'vt_tray':{'tray_type':'PLA','tray_color':'FFFFFFFF','remain':100}}
+                'vt_tray':{'tray_type':'PLA','tray_color':'FFFFFFFF','remain':100},
+                # Dual-nozzle demo (H2D): the AMS feeds the left nozzle (info bits 8-11 = 1), which is in use with AMS slot 1;
+                # the right nozzle has the right external spool loaded. See filament_sides.py.
+                # Each nozzle's temp packs target << 16 | current; device.nozzle lists the fitted hotends (multi-hotend).
+                **({'device':{'extruder':{'state':2|1<<4,'info':[{'id':0,'snow':255<<8,'temp':28,'hnow':0},{'id':1,'snow':0,'temp':(220<<16)|214,'hnow':1}]},
+                              'nozzle':{'info':[{'id':0,'diameter':0.4,'type':'HS00'},{'id':1,'diameter':0.4,'type':'HH01'}]}},
+                    'vir_slot':[{'id':'255','tray_type':'PLA','tray_color':'FFFFFFFF','remain':100},
+                                {'id':'254','tray_type':'PETG','tray_color':'161616FF','remain':60}]}
+                   if 'h2d' in (p.get('model') or p['name']).lower() else {})}
     for p in (PRINTERS or [{'name':'Demo H2D'}, {'name':'Demo A1'}])
 }
 import asyncio
@@ -72,6 +80,7 @@ def load_settings():
 settings = load_settings()
 public_channels = {}
 from printer_errors import describe as describe_error, errors as decode_errors
+import filament_sides
 from diagnostics import log_error
 
 def printer_error_text(name, error, data=None):
@@ -537,8 +546,19 @@ def printer_embed(name):
     field(embed, 'Progress', progress(data.get('mc_percent')), False)
     field(embed, 'Time remaining', str(data.get('mc_remaining_time', '?')) + ' min')
     field(embed, 'Layer', f"{data.get('layer_num', '?')} / {data.get('total_layer_num', '?')}")
-    for label, current, target in [('Nozzle', 'nozzle_temper', 'nozzle_target_temper'), ('Bed', 'bed_temper', 'bed_target_temper')]:
-        field(embed, label, f"{data.get(current, '?')}°C → {data.get(target, '?')}°C")
+    sides = filament_sides.nozzles(data)
+    if sides:
+        # Dual-nozzle printers: each nozzle's temperature, fitted hotend and loaded filament (multi-hotend).
+        for n in sides:
+            heat = f"{n['current'] if n['current'] is not None else '?'}°C → {n['target'] if n['target'] else 'off'}{'°C' if n['target'] else ''}"
+            details = [heat, n['hotend']['label'] if n['hotend'] else '', n['filament'] and 'Loaded: ' + n['filament']]
+            field(embed, f"{n['side']} nozzle" + (' • in use' if n['active'] else ''), '\n'.join(d for d in details if d))
+    else:
+        field(embed, 'Nozzle', f"{data.get('nozzle_temper', '?')}°C → {data.get('nozzle_target_temper', '?')}°C")
+    field(embed, 'Bed', f"{data.get('bed_temper', '?')}°C → {data.get('bed_target_temper', '?')}°C")
+    rack = filament_sides.hotends(data)[1]
+    if rack:
+        field(embed, 'Hotend rack', '\n'.join(f"Slot {h['slot'] + 1}: {h['label']}" for h in rack), False)
     if error or data.get('hms'):
         field(embed, '⚠️ Printer error', printer_error_text(name, error, data), False)
     if not EXAMPLE_MODE:
@@ -576,14 +596,30 @@ def filament_embed(name):
     ams = data.get('ams', {})
     units = ams if isinstance(ams, list) else ams.get('ams', [])
     exist_bits = None if isinstance(ams, list) else ams.get('tray_exist_bits')
+    # Dual-nozzle printers (H2D): which nozzle each AMS / external spool feeds and what each nozzle has loaded (#5).
+    dual, loaded = filament_sides.is_dual(data), filament_sides.loaded_slots(data)
+    if dual and filament_sides.active_nozzle(data) is not None:
+        embed.description = (embed.description + '\n' if embed.description else '') + \
+            f"Nozzle in use: **{filament_sides.side_label(filament_sides.active_nozzle(data))}**"
+
+    def in_nozzle(ams_id, slot):
+        nozzle = loaded.get((ams_id, slot))
+        return f" • ◀ loaded in the {filament_sides.SIDES[nozzle].lower()} nozzle" if nozzle is not None else ''
+
     for unit in units[:24]:
         text = f"Humidity: {unit.get('humidity', '?')} • Temperature: {unit.get('temp', '?')}°C\n"
+        try:
+            unit_id = int(unit.get('id'))
+        except (TypeError, ValueError):
+            unit_id = None
         text += '\n'.join(f"**Slot {tray.get('id', '?')}** — {tray_text(tray if tray_present(exist_bits, unit, tray) else None)}"
+                          + (in_nozzle(unit_id, int(tray['id'])) if str(tray.get('id', '')).isdigit() else '')
                           for tray in unit.get('tray', []))
-        field(embed, 'AMS ' + str(unit.get('id', '?')), text, False)
-    external = data.get('vt_tray')
-    if external:
-        field(embed, 'External spool', tray_text(external), False)
+        side = filament_sides.side_label(filament_sides.ams_nozzle(unit)) if dual else ''
+        field(embed, 'AMS ' + str(unit.get('id', '?')) + (f' • {side}' if side else ''), text, False)
+    for ams_id, tray, nozzle in filament_sides.external_spools(data):
+        name = f'External spool • {filament_sides.side_label(nozzle)}' if nozzle is not None else 'External spool'
+        field(embed, name, tray_text(tray) + in_nozzle(ams_id, 0), False)
     if not embed.fields:
         embed.description = 'No filament data has been reported yet.'
     return embed
