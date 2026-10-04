@@ -345,6 +345,11 @@ class Team:
         elif action=='command':
             if data.get('confirmed')is not True:raise ValueError('Confirm the laptop command.')
             result={'id':await self.device_command(str(data['device']),str(data['command']))}
+        elif action=='desktop':
+            # Remote desktop through MeshCentral's own viewer (#61); recorded in Activity.
+            node,url=await self.mesh.desktop_url(str(data.get('device','')))
+            self.store.event('Laptops','Remote desktop opened',f"{node['name']} • web administrator")
+            result={'url':url}
         elif action=='reboot':await self.reboot(data.get('confirmed'))
         else:raise ValueError('Unknown team action.')
         return web.json_response(result)

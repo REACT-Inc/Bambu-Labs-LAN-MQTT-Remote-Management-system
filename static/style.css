@@ -209,3 +209,5 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 .plate-card:disabled{opacity:.45;cursor:not-allowed}
 .plate-fils{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
 .plate-fils .fil{width:12px;height:12px;border-radius:50%;border:1px solid #fff4;background:#2a322e}
+
+.desktop-btn{margin-top:10px;width:100%}

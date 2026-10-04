@@ -2,6 +2,14 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.6.1)
+
+### Added
+- **Remote desktop for MeshCentral laptops (#61, dashboard).** Each online laptop whose agent supports it has a **🖥 Remote desktop** button in **Devices**.
+  - **What it opens:** MeshCentral's own desktop viewer for that laptop, in a new tab. You sign in to MeshCentral with your own account; the dashboard's token never reaches the browser.
+  - **Activity:** each session is recorded.
+  - **Turning it off:** untick it in the MeshCentral settings.
+
 ## 1.6.0-beta.1
 
 Built on 1.5.0-beta.1. A better Queue a print dialog with Print now (#7), support for more Bambu Lab printers (#6), printing a finished job on another printer (#57), and fixes for movement commands (#1) and Swapmod (#17).
