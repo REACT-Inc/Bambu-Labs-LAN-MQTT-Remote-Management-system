@@ -11,6 +11,13 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Starting:** the new job still needs the normal start confirmation.
   - **Files on the printer:** for jobs whose file is on the original printer's storage, the file is copied to the Pi when you send it, and uploaded to the new printer at start.
 
+### Changed
+- **Swapmod is only offered for A-series printers (#17).**
+  - **What's hidden:** the dashboard's Swapmod settings and the `/plateswap configure` / `check` printer choices appear only for A1 and A1 mini printers.
+  - **Detection:** the configured `model`, or the serial number (`030` = A1 mini, `039` = A1), or the name.
+  - **Server checks:** the server refuses to enable or check Swapmod on other printers.
+  - **Old settings:** settings saved earlier for a non-A-series printer are switched off at start-up, with a note in the Activity feed.
+
 ### Fixed
 - **Movement commands that didn't move the printer (#1).** The printer ignores jogs on an axis it reports as not homed (its `home_flag`), for example after it released its motors while idle, so moves were accepted but nothing happened. Like Bambu Studio, the app now reads that flag and asks you to press **⌂ Home** / `/home` first. The dashboard disables the buttons for those axes and explains why. The G-code jog now matches Bambu Studio byte for byte, including its speeds (X/Y at F3000, Z at F900).
 

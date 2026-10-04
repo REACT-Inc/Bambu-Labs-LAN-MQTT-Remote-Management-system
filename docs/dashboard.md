@@ -41,7 +41,7 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 | Move axes | **⌂ Home** (homes X, Y and Z while the printer is idle), and a movement pad locked until you tick the safety checkbox. See [Printer controls](printer-controls.md). |
 | Nozzle | The fitted nozzle's diameter and type, which you can change after swapping the nozzle. See [Printer controls](printer-controls.md#nozzle-diameter-and-type). |
 | Filament | AMS units (humidity, temperature) and each slot's material, colour and remaining %, plus the external spool. **Click a slot** to change its material or colour. See [Printer controls](printer-controls.md#filament-material-and-colour-per-slot). |
-| More: files, snapshot, Swapmod | Download the printer's file listing, take a single camera snapshot, and Swapmod A1m kit settings (see [Swapmod](swapmod.md)) |
+| More: files, snapshot, Swapmod | Download the printer's file listing, take a single camera snapshot, and Swapmod A1m kit settings, shown for A-series printers only (see [Swapmod](swapmod.md)) |
 
 **Only Pause and Stop ask for confirmation.** Every control, including temperature tiles, speed, fan rows and movement buttons, pulses purple while it waits for the printer. Temperatures, speed, fans, light and resume apply straight away. The server still enforces the limits and safety checks (see [Printer controls](printer-controls.md)). Movement stays locked until you tick the safety checkbox.
 
