@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.6.1)
+## 1.6.1-beta.1
+
+Built on 1.6.0-beta.1. Adds multi-hotend support for dual-nozzle printers (#68, #5), remote desktop for MeshCentral laptops (#61) and AI print-failure detection with the Raspberry Pi 5 AI HAT (#70).
 
 ### Added
 - **Multi-hotend support for dual-nozzle printers (#68): H2D, H2D Pro, H2C, X2D.**
