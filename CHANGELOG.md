@@ -15,6 +15,17 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **What it opens:** MeshCentral's own desktop viewer for that laptop, in a new tab. You sign in to MeshCentral with your own account; the dashboard's token never reaches the browser.
   - **Activity:** each session is recorded.
   - **Turning it off:** untick it in the MeshCentral settings.
+- **AI print-failure detection with a Raspberry Pi 5 AI HAT (#70).** Off until `failure_detection` is enabled in config.json. See [AI failure detection](failureDetection/FAILURE_DETECTION.md).
+  - **How it watches:** while a printer is printing, the Pi takes a camera still every 30 s, using the cheap single-still path, and the AI HAT (Hailo-8L / Hailo-8) scores it with your `.hef` model.
+  - **No single-frame alarms:** a print is only flagged when 6 of the last 10 frames fail, spread over at least 4 minutes, with the newest frame still failing. The first 3 minutes of a print aren't judged, frozen or duplicate frames are skipped, and a camera gap starts the evidence again. All of these are configurable.
+  - **Reported everywhere:** in Activity, on the printer card and panel, in Discord with the camera picture, and on `/printer`.
+  - **Accurate pausing (`"action": "pause"`):**
+    - **Once per print:** the pause is sent a single time, and only while the printer still reports RUNNING.
+    - **Confirmed:** it's reported as paused only after the printer reports `PAUSE`.
+    - **After resuming:** a resumed print isn't paused again.
+    - **Default:** with `"notify"`, the default, it only reports.
+  - **Per printer:** watching can be turned off for one printer from its panel.
+  - **Isolated helper:** the AI runs in a separate helper under the system Python that `hailo-all` installs into. If the HAT, model or library is missing, the dashboard shows *AI HAT unavailable* with the reason, and nothing else is affected.
 
 ## 1.6.0-beta.1
 

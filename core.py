@@ -65,6 +65,7 @@ from progress_notifications import ProgressTracker
 progress_tracker = ProgressTracker()
 report_listener = None
 event_listener = None
+failure_monitor = None   # set by the dashboard (failureDetection, #70)
 
 
 def load_settings():
@@ -561,10 +562,21 @@ def printer_embed(name):
         field(embed, 'Hotend rack', '\n'.join(f"Slot {h['slot'] + 1}: {h['label']}" for h in rack), False)
     if error or data.get('hms'):
         field(embed, '⚠️ Printer error', printer_error_text(name, error, data), False)
+    ai = failure_monitor.state(name) if failure_monitor else {}
+    if ai.get('enabled'):
+        field(embed, '🤖 AI failure watch', ai_watch_text(ai), False)
     if not EXAMPLE_MODE:
         seen = last_seen.get(name)
         field(embed, 'Last telemetry', f'<t:{int(seen)}:R>' if seen else 'No telemetry received', False)
     return embed
+
+
+def ai_watch_text(ai):
+    if not ai.get('watching'):
+        return 'Off for this printer'
+    label = {'failure': '⚠️ Possible failure', 'paused': '⏸️ Paused by AI', 'suspect': '👀 Suspect frames',
+             'unavailable': '❌ AI HAT unavailable', 'watching': '✅ Watching'}.get(ai.get('status'), 'Waiting for a print')
+    return f"{label}" + (f" • {safe(ai['message'])}" if ai.get('message') else '')
 
 
 def tray_text(tray):

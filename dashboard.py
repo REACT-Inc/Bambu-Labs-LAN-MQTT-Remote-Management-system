@@ -18,6 +18,7 @@ import sliced_file
 import filament_sides
 from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
+from failureDetection.detection import FailureMonitor
 from queueing import MAX_UPLOAD, options, validate_archive
 import diagnostics
 from issue_reports import IssueReports
@@ -63,11 +64,15 @@ class Dashboard:
         except (OSError,ValueError):self.release=''
         self.app.on_shutdown.append(self.cameras.close)
         self.app.on_startup.append(self.snapshots.start);self.app.on_shutdown.append(self.snapshots.stop)
+        self.failure = FailureMonitor(core, engine)
+        core.failure_monitor = self.failure   # Discord /printer shows the AI watch line (#70)
+        self.app.on_startup.append(self.failure.start);self.app.on_shutdown.append(self.failure.stop)
         self.app.add_routes([
             web.get('/api/liveframe/{name}',self.cameras.frame_response),
             web.get('/api/snapshot/{name}',self.snapshots.response),
             web.get('/api/live/{name}',self.cameras.stream),
             web.post('/api/plateswap/{name}/{action}',self.plate_swap),
+            web.post('/api/ai/{name}',self.ai_watch),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
@@ -114,6 +119,13 @@ class Dashboard:
         response.headers.update({'X-Content-Type-Options':'nosniff',
             'Referrer-Policy':'same-origin', 'Content-Security-Policy':"default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'"})
         return response
+
+    async def ai_watch(self, request):
+        name=request.match_info['name']
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        data=await request.json()
+        self.failure.set_watching(name,bool(data.get('watch')))
+        return web.json_response(self.failure.state(name))
 
     async def files(self, request):
         name=request.match_info['name']
@@ -169,7 +181,7 @@ class Dashboard:
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,sides=filament_sides.summary(data),last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,sides=filament_sides.summary(data),last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,

@@ -225,10 +225,16 @@ $('detailDialog').addEventListener('close',()=>{$('jogArm').checked=false;clearT
 // The play button shows whenever live view isn't running, however it stopped.
 setInterval(()=>{$('cameraPlaceholder').hidden=!!livePrinter;$('stopLive').hidden=!livePrinter;},300);
 
-function loadSwapSettings(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap||{};$('swapEnabled').checked=!!cfg.enabled;$('swapModel').value=cfg.model||'A1 mini';$('swapSpares').value=cfg.spares||0;renderSwapStatus();}
+function loadSwapSettings(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap||{};$('swapEnabled').checked=!!cfg.enabled;$('swapModel').value=cfg.model||'A1 mini';$('swapSpares').value=cfg.spares||0;renderSwapStatus();renderAiStatus();}
 // Swapmod is only offered for A-series printers (A1 / A1 mini) (#17).
 function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;$('swapStatus').textContent=cfg?.enabled?`${cfg.model} kit enabled · ${cfg.spares} estimated magazine plates · ${cfg.verified?'Starting setup checked':'Starting setup check needed'}`:'Disabled for this printer — manual queue workflow.';}
-setInterval(()=>{if($('detailDialog').open&&state)renderSwapStatus();},1000);
+function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;
+ if(document.activeElement!==$('aiWatch'))$('aiWatch').checked=!!ai.watching;
+ $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (it never pauses on its own; set "action": "pause" to allow that)';
+ const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI HAT unavailable'}[ai.status]||ai.status;
+ $('aiStatus').textContent=!ai.watching?'Off for this printer.':label+(ai.message?' — '+ai.message:'')+(ai.score!=null&&ai.score!==undefined?` (last score ${Number(ai.score).toFixed(2)})`:'');}
+$('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
+setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
 $('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};
 $('swapChecked').onclick=()=>{const name=selectedPrinter;confirmAction('Swapmod starting setup checked?',printerLabel(name)+' — this records your inspection; no swap movement is sent.','I checked the starting setup against Swaplist instructions, loaded the required magazine plates and cleared the ejection path.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/check',{confirmed:true});notice('Setup checked. Start the approved Swaplist batch when ready.');});};
 

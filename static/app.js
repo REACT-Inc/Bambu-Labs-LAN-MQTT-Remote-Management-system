@@ -86,6 +86,10 @@ function miniSwatches(d){const ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),
  return trays.slice(0,17).map(t=>{const c=/^[0-9a-f]{6}/i.test(t.tray_color||'')&&t.tray_type?'#'+t.tray_color.slice(0,6):'';return `<i class="mini-swatch${c?'':' is-empty'}"${c?` data-color="${c}"`:''} title="${esc(t.tray_type||'Empty')}"></i>`;}).join('');}
 // The Content-Security-Policy blocks inline style attributes, so colours and widths are applied through the DOM.
 function applyStyles(root){root.querySelectorAll('[data-color]').forEach(e=>e.style.background=e.dataset.color);root.querySelectorAll('[data-width]').forEach(e=>e.style.width=e.dataset.width+'%');}
+// AI failure watch (#70): only shown on a card while it's watching a print or has something to say.
+const AI_LABELS={watching:'🤖 AI watching',suspect:'🤖 AI: suspect frames',failure:'🤖 AI: print may be failing',paused:'🤖 AI paused this print',unavailable:'🤖 AI HAT unavailable'};
+function aiLine(ai){if(!ai?.enabled||!ai.watching||!AI_LABELS[ai.status])return '';const bad=['failure','paused'].includes(ai.status);
+ return `<p class="ai-line ai-${esc(ai.status)}" title="${esc(ai.message||'')}">${AI_LABELS[ai.status]}${ai.status==='suspect'||bad?` · ${esc(ai.failing??0)}/${esc(ai.frames??0)} frames`:''}</p>`;}
 function printerCard(x){
  const d=x.data||{},n=`data-printer="${esc(x.name)}"`,progress=Math.max(0,Math.min(100,Number(d.mc_percent)||0)),active=['RUNNING','PAUSE','PREPARE'].includes(x.state);
  const waiting=state.jobs.filter(v=>v.printer===x.name&&v.status==='queued').length,left=fmtMinutes(d.mc_remaining_time);
@@ -103,7 +107,7 @@ ${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
-${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}
+${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${aiLine(x.ai)}
 <div class="pc-actions">${actions}<span class="spacer"></span>${actionButton('printerQueue',waiting?`${waiting} queued →`:'Queue →',n,'ghost')}</div></article>`;}
 async function downloadFileListing(printer,button){if(button)button.disabled=true;notice('Reading printer storage…');
  try{const r=await api('files/'+encodeURIComponent(printer),undefined,'GET'),url=URL.createObjectURL(new Blob([r.text],{type:'text/plain'})),a=document.createElement('a');

@@ -153,3 +153,4 @@ Set `camera_type` on each printer in [config.json](configuration.md#printer-entr
 - **Login required:** camera access needs a dashboard login, and the session is re-checked while streaming.
 - **Other clients:** if the printer won't accept another camera connection, close other camera clients (Bambu Studio, Handy).
 - **Printer settings:** firmware LAN settings and the access code still decide whether the camera is available. Camera errors are logged with the access code removed.
+- **AI failure detection:** with a Raspberry Pi 5 AI HAT, the cameras can also be watched for failed prints. See [AI failure detection](../failureDetection/FAILURE_DETECTION.md).
