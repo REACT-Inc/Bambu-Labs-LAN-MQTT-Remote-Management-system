@@ -209,3 +209,4 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 .plate-card:disabled{opacity:.45;cursor:not-allowed}
 .plate-fils{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
 .plate-fils .fil{width:12px;height:12px;border-radius:50%;border:1px solid #fff4;background:#2a322e}
+.ai-line{font-size:12px;margin:6px 0 0;color:var(--muted)}.ai-line.ai-suspect,.ai-line.ai-unavailable{color:var(--yellow)}.ai-line.ai-failure,.ai-line.ai-paused{color:var(--red);font-weight:650}

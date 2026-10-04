@@ -52,6 +52,7 @@ The guides below are in the `docs/` folder of the [GitHub repository](https://gi
 | [Print queue](docs/print-queue.md) | Supported files, job states, starting prints safely, review and recovery |
 | [Printer controls & camera](docs/printer-controls.md) | Temperatures, speed, fans, chamber, movement, lights, live view |
 | [Swapmod A1m](docs/swapmod.md) | Plate-swap batches for equipped A1 minis |
+| [AI failure detection](failureDetection/FAILURE_DETECTION.md) *(in release)* | Watching prints with a Raspberry Pi 5 AI HAT, pausing failed prints |
 | [Team tools](docs/team-tools.md) | Notes, reminders, assignments, practice schedule, archiving, server and reboot |
 | [Laptops (MeshCentral)](laptopManagement_Intergration/LAPTOPS.md) *(in release)* | Connecting MeshCentral and running approved laptop commands |
 | [Updates & releases](docs/updates.md) | Dashboard and GitHub updates, release channels, manual updates, publishing releases |

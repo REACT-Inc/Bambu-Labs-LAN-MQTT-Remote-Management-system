@@ -11,7 +11,7 @@ MAX_ZIP=32*1024*1024
 MAX_EXPANDED=128*1024*1024
 REQUIRED={'main.py','core.py','dashboard.py','queueing.py','requirements.txt','static/index.html','static/app.js'}
 
-PACKAGE_DIRS={'swapMod','Updater','discord_Intergration','laptopManagement_Intergration'}
+PACKAGE_DIRS={'swapMod','failureDetection','Updater','discord_Intergration','laptopManagement_Intergration'}
 
 
 def runtime_path(name):
