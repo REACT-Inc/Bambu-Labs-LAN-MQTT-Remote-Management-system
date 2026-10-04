@@ -71,19 +71,39 @@ Example:
 | `ip` | live | Printer's LAN IP address. Give it a fixed/reserved address in your router. |
 | `serial` | live | Printer serial number (MQTT topic and error-model detection). |
 | `access_code` | live | LAN access code from the printer's screen. |
-| `model` | recommended | E.g. `H2D`, `A1`, `A1 mini`. Sets temperature limits, chamber support and fan layout. If omitted, the **name** is used to guess, so name printers clearly or set this. |
-| `camera_type` | for camera | `rtsp` (H2D and other RTSP cameras; needs ffmpeg) or `jpeg_tcp` (A1 family). Omit to disable camera features for that printer. |
+| `model` | recommended | E.g. `H2D`, `A1 mini`, `P1S`, `X1 Carbon`. Sets temperature limits, chamber support and fan layout (see [Supported printers](#supported-printers)). If omitted, the serial number identifies the model, and failing that the **name**. |
+| `camera_type` | for camera | `rtsp` (H2-series, X1-series, P2S, X2D; needs ffmpeg) or `jpeg_tcp` (A1-series and P1-series). See the table below. Omit to disable camera features for that printer. |
+| `limits` | no | Override the nozzle / bed maximums, e.g. `{"nozzle": 300, "bed": 100}` (up to 400 / 150 °C). Useful for a model the app doesn't know, or if a default is wrong for your printer. |
 | `error_model` | no | Forces which Bambu error catalog to use. Normally the first 3 characters of the serial pick it. |
-| `ftp_tls_unwrap` | no | `true`/`false` overrides how FTPS uploads close their data connection. It's enabled automatically for the H2D. See [Troubleshooting](troubleshooting.md#h2d-upload-fails-with-426). |
+| `ftp_tls_unwrap` | no | `true`/`false` overrides how FTPS uploads close their data connection. It's enabled automatically for H2-series printers. See [Troubleshooting](troubleshooting.md#h2d-upload-fails-with-426). |
 
-**Limits derived from `model`:**
+## Supported printers
 
-| Model contains | Nozzle max | Bed max | Chamber |
-|---|---|---|---|
-| `h2d` | 350 °C | 120 °C | 40–65 °C (or off) |
-| `a1` + `mini` | 300 °C | 80 °C | — |
-| `a1` | 300 °C | 100 °C | — |
-| anything else | 300 °C | 80 °C | — |
+The app uses each printer's model for its temperature limits, chamber heating, fans and FTPS settings (`printer_models.py`). The values come from Bambu Studio's printer definitions; bed maximums Studio doesn't list come from Bambu's published specs.
+
+| Model | Tested | `camera_type` | Nozzle max | Bed max | Chamber heating | Serial starts with |
+|---|---|---|---|---|---|---|
+| A1 mini | ✅ | `jpeg_tcp` | 300 °C | 80 °C | — | `030` |
+| A1 | ✅ | `jpeg_tcp` | 300 °C | 100 °C | — | `039` |
+| A2L | untested | `jpeg_tcp` | 300 °C | 100 °C | — | `26A` |
+| P1P | untested | `jpeg_tcp` | 300 °C | 100 °C | — | `01S` |
+| P1S | untested | `jpeg_tcp` | 300 °C | 100 °C | — | `01P` |
+| P2S | untested | `rtsp` | 300 °C | 110 °C | — | `22E` |
+| X1 | untested | `rtsp` | 300 °C | 110 °C | — | `00W` |
+| X1 Carbon | untested | `rtsp` | 300 °C | 110 °C | — | `00M` |
+| X1E | untested | `rtsp` | 320 °C | 120 °C | not offered¹ | `03W` |
+| X2D | untested | `rtsp` | 300 °C | 120 °C | 40–65 °C | `20P` |
+| H2D | ✅ | `rtsp` | 350 °C | 120 °C | 40–65 °C | `094` |
+| H2D Pro | untested | `rtsp` | 350 °C | 120 °C | 40–65 °C | `239` |
+| H2S | untested | `rtsp` | 350 °C | 120 °C | 40–65 °C | `093` |
+| H2C | untested | `rtsp` | 350 °C | 120 °C | 40–65 °C | `31B` |
+| Not recognised | — | — | 300 °C | 80 °C | — | |
+
+¹ The X1E heats its chamber, but not necessarily with the command the app sends to the H2D, so the app doesn't offer it. Set the chamber on the printer.
+
+- **Untested** means nobody has run the app against that printer yet. Monitoring, the queue and controls use the same LAN protocol, so they should work. Report anything that doesn't with **Report a problem** in the dashboard.
+- **Dual-nozzle printers** (H2D, H2D Pro, H2C, X2D) show left/right nozzle details where the printer reports them.
+- **Fans:** printers that report their airflow layout (newer firmware) show exactly the fans they report. Older firmware falls back to the model's known fans.
 
 ## Files and folders
 

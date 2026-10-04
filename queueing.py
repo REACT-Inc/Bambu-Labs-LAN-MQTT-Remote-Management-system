@@ -9,6 +9,8 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import printer_models
+
 ACTIVE = ('staging', 'awaiting_start', 'printing', 'paused', 'needs_review')
 TERMINAL = ('finished', 'failed', 'cancelled')
 MAX_UPLOAD = 256 * 1024 * 1024
@@ -157,8 +159,8 @@ def ftps_client(printer):
     # BambuTools supplies implicit FTPS with TLS session reuse for port 990.
     from bambulabs_api.ftp_client import ImplicitFTP_TLS
     context = ssl._create_unverified_context()
-    model=str(printer.get('model') or printer.get('name','')).lower().replace(' ','')
-    unwrap=printer.get('ftp_tls_unwrap','h2d' in model)
+    # H2-series printers need the TLS data connection unwrapped before it's closed (printer_models, #6).
+    unwrap=printer.get('ftp_tls_unwrap',printer_models.info(printer)['ftp_unwrap'])
     if type(unwrap) is not bool:raise ValueError('ftp_tls_unwrap must be true or false.')
     return ImplicitFTP_TLS(timeout=60, context=context, unwrap=unwrap)
 

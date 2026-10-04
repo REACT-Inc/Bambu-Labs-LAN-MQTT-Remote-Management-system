@@ -1,4 +1,5 @@
 """Fan capability mapping from Bambu Studio DevFan, and chamber target control."""
+import printer_models
 FAN_NAMES={1:'Part cooling',2:'Auxiliary cooling',3:'Chamber / exhaust',6:'Internal circulation',10:'Auxiliary cooling 2'}
 FAN_KEYS={1:'part',2:'auxiliary',3:'chamber',6:'circulation',10:'auxiliary2'}
 # Older reports give fan speeds as 0-15 strings. Bambu Studio shows floor(value / 1.5) * 10 percent.
@@ -11,8 +12,8 @@ def legacy_percent(data,index):
 
 
 def model_name(core,name):
-    config=getattr(core,'printer_config',lambda n:None)(name) or {}
-    return str(config.get('model') or name).lower().replace(' ','').replace('_','')
+    """The printer's model key from printer_models (e.g. 'h2d', 'x1c', 'a1mini'), or '' if unknown."""
+    return printer_models.printer(core,name)['key']
 
 
 def fans(core,name):
@@ -33,9 +34,10 @@ def fans(core,name):
                     'percent':int(p.get('state',0))&255})
             except (ValueError,TypeError,KeyError):continue
         return result
-    model=model_name(core,name);indices=[1]
-    if data.get('support_aux_fan') is True or any(m in model for m in ('h2d','x1','p1s')):indices.append(2)
-    if data.get('support_chamber_fan') is True or any(m in model for m in ('h2d','x1','p1s')):indices.append(3)
+    # Older firmware without an airduct report: the printer's flags, or the model's known fans (printer_models).
+    model=printer_models.printer(core,name);indices=[1]
+    if data.get('support_aux_fan') is True or model['aux_fan']:indices.append(2)
+    if data.get('support_chamber_fan') is True or model['chamber_fan']:indices.append(3)
     return [{'key':FAN_KEYS[i],'id':i,'label':FAN_NAMES[i],'protocol':'gcode_line','minimum':0,'maximum':100,'manual':True,
              'percent':legacy_percent(data,i) if legacy_percent(data,i) is not None else (data.get('demo_fan_targets') or {}).get(str(i))} for i in indices]
 
