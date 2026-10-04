@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.6.0-beta.1
+
+Built on 1.5.0-beta.1. A better Queue a print dialog with Print now (#7), support for more Bambu Lab printers (#6), printing a finished job on another printer (#57), and fixes for movement commands (#1) and Swapmod (#17).
 
 ### Added
 - **Print a finished job on another printer (#57, dashboard only).** History jobs have **Print on another printer…**, which adds a copy to a different printer's queue.
