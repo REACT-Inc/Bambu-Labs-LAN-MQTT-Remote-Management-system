@@ -10,6 +10,12 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Settings:** the AMS mapping is chosen again for the new printer; plate and bed type carry over.
   - **Starting:** the new job still needs the normal start confirmation.
   - **Files on the printer:** for jobs whose file is on the original printer's storage, the file is copied to the Pi when you send it, and uploaded to the new printer at start.
+- **Support for more Bambu Lab printers (#6).** A new model registry (`printer_models.py`) covers the A1 mini, A1, A2L, P1P, P1S, P2S, X1, X1 Carbon, X1E, X2D, H2D, H2D Pro, H2S and H2C. For each one it knows the temperature limits, chamber heating, fans, camera type, FTPS settings, serial prefix and Bambu Studio model ID, all taken from Bambu Studio's printer definitions.
+  - **Recognising printers:** by `model`, serial number or name, and in sliced files for **Print on another printer**.
+  - **Untested:** only the H2D, A1 and A1 mini have been tested; the others are marked untested in [Supported printers](docs/configuration.md#supported-printers).
+  - **Your limits:** a printer's nozzle and bed limits can be overridden with `"limits"` in config.json.
+  - **Camera hint:** a printer without a camera now gets a hint naming the right `camera_type` for its model.
+  - **No change for tested printers:** the H2D, A1 and A1 mini behave exactly as before.
 
 ### Changed
 - **Swapmod is only offered for A-series printers (#17).**

@@ -24,7 +24,7 @@ function renderStill(p){const still=$('stillImage'),snap=p?.snapshot||{};
  const url=snapshotUrl(p);if(still.dataset.url!==url){still.dataset.url=url;still.src=url;}still.hidden=false;}
 function showCamera(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
  const snap=p?.snapshot||{};
- $('cameraHint').textContent=!p?.has_camera?(state?.demo?'No camera in demo mode.':'No camera configured for this printer (camera_type in config.json).')
+ $('cameraHint').textContent=!p?.has_camera?(state?.demo?'No camera in demo mode.':(p?.limits?.camera_type?`No camera configured. For this ${p.limits.model} add "camera_type": "${p.limits.camera_type}" to its entry in config.json.`:'No camera configured for this printer (camera_type in config.json).'))
   :snap.error&&!snap.time?snap.error:'Live view: about one frame per second. Nothing is recorded.';
  if(!livePrinter)$('liveStatus').textContent=!p?.has_camera?'No camera.':snap.time?'Snapshot from '+new Date(snap.time*1000).toLocaleTimeString()+' · ▶ for live view':(snap.error||'Waiting for the first snapshot…');
  renderStill(p);}

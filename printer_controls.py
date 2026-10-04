@@ -4,7 +4,8 @@ import json
 import math
 import re
 import time
-from thermal_controls import fans,fan_commands,model_name
+from thermal_controls import fans,fan_commands
+import printer_models
 
 SPEEDS={'silent':1,'standard':2,'sport':3,'ludicrous':4}
 # Bambu generic filament presets: tray_info_idx and nozzle temperature range sent with ams_filament_setting.
@@ -16,10 +17,10 @@ EXTERNAL_SPOOL=255
 
 
 def limits(core,name):
-    p=getattr(core,'printer_config',lambda n:None)(name) or {}
-    model=str(p.get('model') or name).lower().replace(' ','').replace('_','')
-    return {'chamber':65 if 'h2d' in model else 0,'fans':fans(core,name), 'nozzle':350 if 'h2d' in model else 300,
-            'bed':120 if 'h2d' in model else 80 if 'mini' in model else 100 if 'a1' in model else 80}
+    # Per model from printer_models (#6), with config.json "limits" overrides for nozzle and bed.
+    model=printer_models.printer(core,name)
+    return {**printer_models.limits(core,name),'fans':fans(core,name),'model':model['name'] if model['key'] else '',
+            'camera_type':model['camera'],'tested':model['tested']}
 
 
 def number(value,low,high,integer=False):
@@ -40,9 +41,10 @@ def prepare(core,name,kind,value,axis=None):
         if value not in SPEEDS:raise ValueError('Choose silent, standard, sport or ludicrous.')
         return 'print_speed',str(SPEEDS[value]),f'Print speed → {value}'
     if kind=='chamber':
-        if 'h2d' not in model_name(core,name):raise ValueError('Active chamber heating is only enabled for H2D printers.')
-        value=number(value,0,65,True)
-        if value and value<40:raise ValueError('Use 0 to turn chamber heating off, or 40–65 °C.')
+        top=printer_models.limits(core,name)['chamber']
+        if not top:raise ValueError('Active chamber heating is only available on H2-series printers (H2D, H2S, H2C).')
+        value=number(value,0,top,True)
+        if value and value<40:raise ValueError(f'Use 0 to turn chamber heating off, or 40–{top} °C.')
         return 'batch',[{'command':'set_ctt','ctt_val':value}],f'Chamber target → {value} °C'
     if kind=='fan' or kind=='fanall' or kind.startswith('fan_'):
         value=number(value,0,100,True)

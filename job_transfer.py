@@ -15,27 +15,18 @@ import secrets
 import zipfile
 from pathlib import Path
 
+import printer_models
 import queueing
 from queueing import TERMINAL, options, validate_archive
 
-# Bambu Studio printer_model_id values (resources/profiles/BBL/machine/*.json "model_id").
-MODEL_IDS = {'N1': 'a1mini', 'N2S': 'a1', 'C11': 'p1p', 'C12': 'p1s', 'BL-P001': 'x1c', 'BL-P002': 'x1',
-             'C13': 'x1e', 'O1D': 'h2d'}
-# First 3 characters of the serial number.
-SERIALS = {'030': 'a1mini', '039': 'a1', '01S': 'p1p', '01P': 'p1s', '00M': 'x1c', '03W': 'x1e', '094': 'h2d'}
-ALIASES = {'x1carbon': 'x1c', 'a1m': 'a1mini'}
-NAMES = {'a1mini': 'A1 mini', 'a1': 'A1', 'p1p': 'P1P', 'p1s': 'P1S', 'x1c': 'X1 Carbon', 'x1': 'X1', 'x1e': 'X1E', 'h2d': 'H2D'}
-
 
 def model_key(text):
-    """'Bambu Lab A1 mini' / 'A1 mini' / 'A1M' -> 'a1mini'; '' for nothing."""
-    key = re.sub(r'[^a-z0-9]', '', str(text or '').lower())
-    key = key.removeprefix('bambulab')
-    return ALIASES.get(key, key)
+    """'Bambu Lab A1 mini' / 'A1 mini' / 'A1M' -> 'a1mini'; '' for nothing. Models the app doesn't know yet
+    keep their normalized name, so two printers of the same new model still match."""
+    return printer_models.key_from_text(text) or printer_models.normalize(text)
 
 
-def label(key):
-    return NAMES.get(key, key.upper() if key else 'unknown model')
+label = printer_models.label
 
 
 def sliced_for(path):
@@ -53,7 +44,7 @@ def sliced_for(path):
             if 'Metadata/slice_info.config' in names:
                 match = re.search(rb'key="printer_model_id"\s+value="([^"]+)"', archive.read('Metadata/slice_info.config'))
                 if match:
-                    return MODEL_IDS.get(match.group(1).decode(errors='replace'), '')
+                    return printer_models.key_from_studio_id(match.group(1).decode(errors='replace'))
     except (OSError, zipfile.BadZipFile):
         pass
     return ''
@@ -63,7 +54,7 @@ def printer_model(core, name):
     config = core.printer_config(name) or {}
     if config.get('model'):
         return model_key(config['model'])
-    return SERIALS.get(str(config.get('serial') or '')[:3], '')
+    return printer_models.key_for(config, name)
 
 
 def file_model(core, job, path=None):

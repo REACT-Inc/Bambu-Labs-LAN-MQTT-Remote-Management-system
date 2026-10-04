@@ -1,31 +1,21 @@
 import json
 import time
 
-# Swapmod is only offered for Bambu Lab A-series printers (#17). First 3 characters of the serial number:
-A_SERIES_SERIALS={'030':'A1 mini','039':'A1'}
-OTHER_MODELS=('h2d','h2c','h2s','x1','p1','p2','a2l')
+import printer_models
+
+# Swapmod (the Swapmod A1m kit) is only offered for the A1 family (#17); models come from printer_models (#6).
+SWAPMOD_MODELS=('a1mini','a1')
 NOT_A_SERIES=('Swapmod is only available for Bambu Lab A-series printers (A1 / A1 mini). If this is one, set its "model" '
               'in config.json (for example "A1 mini").')
 
 
-def _model_from_text(text):
-    text=str(text).lower().replace(' ','').replace('_','').replace('-','')
-    if any(x in text for x in OTHER_MODELS):return None
-    if 'a1mini' in text or text.endswith('a1m'):return 'A1 mini'
-    return 'A1' if 'a1' in text else None
-
-
 def a_series_model(core,name):
-    """'A1 mini' or 'A1' for A-series printers, otherwise None.
+    """'A1 mini' or 'A1' for A1-family printers, otherwise None.
 
     The configured "model" decides; without one, the serial number's first 3 characters; without a serial, the name.
     """
-    config=getattr(core,'printer_config',lambda n:None)(name) or {}
-    if config.get('model'):return _model_from_text(config['model'])
-    serial=str(config.get('serial') or '')[:3]
-    if serial in A_SERIES_SERIALS:return A_SERIES_SERIALS[serial]
-    if len(serial)==3:return None   # another model's serial
-    return _model_from_text(name)
+    key=printer_models.printer(core,name)['key']
+    return printer_models.label(key) if key in SWAPMOD_MODELS else None
 
 
 class PlateSwap:
