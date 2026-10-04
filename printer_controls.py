@@ -54,8 +54,9 @@ def prepare(core,name,kind,value,axis=None):
         value=number(value,-(1 if axis=='Z' else 10),1 if axis=='Z' else 10)
         value=round(value,1)
         if abs(value)<0.1:raise ValueError('Move at least 0.1 mm.')
-        # Same wrapper Bambu Studio uses (DevAxis::Ctrl_Axis): soft endstops on, relative mode saved and restored.
-        gcode=(f'M211 S\nM211 X1 Y1 Z1\nM1002 push_ref_mode\nG91\nG1 {axis}{value:.1f} F{300 if axis=="Z" else 1200}\n'
+        # Exactly what Bambu Studio sends (DevAxis::Ctrl_Axis): soft endstops on, relative mode saved and restored,
+        # F3000 on X/Y and F900 on Z (StatusPanel::on_axis_ctrl_*).
+        gcode=(f'M211 S \nM211 X1 Y1 Z1\nM1002 push_ref_mode\nG91 \nG1 {axis}{value:.1f} F{900 if axis=="Z" else 3000}\n'
                'M1002 pop_ref_mode\nM211 R\n')
         return 'gcode_line',gcode,f'Move {axis} by {value:+g} mm'
     if kind=='home':
@@ -98,6 +99,18 @@ def axis_ctrl_supported(data):
     # Bambu Studio (DevAxis::Ctrl_Axis) jogs printers with bit 38 of the hex "fun" flags set via xyz_ctrl, not G-code.
     try:return bool(int(str(data.get('fun') or '0'),16)>>38&1)
     except ValueError:return False
+
+
+def unhomed_axes(data):
+    """Axes the printer reports as not homed (bits 0-2 of home_flag are X, Y, Z; 0 or missing means unknown).
+
+    The firmware ignores jogs on an axis that isn't homed, for example after the motors were released while idle,
+    so Bambu Studio (StatusPanel::on_axis_ctrl_xy, DevAxis::IsAxisAtHome*) asks to home first instead of sending them.
+    """
+    try:flag=int(data.get('home_flag') or 0)
+    except (TypeError,ValueError):return []
+    if flag==0:return []
+    return [axis for bit,axis in enumerate('XYZ') if not flag>>bit&1]
 
 
 def xyz_ctrl(axis,value):
@@ -143,6 +156,8 @@ class Controls:
             if any(j['printer']==name and j['status'] in ('staging','awaiting_start','printing','paused','needs_review') for j in self.store.jobs()):
                 raise ValueError('Resolve the active queue job before '+('homing.' if kind=='home' else 'jogging.'))
             if time.monotonic()-self.moved.get(name,-100)<3:raise ValueError('Wait three seconds between moves.')
+            if kind=='move' and axis in unhomed_axes(data):
+                raise ValueError(f'The printer reports that {axis} is not homed, so it would ignore the move. Press Home (or /home) first, then try again.')
             if kind=='move' and axis_ctrl_supported(data):command,param=('batch',xyz_ctrl(axis,round(float(value),1)))
             if kind=='home' and mqtt_homing_supported(data):command,param=('batch',[{'command':'back_to_center'}])
         if kind=='nozzle_size' and state in ('RUNNING','PAUSE','PREPARE'):raise ValueError('Change the nozzle setting only when no print is running.')

@@ -2,7 +2,14 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.5.0)
+## Unreleased
+
+### Added
+- **Print a finished job on another printer (#57, dashboard only).** History jobs have **Print on another printer…**, which adds a copy to a different printer's queue.
+  - **Same model only:** only printers of the model the `.3mf` was sliced for are offered. A mismatch is refused, and an unknown model needs a confirmation tick.
+  - **Settings:** the AMS mapping is chosen again for the new printer; plate and bed type carry over.
+  - **Starting:** the new job still needs the normal start confirmation.
+  - **Files on the printer:** for jobs whose file is on the original printer's storage, the file is copied to the Pi when you send it, and uploaded to the new printer at start.
 
 ### Changed
 - **Swapmod is only offered for A-series printers (#17).**
@@ -11,6 +18,22 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Server checks:** the server refuses to enable or check Swapmod on other printers.
   - **Old settings:** settings saved earlier for a non-A-series printer are switched off at start-up, with a note in the Activity feed.
 
+### Fixed
+- **Movement commands that didn't move the printer (#1).** The printer ignores jogs on an axis it reports as not homed (its `home_flag`), for example after it released its motors while idle, so moves were accepted but nothing happened. Like Bambu Studio, the app now reads that flag and asks you to press **⌂ Home** / `/home` first. The dashboard disables the buttons for those axes and explains why. The G-code jog now matches Bambu Studio byte for byte, including its speeds (X/Y at F3000, Z at F900).
+
+## 1.5.0-beta.1
+
+Built on 1.4.0-beta.1. Makes Discord `/printer` on the H2D much lighter on the Pi (#54).
+
+### Fixed
+- **Pi crash after `/printer` on the H2D (#54).** `/printer` started a **full live ffmpeg decode** of the H2D's 1080p camera stream, using every CPU core at normal priority, just to get one picture. If the dashboard was open, it could run alongside another full-resolution capture of the same camera. On a Raspberry Pi this could exhaust RAM, CPU or power. Now:
+  - **Reuse first:** `/printer` reuses a picture already on hand (an open live view, or the dashboard's still from the last minute).
+  - **Otherwise one cheap still:** it takes a single frame: keyframe only, one thread, 960 px, at lower priority.
+  - **One capture per camera:** Discord and the dashboard share captures, so a camera never has two at once.
+  - **Live view is lighter too:** it runs at lower priority with at most 2 decoder threads.
+  - **Reply first:** `/printer` sends the status card straight away and adds the picture when it arrives, instead of waiting up to 25 seconds (part of #44).
+
+## 1.4.0-beta.1
 
 Built on 1.3.0-beta.1. Fixes the dashboard and printer controls becoming unresponsive on 1.3.0-beta.1 (#40).
 

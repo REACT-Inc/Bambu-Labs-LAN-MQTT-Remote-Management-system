@@ -46,6 +46,10 @@ class SnapshotRotation:
         feed = self.cameras.feeds.get(name)
         if feed and feed.frame and time.time() - feed.updated < 5:
             return feed.frame
+        # Shared with Discord /printer: never two captures of the same camera at once (#54).
+        capture_still = getattr(self.core, 'capture_still', None)
+        if capture_still:
+            return await capture_still(name, self.timeout)
         config = self.core.printer_config(name)
         return await asyncio.wait_for(asyncio.to_thread(self.core.snapshot_bytes, config), self.timeout)
 

@@ -153,14 +153,50 @@ class Store:
         self.event(job['printer'], 'Queue changed', f'{action} • {job_id} • {author}')
 
 
-def upload(printer, source, remote):
+def ftps_client(printer):
     # BambuTools supplies implicit FTPS with TLS session reuse for port 990.
     from bambulabs_api.ftp_client import ImplicitFTP_TLS
     context = ssl._create_unverified_context()
     model=str(printer.get('model') or printer.get('name','')).lower().replace(' ','')
     unwrap=printer.get('ftp_tls_unwrap','h2d' in model)
     if type(unwrap) is not bool:raise ValueError('ftp_tls_unwrap must be true or false.')
-    ftp = ImplicitFTP_TLS(timeout=60, context=context, unwrap=unwrap)
+    return ImplicitFTP_TLS(timeout=60, context=context, unwrap=unwrap)
+
+
+def download(printer, remote, dest):
+    """Copy a file from a printer's storage to the Pi (used to send a finished print to another printer, #57)."""
+    ftp = ftps_client(printer)
+    received=0;deadline=time.monotonic()+240
+    phase='connect'
+    try:
+        ftp.connect(printer['ip'], 990)
+        ftp.login('bblp', printer['access_code'])
+        ftp.prot_p()
+        phase='check file'
+        ftp.voidcmd('TYPE I')
+        size = ftp.size(remote)
+        if not size or size > MAX_UPLOAD:
+            raise ValueError('The file is missing on the printer, empty, or larger than 256 MiB.')
+        phase='transfer / TLS close'
+        with open(dest, 'xb') as stream:
+            def write(chunk):
+                nonlocal received
+                received+=len(chunk)
+                if received>size or time.monotonic()>deadline:raise TimeoutError('Download took too long or was larger than reported.')
+                stream.write(chunk)
+            ftp.retrbinary('RETR ' + remote, write, blocksize=32768)
+        if received != size:
+            raise RuntimeError('Downloaded file size did not match.')
+    except Exception as exc:
+        Path(dest).unlink(missing_ok=True)
+        detail=str(exc).replace(str(printer['access_code']),'[hidden]')
+        raise RuntimeError(f"Couldn't copy the file from {printer.get('name','the printer')} (FTPS {phase}: {detail[:120]}). Check that printer is on and reachable.") from exc
+    finally:
+        ftp.close()
+
+
+def upload(printer, source, remote):
+    ftp = ftps_client(printer)
     sent=0;expected=Path(source).stat().st_size;deadline=time.monotonic()+240
     phase='connect'
     def progress(chunk):

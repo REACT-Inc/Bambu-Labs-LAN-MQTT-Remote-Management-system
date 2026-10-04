@@ -17,6 +17,7 @@ How the code is organised, how to run it locally, and how changes are tested and
 | `core.py` | Configuration, MQTT printer connections and telemetry, the Discord bot and core commands, permissions, notifications |
 | `dashboard.py` | aiohttp web app: login/sessions/CSRF, the JSON API used by `static/`, settings |
 | `queueing.py` | Durable SQLite queue and activity log (`Store`), and the start/monitor/resolve logic (`Engine`), including FTPS upload |
+| `job_transfer.py` | Send a finished print to another printer of the same model (dashboard **Print on another printer…**) |
 | `printer_controls.py` | Validated printer controls (temperatures, speed, fans, chamber, movement) shared by Discord and the dashboard |
 | `thermal_controls.py` | Fan capability mapping (from Bambu Studio) and chamber control |
 | `printer_files.py` | Read-only, bounded browsing of printer storage over FTPS |

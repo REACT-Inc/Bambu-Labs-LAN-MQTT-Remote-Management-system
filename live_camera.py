@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import logging
+import shutil
 import ssl
 import struct
 import time
@@ -52,7 +53,9 @@ class Feed:
 
     async def rtsp(self):
         p=self.printer;url=f"rtsps://bblp:{p['access_code']}@{p['ip']}:322/streaming/live/1"
-        process=await asyncio.create_subprocess_exec('ffmpeg','-nostdin','-loglevel','error','-rtsp_transport','tcp','-i',url,
+        # Lower priority and at most 2 decoder threads, so a live view never starves the Pi (#54).
+        nice=shutil.which('nice');prefix=[nice,'-n','10'] if nice else []
+        process=await asyncio.create_subprocess_exec(*prefix,'ffmpeg','-nostdin','-loglevel','error','-threads','2','-rtsp_transport','tcp','-i',url,
             '-an','-vf','fps=5,scale=960:-2','-f','image2pipe','-vcodec','mjpeg','-q:v','5','pipe:1',
             stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
         errors=bytearray()
