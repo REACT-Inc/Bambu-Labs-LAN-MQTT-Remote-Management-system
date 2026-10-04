@@ -35,22 +35,20 @@ Light control uses the standard `chamber_light` command. Whether it works depend
 
 | | Dashboard | Discord |
 |---|---|---|
-| Nozzle | Control: *Active nozzle temperature* | `/temperature target:nozzle degrees:210` |
-| Bed | Control: *Bed temperature* | `/temperature target:bed degrees:60` |
+| Nozzle | **Nozzle** tile | `/temperature target:nozzle degrees:210` |
+| Left / right nozzle (dual-nozzle printers) | **Left nozzle** / **Right nozzle** tiles | `/temperature target:left nozzle degrees:220` |
+| Bed | **Bed** tile | `/temperature target:bed degrees:60` |
 
 - **Values:** whole degrees Celsius, and **0 turns heating off**.
 - **Limits:** set per model. See [Configuration](configuration.md#printer-entries).
 
-  | Model | Nozzle max | Bed max |
-  |---|---|---|
-  | H2D | 350 °C | 120 °C |
-  | A1 | 300 °C | 100 °C |
-  | A1 mini | 300 °C | 80 °C |
-  | unknown | 300 °C | 80 °C |
-
-  Set `model` on each printer so the right limits apply.
-- **Nozzle:** the *active* nozzle is changed. The app doesn't switch H2D tools.
-- **How it's sent:** as non-blocking `M104`/`M140` commands. The G-code of a running print can change the targets again.
+  Every model's limits are in [Supported printers](configuration.md#supported-printers). Set `model` on each printer so the right limits apply.
+- **Single-nozzle printers:** the **Nozzle** tile sets the nozzle.
+- **Dual-nozzle printers (H2D, H2D Pro, H2C, X2D):**
+  - **Tiles:** a **Left nozzle** and a **Right nozzle** tile, each with its own current → target. The one marked **· in use** is printing or loaded.
+  - **How it's sent:** each is set on its own with Bambu Studio's `set_nozzle_temp` command (`extruder_index` 0 = right, 1 = left).
+  - **Tool switching:** the app doesn't switch tools.
+- **How it's sent otherwise:** non-blocking `M104`/`M140` commands. The G-code of a running print can change the targets again.
 
 ## Chamber heating (H2D)
 
@@ -118,11 +116,17 @@ In the dashboard's printer panel, **click an AMS slot** (or the external spool) 
   - PLA 190–230 °C, PETG 220–260, ABS/ASA 240–270, TPU 200–250, PC/PA 260–290, PVA 190–230.
 - **During a print:** you can edit any slot except the one feeding the current print.
 - **Waiting feedback:** the slot pulses purple until the printer reports the new material and colour.
-- **Hardware check needed:** the `ams_filament_setting` fields (including the external spool's `ams_id 255` / `tray_id 254`) follow Bambu Studio and still need checking on each model.
+- **Hardware check needed:** the `ams_filament_setting` fields (including the external spool's `ams_id 255` / `tray_id 254`, and the H2D's left external spool, `ams_id 254`) follow Bambu Studio and still need checking on each model.
+- **Dual-nozzle printers (H2D):** a slot that either nozzle has loaded can't be edited during a print.
 
 ## Nozzle diameter and type
 
-Under **Nozzle** in the printer panel, pick the **diameter** (0.2, 0.4, 0.6 or 0.8 mm) and **type** (stainless steel, hardened steel or tungsten carbide), then **Save**.
+**Dual-nozzle printers (H2D, H2D Pro, H2C, X2D):** their hotends report their own size and type.
+- **What's shown:** under **Nozzle**, one card per side with the fitted hotend (for example "0.4 mm hardened steel, high flow"), what that nozzle has loaded, and which nozzle is **in use**.
+- **H2C:** also lists the hotends parked in its **hotend rack**.
+- **No manual setting:** it's hidden on these printers. Change hotends on the printer.
+
+**Other printers:** under **Nozzle** in the printer panel, pick the **diameter** (0.2, 0.4, 0.6 or 0.8 mm) and **type** (stainless steel, hardened steel or tungsten carbide), then **Save**.
 
 - **When to use it:** after you've physically swapped the nozzle, so the printer, and Bambu Studio when slicing, know what's fitted. It doesn't change anything mechanically.
 - **Not while printing:** it's refused while a print is running or paused.

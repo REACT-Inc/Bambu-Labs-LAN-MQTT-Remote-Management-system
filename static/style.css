@@ -148,6 +148,9 @@ button.slot:hover{border-color:#4d624c;background:#17201b}
 .ams-unit{background:var(--raised);border:1px solid var(--line);border-radius:14px;padding:12px}
 .ams-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:13px}
 .ams-head small{font-size:11px}
+.side-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:#1d2a36;color:#8cc4ff;font-size:11px;font-weight:600;vertical-align:1px}
+.nozzle-tag{font-style:normal;font-size:10px;color:var(--green);white-space:nowrap}
+.nozzle-now{margin:0 0 8px;font-size:13px;color:var(--muted)}
 .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .ams-unit.external .slots{grid-template-columns:minmax(0,120px)}
 .slot{position:relative;display:grid;justify-items:center;gap:3px;padding:10px 4px 12px;border-radius:10px;background:#111815;border:1px solid transparent;overflow:hidden;text-align:center}
@@ -209,4 +212,14 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 .plate-card:disabled{opacity:.45;cursor:not-allowed}
 .plate-fils{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
 .plate-fils .fil{width:12px;height:12px;border-radius:50%;border:1px solid #fff4;background:#2a322e}
+
+/* Multi-hotend: one card per nozzle, plus the H2C hotend rack */
+.nozzle-sides{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:10px}
+.nozzle-side,.nozzle-rack{display:grid;gap:3px;padding:10px;border-radius:10px;background:#111815;border:1px solid var(--line);font-size:13px}
+.nozzle-side.active{border-color:var(--green)}
+.nozzle-side small{color:var(--muted)}
+.nozzle-rack{grid-column:1/-1}
+.nozzle-rack span{font-size:12px;color:var(--muted)}
+#nozzleForm.dual{display:none}
+.desktop-btn{margin-top:10px;width:100%}
 .ai-line{font-size:12px;margin:6px 0 0;color:var(--muted)}.ai-line.ai-suspect,.ai-line.ai-unavailable{color:var(--yellow)}.ai-line.ai-failure,.ai-line.ai-paused{color:var(--red);font-weight:650}

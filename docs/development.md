@@ -22,6 +22,7 @@ How the code is organised, how to run it locally, and how changes are tested and
 | `printer_controls.py` | Validated printer controls (temperatures, speed, fans, chamber, movement) shared by Discord and the dashboard |
 | `thermal_controls.py` | Fan capability mapping (from Bambu Studio) and chamber control |
 | `printer_models.py` | Every supported Bambu Lab model: limits, chamber, fans, camera type, FTPS settings, serial prefix and Bambu Studio ID (from Bambu Studio). Everything model-specific reads it. |
+| `filament_sides.py` | Dual-nozzle (multi-hotend) decoding: which nozzle each AMS / external spool feeds, what each nozzle has loaded, per-nozzle temperatures, fitted hotends and the H2C hotend rack |
 | `printer_files.py` | Read-only, bounded browsing of printer storage over FTPS |
 | `printer_errors.py`, `bambu_error_catalog.json` | Offline Bambu HMS and print-error descriptions. See [ERROR_SOURCES.md](../ERROR_SOURCES.md). |
 | `camera_capture.py`, `live_camera.py` | Single-frame capture and shared live camera connections |

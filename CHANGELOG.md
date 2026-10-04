@@ -5,6 +5,16 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased (1.6.1)
 
 ### Added
+- **Multi-hotend support for dual-nozzle printers (#68): H2D, H2D Pro, H2C, X2D.**
+  - **Temperatures:** the dashboard shows a **Left nozzle** and a **Right nozzle** tile, each with its own current → target and settable on its own (Bambu Studio's `set_nozzle_temp`). The nozzle in use is marked. `/temperature` has `left nozzle` / `right nozzle` targets.
+  - **Hotends:** the **Nozzle** section shows each side's fitted hotend (size, material, high flow) and what it has loaded, plus the H2C's **hotend rack**. The manual size/type editor is hidden on these printers, because their hotends report themselves.
+  - **`/printer`:** shows each nozzle's temperature, hotend and loaded filament, and the hotend rack.
+- **Left/right nozzle indicators (#5).** The dashboard's **Filament** section and Discord `/filaments` show which nozzle each AMS and external spool feeds, what each nozzle has loaded and which nozzle is in use. Both external spools are listed and editable (the left one uses `ams_id 254`).
+- Single-nozzle printers look and behave as before.
+- **Remote desktop for MeshCentral laptops (#61, dashboard).** Each online laptop whose agent supports it has a **🖥 Remote desktop** button in **Devices**.
+  - **What it opens:** MeshCentral's own desktop viewer for that laptop, in a new tab. You sign in to MeshCentral with your own account; the dashboard's token never reaches the browser.
+  - **Activity:** each session is recorded.
+  - **Turning it off:** untick it in the MeshCentral settings.
 - **AI print-failure detection with a Raspberry Pi 5 AI HAT (#70).** Off until `failure_detection` is enabled in config.json. See [AI failure detection](failureDetection/FAILURE_DETECTION.md).
   - **How it watches:** while a printer is printing, the Pi takes a camera still every 30 s, using the cheap single-still path, and the AI HAT (Hailo-8L / Hailo-8) scores it with your `.hef` model.
   - **No single-frame alarms:** a print is only flagged when 6 of the last 10 frames fail, spread over at least 4 minutes, with the newest frame still failing. The first 3 minutes of a print aren't judged, frozen or duplicate frames are skipped, and a camera gap starts the evidence again. All of these are configurable.

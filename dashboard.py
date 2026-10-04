@@ -15,6 +15,7 @@ from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits
 import job_transfer
 import sliced_file
+import filament_sides
 from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
 from failureDetection.detection import FailureMonitor
@@ -180,7 +181,7 @@ class Dashboard:
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,sides=filament_sides.summary(data),last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
@@ -316,7 +317,7 @@ class Dashboard:
     async def control(self,request):
         name=request.match_info['name'];action=request.match_info['action'];data=await request.json()
         if name not in self.core.names(): raise ValueError('Unknown printer.')
-        if action in ('nozzle','bed','chamber','speed','fan','fanall','move','home','filament','nozzle_size') or action.startswith('fan_'):
+        if action in ('nozzle','nozzle_left','nozzle_right','bed','chamber','speed','fan','fanall','move','home','filament','nozzle_size') or action.startswith('fan_'):
             message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'),author='web administrator')
             return web.json_response({'ok':True,'message':message})
         if action=='stop' and data.get('confirmed') is not True: raise ValueError('Confirm stopping the print.')
