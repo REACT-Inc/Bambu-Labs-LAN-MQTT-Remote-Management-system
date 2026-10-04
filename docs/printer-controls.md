@@ -136,7 +136,7 @@ Set `camera_type` on each printer in [config.json](configuration.md#printer-entr
 | `camera_type` | Printers | How it works |
 |---|---|---|
 | `jpeg_tcp` | A1 family | TLS JPEG stream on port 6000. Frame rate is limited by the camera. |
-| `rtsp` | H2D and other RTSP cameras | RTSP on port 322, decoded by **ffmpeg** (limited to 5 fps at 960 px wide to spare the Pi) |
+| `rtsp` | H2D and other RTSP cameras | RTSP on port 322, decoded by **ffmpeg** at lower priority (`nice`). Live view: 5 fps at 960 px, at most 2 decoder threads. Stills (dashboard cards, Discord `/printer`): one keyframe, one thread. Only one still is ever taken from a camera at a time, and `/printer` reuses a recent dashboard still or live frame instead of opening the camera. |
 
 - **Snapshots:** `/printer`, notifications, and **Snapshot → Refresh camera snapshot** in the dashboard.
 - **Still snapshots (cards and panel):** while someone has the dashboard open, the Pi takes **one still at a time**, printer after printer, spaced at least 5 seconds apart (each printer about every 30–40 s). Each still is one short connection: connect, one frame, disconnect.
