@@ -2,6 +2,16 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.6.1)
+
+### Added
+- **Multi-hotend support for dual-nozzle printers (#68): H2D, H2D Pro, H2C, X2D.**
+  - **Temperatures:** the dashboard shows a **Left nozzle** and a **Right nozzle** tile, each with its own current → target and settable on its own (Bambu Studio's `set_nozzle_temp`). The nozzle in use is marked. `/temperature` has `left nozzle` / `right nozzle` targets.
+  - **Hotends:** the **Nozzle** section shows each side's fitted hotend (size, material, high flow) and what it has loaded, plus the H2C's **hotend rack**. The manual size/type editor is hidden on these printers, because their hotends report themselves.
+  - **`/printer`:** shows each nozzle's temperature, hotend and loaded filament, and the hotend rack.
+- **Left/right nozzle indicators (#5).** The dashboard's **Filament** section and Discord `/filaments` show which nozzle each AMS and external spool feeds, what each nozzle has loaded and which nozzle is in use. Both external spools are listed and editable (the left one uses `ams_id 254`).
+- Single-nozzle printers look and behave as before.
+
 ## 1.6.0-beta.1
 
 Built on 1.5.0-beta.1. A better Queue a print dialog with Print now (#7), support for more Bambu Lab printers (#6), printing a finished job on another printer (#57), and fixes for movement commands (#1) and Swapmod (#17).

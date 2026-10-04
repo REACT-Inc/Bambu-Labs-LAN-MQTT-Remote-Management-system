@@ -20,7 +20,9 @@ EXAMPLE_DATA = CONFIG.get('example_data') or {
                 'vt_tray':{'tray_type':'PLA','tray_color':'FFFFFFFF','remain':100},
                 # Dual-nozzle demo (H2D): the AMS feeds the left nozzle (info bits 8-11 = 1), which is in use with AMS slot 1;
                 # the right nozzle has the right external spool loaded. See filament_sides.py.
-                **({'device':{'extruder':{'state':2|1<<4,'info':[{'id':0,'snow':255<<8},{'id':1,'snow':0}]}},
+                # Each nozzle's temp packs target << 16 | current; device.nozzle lists the fitted hotends (multi-hotend).
+                **({'device':{'extruder':{'state':2|1<<4,'info':[{'id':0,'snow':255<<8,'temp':28,'hnow':0},{'id':1,'snow':0,'temp':(220<<16)|214,'hnow':1}]},
+                              'nozzle':{'info':[{'id':0,'diameter':0.4,'type':'HS00'},{'id':1,'diameter':0.4,'type':'HH01'}]}},
                     'vir_slot':[{'id':'255','tray_type':'PLA','tray_color':'FFFFFFFF','remain':100},
                                 {'id':'254','tray_type':'PETG','tray_color':'161616FF','remain':60}]}
                    if 'h2d' in (p.get('model') or p['name']).lower() else {})}
@@ -544,8 +546,19 @@ def printer_embed(name):
     field(embed, 'Progress', progress(data.get('mc_percent')), False)
     field(embed, 'Time remaining', str(data.get('mc_remaining_time', '?')) + ' min')
     field(embed, 'Layer', f"{data.get('layer_num', '?')} / {data.get('total_layer_num', '?')}")
-    for label, current, target in [('Nozzle', 'nozzle_temper', 'nozzle_target_temper'), ('Bed', 'bed_temper', 'bed_target_temper')]:
-        field(embed, label, f"{data.get(current, '?')}°C → {data.get(target, '?')}°C")
+    sides = filament_sides.nozzles(data)
+    if sides:
+        # Dual-nozzle printers: each nozzle's temperature, fitted hotend and loaded filament (multi-hotend).
+        for n in sides:
+            heat = f"{n['current'] if n['current'] is not None else '?'}°C → {n['target'] if n['target'] else 'off'}{'°C' if n['target'] else ''}"
+            details = [heat, n['hotend']['label'] if n['hotend'] else '', n['filament'] and 'Loaded: ' + n['filament']]
+            field(embed, f"{n['side']} nozzle" + (' • in use' if n['active'] else ''), '\n'.join(d for d in details if d))
+    else:
+        field(embed, 'Nozzle', f"{data.get('nozzle_temper', '?')}°C → {data.get('nozzle_target_temper', '?')}°C")
+    field(embed, 'Bed', f"{data.get('bed_temper', '?')}°C → {data.get('bed_target_temper', '?')}°C")
+    rack = filament_sides.hotends(data)[1]
+    if rack:
+        field(embed, 'Hotend rack', '\n'.join(f"Slot {h['slot'] + 1}: {h['label']}" for h in rack), False)
     if error or data.get('hms'):
         field(embed, '⚠️ Printer error', printer_error_text(name, error, data), False)
     if not EXAMPLE_MODE:

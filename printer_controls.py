@@ -39,6 +39,12 @@ def prepare(core,name,kind,value,axis=None):
     if kind in ('nozzle','bed'):
         value=number(value,0,limits(core,name)[kind],True)
         return 'gcode_line',f'{"M104" if kind=="nozzle" else "M140"} S{value}\n',f'{kind.title()} target → {value} °C'
+    if kind in ('nozzle_left','nozzle_right'):
+        # Dual-nozzle printers: Bambu Studio's set_nozzle_temp with extruder_index 0 = right, 1 = left (multi-hotend).
+        if not dual_nozzle(core,name):raise ValueError('This printer has a single nozzle; set the Nozzle temperature instead.')
+        value=number(value,0,limits(core,name)['nozzle'],True)
+        side=filament_sides.RIGHT if kind=='nozzle_right' else filament_sides.LEFT
+        return 'batch',[{'command':'set_nozzle_temp','extruder_index':side,'target_temp':value}],f'{filament_sides.SIDES[side]} nozzle target → {value} °C'
     if kind=='speed':
         if value not in SPEEDS:raise ValueError('Choose silent, standard, sport or ludicrous.')
         return 'print_speed',str(SPEEDS[value]),f'Print speed → {value}'
@@ -92,6 +98,13 @@ def prepare(core,name,kind,value,axis=None):
         return 'batch',[{'_root':'system','command':'set_accessories','accessory_type':'nozzle','nozzle_diameter':diameter,'nozzle_type':nozzle}],\
             f'Nozzle → {diameter:g} mm {NOZZLE_TYPES[nozzle].lower()}'
     raise ValueError('Unknown control.')
+
+
+def dual_nozzle(core,name):
+    """True for printers with two nozzles: known from the model, or reported by the printer (device.extruder)."""
+    if printer_models.printer(core,name)['dual_nozzle']:return True
+    try:return filament_sides.is_dual(core.state_data(name)[2])
+    except Exception:return False
 
 
 def mqtt_homing_supported(data):
@@ -177,6 +190,10 @@ class Controls:
         if self.core.EXAMPLE_MODE:
             d=self.core.EXAMPLE_DATA[name]
             if kind in ('nozzle','bed'):d[kind+'_target_temper']=int(value)
+            elif kind in ('nozzle_left','nozzle_right'):
+                side=param[0]['extruder_index']
+                for item in ((d.get('device') or {}).get('extruder') or {}).get('info') or []:
+                    if item.get('id')==side:item['temp']=(int(value)<<16)|(int(item.get('temp') or 0)&0xFFFF)
             elif kind=='speed':d['spd_lvl']=SPEEDS[value]
             elif kind=='chamber':d['ctt']=int(value)
             elif kind=='filament':

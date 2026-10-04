@@ -48,15 +48,18 @@ async function control(kind,body,label){const r=await api('printers/'+encodeURIC
 // Everyday controls apply straight away; the server still checks limits. Only Pause and Stop ask first.
 async function sendControl(kind,value){try{return await control(kind,{value,confirmed:true});}catch(e){notice(e.message);throw e;}finally{refresh();}}
 
-function tempDefs(p){const d=p.data||{},l=p.limits||{},defs=[
- {kind:'nozzle',label:'Nozzle',icon:'🔥',now:d.nozzle_temper,target:d.nozzle_target_temper,max:l.nozzle||300,hint:'Active nozzle. 0 turns heating off.'},
- {kind:'bed',label:'Bed',icon:'▭',now:d.bed_temper,target:d.bed_target_temper,max:l.bed||100,hint:'0 turns heating off.'}];
+function tempDefs(p){const d=p.data||{},l=p.limits||{},nozzles=(p.sides||{}).nozzles||[];
+ // Dual-nozzle printers get a tile per nozzle, left first (multi-hotend); others one Nozzle tile.
+ const defs=nozzles.length?nozzles.slice().sort((a,b)=>b.nozzle-a.nozzle).map(n=>({kind:n.nozzle===1?'nozzle_left':'nozzle_right',
+   label:n.side+' nozzle'+(n.active?' · in use':''),icon:'🔥',now:n.current,target:n.target,max:l.nozzle||300,hint:(n.hotend?n.hotend.label+'. ':'')+'0 turns heating off.'}))
+  :[{kind:'nozzle',label:'Nozzle',icon:'🔥',now:d.nozzle_temper,target:d.nozzle_target_temper,max:l.nozzle||300,hint:'Active nozzle. 0 turns heating off.'}];
+ defs.push({kind:'bed',label:'Bed',icon:'▭',now:d.bed_temper,target:d.bed_target_temper,max:l.bed||100,hint:'0 turns heating off.'});
  if(l.chamber)defs.push({kind:'chamber',label:'Chamber',icon:'◫',now:d.chamber_temper,target:d.ctt,max:l.chamber,min:40,hint:'0 = off, or 40–65 °C. Firmware may refuse for low-temperature filament.'});
  return defs;}
-function renderTiles(p){const box=$('tempTiles'),defs=tempDefs(p);
- if(box.dataset.printer!==p.name||box.children.length!==defs.length){box.dataset.printer=p.name;editingTile=null;
+function renderTiles(p){const box=$('tempTiles'),defs=tempDefs(p),kinds=defs.map(t=>t.kind).join();
+ if(box.dataset.printer!==p.name||box.dataset.kinds!==kinds){box.dataset.kinds=kinds;box.dataset.printer=p.name;editingTile=null;
   box.innerHTML=defs.map(t=>`<div class="tile" data-kind="${t.kind}"><button type="button" class="tile-main" data-edit="${t.kind}" aria-label="Set ${t.label} temperature"><span class="tile-icon">${t.icon}</span><span class="tile-label">${t.label}</span><strong class="tile-now">—</strong><small class="tile-target">→ —</small></button><form class="tile-edit" hidden><input type="number" inputmode="numeric" min="0" max="${t.max}" step="1" aria-label="${t.label} target °C"><div class="tile-edit-actions"><button type="submit" class="primary">Set</button><button type="button" data-cancel>✕</button></div><small>${esc(t.hint)} Max ${t.max} °C.</small></form></div>`).join('');}
- for(const t of defs){const tile=box.querySelector(`[data-kind="${t.kind}"]`);tile.querySelector('.tile-now').textContent=fmtTemp(t.now);
+ for(const t of defs){const tile=box.querySelector(`[data-kind="${t.kind}"]`);tile.querySelector('.tile-now').textContent=fmtTemp(t.now);tile.querySelector('.tile-label').textContent=t.label;
   const target=num(t.target),key='temp|'+p.name+'|'+t.kind,waiting=isPending(key,p);
   tile.querySelector('.tile-target').textContent=waiting?'Setting '+(pending[key].value?pending[key].value+'°':'off')+'…':target?'→ '+Math.round(target)+'°':'Off';
   tile.classList.toggle('heating',!!target&&!waiting);tile.classList.toggle('pending',waiting);}
@@ -180,6 +183,12 @@ $('detailDialog').addEventListener('close',()=>{$('filamentEditor').hidden=true;
 // ---- Nozzle diameter and type -----------------------------------------------------------
 const NOZZLE_TYPES={stainless_steel:'Stainless steel',hardened_steel:'Hardened steel',tungsten_carbide:'Tungsten carbide'};
 function renderNozzle(p){const d=p.data||{},dia=num(d.nozzle_diameter),type=d.nozzle_type,key='nozzle|'+p.name,waiting=isPending(key,p);
+ // Dual-nozzle printers report each fitted hotend themselves, so show them instead of the manual setting (multi-hotend).
+ const sides=(p.sides||{}).nozzles||[],rack=(p.sides||{}).rack||[];
+ $('nozzleForm').classList.toggle('dual',!!sides.length);
+ $('nozzleSides').innerHTML=sides.slice().sort((a,b)=>b.nozzle-a.nozzle).map(n=>`<div class="nozzle-side${n.active?' active':''}"><strong>${esc(n.side)}${n.active?' · in use':''}</strong><span>${esc(n.hotend?n.hotend.label:'Hotend not reported')}</span>${n.filament?`<small>Loaded: ${esc(n.filament)}</small>`:''}</div>`).join('')+
+  (rack.length?`<div class="nozzle-rack"><strong>Hotend rack</strong>${rack.map(h=>`<span>Slot ${h.slot+1}: ${esc(h.label)}</span>`).join('')}</div>`:'');
+ $('nozzleSides').hidden=!sides.length&&!rack.length;$('nozzleHint').textContent=sides.length?'These hotends report their size and type themselves; change them on the printer.':"Set this after physically swapping the nozzle, so the printer and slicer know what's fitted. Not while printing.";
  $('nozzleNow').textContent=dia?`${dia} mm · ${NOZZLE_TYPES[type]||type||'type not reported'}`:'Not reported';
  $('nozzleSave').classList.toggle('pending',waiting);$('nozzleSave').disabled=['RUNNING','PAUSE','PREPARE'].includes(p.state)||!p.connected;
  const form=$('nozzleForm');if(form.dataset.printer!==p.name||(!form.contains(document.activeElement)&&!waiting&&form.dataset.dirty!=='1')){form.dataset.printer=p.name;
