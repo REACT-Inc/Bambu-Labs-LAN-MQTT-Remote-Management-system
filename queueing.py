@@ -34,10 +34,14 @@ def options(plate=1, use_ams=False, mapping='', bed='textured_plate'):
         raise ValueError('Plate must be between 1 and 100.')
     if type(use_ams) is not bool:
         raise ValueError('Use AMS must be a boolean.')
-    trays = [int(x.strip()) for x in str(mapping).split(',') if x.strip()]
-    if len(trays) > 32 or any(x < 0 or x > 255 for x in trays):
+    # One entry per project filament: the tray number (AMS unit * 4 + slot), or -1 for a filament the plate doesn't use.
+    try:
+        trays = [int(x.strip()) for x in str(mapping).split(',') if x.strip()]
+    except ValueError:
+        raise ValueError('AMS mapping must be tray numbers separated by commas, for example 0 or 0,-1,2.') from None
+    if len(trays) > 32 or any(x < -1 or x > 255 for x in trays):
         raise ValueError('Invalid AMS mapping.')
-    if use_ams and not trays:
+    if use_ams and not any(x >= 0 for x in trays):
         raise ValueError('Provide an AMS mapping, for example 0 or 0,1.')
     if bed not in ('textured_plate', 'hot_plate', 'cool_plate', 'engineering_plate'):
         raise ValueError('Choose a supported bed type.')
@@ -135,6 +139,12 @@ class Store:
         except sqlite3.IntegrityError:
             raise ValueError('Another job is already active on this printer.')
         return self.get(job_id)
+
+    def move_to_front(self, job_id):
+        """Put a waiting job ahead of the others for its printer (used by Print now, #7)."""
+        with self.db:
+            first = self.db.execute('SELECT COALESCE(MIN(position),0) FROM jobs').fetchone()[0]
+            self.db.execute("UPDATE jobs SET position=? WHERE id=? AND status='queued'", (first - 1, job_id))
 
     def edit(self, job_id, action, author):
         job = self.get(job_id)

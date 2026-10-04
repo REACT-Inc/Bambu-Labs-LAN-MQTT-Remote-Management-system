@@ -197,3 +197,15 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 .tile.pending .tile-target,.fan-row.pending small{color:#ddd2ff}
 /* The drawer body scrolls; its sections must keep their size instead of shrinking (the camera collapsed to 0). */
 .drawer-body>*{flex-shrink:0}
+
+/* Queue a print: plate picker (#7) */
+.plate-picker{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin:4px 0 14px}
+.plate-card{display:grid;justify-items:center;gap:4px;padding:8px;border-radius:10px;background:#111815;border:1px solid var(--line);color:inherit;text-align:center}
+.plate-card img{width:100%;aspect-ratio:1;object-fit:contain;border-radius:6px;background:#0c100e}
+.plate-card .plate-noimg{width:100%;aspect-ratio:1;display:grid;place-items:center;border-radius:6px;background:#0c100e;color:var(--muted);font-size:11px}
+.plate-card strong{font-size:12px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plate-card small{font-size:11px}
+.plate-card.active{border-color:var(--green);box-shadow:0 0 0 1px var(--green) inset}
+.plate-card:disabled{opacity:.45;cursor:not-allowed}
+.plate-fils{display:flex;gap:4px;flex-wrap:wrap;justify-content:center}
+.plate-fils .fil{width:12px;height:12px;border-radius:50%;border:1px solid #fff4;background:#2a322e}

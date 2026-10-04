@@ -127,10 +127,46 @@ $('logout').onclick=async()=>{try{await api('logout',{});showLogin();}catch(e){n
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog($(b.dataset.close)));
 $('queueFilter').onchange=renderJobs;
+// ---- Queue a print (#7): the file is uploaded and checked as soon as it's picked; plates are chosen from cards,
+// the AMS mapping is suggested from the printer's loaded trays, and Print now skips the queue.
+let jobUpload=null,jobPlate=null;
+function resetJobUpload(){jobUpload=null;jobPlate=null;$('jobPlates').hidden=true;$('jobPlates').innerHTML='';$('jobFileNote').textContent='';$('jobAmsHint').textContent='';}
 $('addJob').onclick=()=>{$('jobError').textContent='';$('jobDialog').showModal();};
-$('source').onchange=()=>{$('uploadLabel').hidden=$('source').value!=='upload';$('remoteLabel').hidden=$('source').value!=='remote';};
-$('jobFile').onchange=()=>{if(!$('jobLabel').value&&$('jobFile').files[0])$('jobLabel').value=$('jobFile').files[0].name.slice(0,120);};
-$('jobForm').onsubmit=async e=>{e.preventDefault();$('jobError').textContent='';$('submitJob').disabled=true;try{const data={printer:$('jobPrinter').value,label:$('jobLabel').value,plate:Number($('jobPlate').value),use_ams:$('jobAms').checked,mapping:$('jobMapping').value,bed:$('jobBed').value};if($('source').value==='upload'){const f=$('jobFile').files[0];if(!f)throw new Error('Select a sliced .3mf file.');if(f.size>256*1024*1024)throw new Error('Maximum upload is 256 MiB.');$('submitJob').textContent='Uploading…';const form=new FormData();form.append('file',f);const uploaded=await api('upload',form);data.asset=uploaded.asset;}else data.remote=$('jobRemote').value;await api('jobs',data);$('jobDialog').close();$('jobForm').reset();$('source').onchange();notice('Added to the shared queue.');tab('queue');await refresh();}catch(e){$('jobError').textContent=e.message;}finally{$('submitJob').disabled=false;$('submitJob').textContent='Add to shared queue';}};
+$('source').onchange=()=>{const upload=$('source').value==='upload';$('uploadLabel').hidden=!upload;$('remoteLabel').hidden=upload;$('jobPlateLabel').hidden=upload;
+ $('jobPlates').hidden=!upload||!jobUpload;$('jobFileNote').hidden=!upload;$('jobAmsHint').hidden=!upload;};
+$('jobFile').onchange=async()=>{const f=$('jobFile').files[0];resetJobUpload();$('jobError').textContent='';if(!f)return;
+ if(!$('jobLabel').value)$('jobLabel').value=f.name.replace(/\.gcode\.3mf$|\.3mf$/i,'').slice(0,120);
+ if(f.size>256*1024*1024){$('jobError').textContent='Maximum upload is 256 MiB.';$('jobFile').value='';return;}
+ $('jobFileNote').textContent='Uploading and checking the file…';
+ try{const form=new FormData();form.append('file',f);jobUpload=await api('upload',form);renderPlates();}
+ catch(e){$('jobFileNote').textContent='';$('jobError').textContent=e.message;$('jobFile').value='';}};
+function renderPlates(){const sliced=jobUpload.plates.filter(p=>p.sliced);if(!sliced.some(p=>p.index===jobPlate))jobPlate=sliced[0]?.index;
+ $('jobFileNote').textContent=(jobUpload.model?`Sliced for the ${jobUpload.model}. `:'')+(sliced.length===1?'One sliced plate.':`${sliced.length} sliced plates: choose one.`);
+ $('jobPlates').innerHTML=jobUpload.plates.map(p=>`<button type="button" class="plate-card${p.index===jobPlate?' active':''}" data-plate="${p.index}"${p.sliced?'':' disabled'}>`+
+  (p.thumbnail?`<img alt="" src="/api/uploads/${encodeURIComponent(jobUpload.asset)}/plate/${p.index}">`:'<span class="plate-noimg">No preview</span>')+
+  `<strong>${esc(p.name)}</strong><small>${p.sliced?[fmtMinutes(p.prediction!=null?Math.round(p.prediction/60):null),p.weight!=null?Math.round(p.weight)+' g':''].filter(Boolean).join(' · ')||'Sliced':'Not sliced'}</small>`+
+  `<span class="plate-fils">${(p.filaments||[]).map(f=>`<i class="fil"${f.colour?` data-color="${esc(f.colour)}"`:''} title="${esc(f.type)} ${esc(f.colour)}"></i>`).join('')}</span></button>`).join('');
+ $('jobPlates').hidden=false;applyStyles($('jobPlates'));suggestAms();}
+$('jobPlates').addEventListener('click',e=>{const b=e.target.closest('[data-plate]');if(!b||b.disabled)return;jobPlate=Number(b.dataset.plate);renderPlates();});
+$('jobPrinter').addEventListener('change',()=>{if(jobUpload)suggestAms();});
+async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUpload.asset,printer=$('jobPrinter').value;$('jobAmsHint').textContent='Checking the AMS on that printer…';
+ try{const r=await api(`uploads/${encodeURIComponent(asset)}/suggest?printer=${encodeURIComponent(printer)}&plate=${jobPlate}`,undefined,'GET');
+  if(jobUpload?.asset!==asset||$('jobPrinter').value!==printer)return;
+  $('jobError').textContent=r.model_warning||'';
+  if(r.complete){$('jobAms').checked=true;$('jobMapping').value=r.mapping;}
+  $('jobAmsHint').textContent=r.message+(r.rows.length?' '+r.rows.map(x=>`Filament ${x.filament} (${x.type||'?'}) → ${x.tray_label||'no matching slot'}`).join(' · '):'');}
+ catch(e){$('jobAmsHint').textContent=e.message;}}
+function jobData(){const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value};
+ if($('source').value==='upload'){if(!jobUpload)throw new Error($('jobFile').files[0]?'Wait for the file check to finish.':'Select a sliced .3mf file.');if(!jobPlate)throw new Error('Choose a plate.');data.asset=jobUpload.asset;data.plate=jobPlate;}
+ else{data.remote=$('jobRemote').value;data.plate=Number($('jobPlate').value);}
+ return data;}
+function jobDone(message){$('jobDialog').close();$('jobForm').reset();resetJobUpload();$('source').onchange();notice(message);tab('queue');}
+$('jobForm').onsubmit=async e=>{e.preventDefault();$('jobError').textContent='';$('submitJob').disabled=true;
+ try{await api('jobs',jobData());jobDone('Added to the shared queue.');await refresh();}catch(e){$('jobError').textContent=e.message;}finally{$('submitJob').disabled=false;}};
+$('printNow').onclick=()=>{$('jobError').textContent='';if(!$('jobForm').reportValidity())return;let data;try{data=jobData();}catch(e){$('jobError').textContent=e.message;return;}
+ confirmAction('Print now?',`${data.label} on ${printerLabel(data.printer)}, plate ${data.plate}, straight away. ${data.use_ams?'AMS mapping: '+data.mapping+'.':'External spool.'}`,
+  'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',
+  async()=>{await api('jobs',{...data,print_now:true,confirmed:true});jobDone(`Starting on ${printerLabel(data.printer)}.`);});};
 $('confirmForm').onsubmit=async e=>{e.preventDefault();const callback=pendingConfirmation;pendingConfirmation=null;$('confirmDialog').close();if(callback){try{await callback();await refresh();}catch(e){notice(e.message);}}};
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b){const card=e.target.closest('.printer-card[data-printer]');if(card)openPrinter(card.dataset.printer);return}const {action,printer,job,outcome}=b.dataset;try{
  if(action==='files'){await downloadFileListing(printer,b);return}

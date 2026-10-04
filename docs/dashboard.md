@@ -24,7 +24,7 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
   - **Buttons:** only the ones that apply right now: **Pause** and **Stop** (both ask for confirmation), **Resume**, the chamber **light** 💡, and **N queued →** (opens that printer's queue).
   - **Waiting for the printer:** a button you've clicked **pulses purple** until the printer reports the result, then shows the real state. For example, the light goes solid amber when it's on. Purple is only used for "waiting". If the printer doesn't report the change in time (10 s for the light, 20 s for other controls), the button goes back and a message says so.
   - **Opening a printer:** click anywhere else on the card (or focus it and press Enter or Space).
-- **+ Queue a print:** at the top right. See [Print queue](print-queue.md).
+- **+ Queue a print:** at the top right. Pick a file and its plates appear as cards (thumbnail, time, weight, colours), the AMS mapping is suggested from the printer's loaded trays, and **Print now** starts it straight away instead of queuing. See [Print queue](print-queue.md#adding-a-job).
 - **Demo mode:** a **DEMO MODE** badge shows when no real printers are being controlled.
 
 ## Printer details

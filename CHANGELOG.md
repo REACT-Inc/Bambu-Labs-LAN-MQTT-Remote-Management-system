@@ -16,6 +16,11 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Your limits:** a printer's nozzle and bed limits can be overridden with `"limits"` in config.json.
   - **Camera hint:** a printer without a camera now gets a hint naming the right `camera_type` for its model.
   - **No change for tested printers:** the H2D, A1 and A1 mini behave exactly as before.
+- **Better Queue a print dialog (#7, dashboard).**
+  - **Checked on pick:** the `.3mf` is read as soon as you choose it. An unsliced project gets "slice it and export the plate sliced file", and a file sliced for a different printer model is flagged and refused.
+  - **Plate picker:** cards for each plate with its thumbnail, name, print time, weight and filament colours, instead of typing a plate number.
+  - **AMS suggestion:** the mapping is filled in by matching each filament to a loaded slot of the same material and the closest colour. Mappings can use `-1` for filaments a plate doesn't use, as Bambu Studio does.
+  - **Print now:** prints straight away on an idle printer without waiting in the queue, after the usual confirmation. If it can't start, nothing is left in the queue.
 
 ### Changed
 - **Swapmod is only offered for A-series printers (#17).**
