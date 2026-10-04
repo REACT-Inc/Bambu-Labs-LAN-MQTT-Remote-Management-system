@@ -190,3 +190,21 @@ class WorkerPermissionTests(unittest.TestCase):
             worker.run([sys.executable,'-c',script])
         self.assertIn('exit 3',err.getvalue());self.assertIn('https://***@pypi.example',err.getvalue())
         self.assertNotIn('secret',err.getvalue())
+
+
+class NewFolderTests(unittest.TestCase):
+    """A release that adds a new package folder must still pass an installed updater's check (1.6.0 rejected 1.6.1)."""
+    def add(self,name,data=b'# new\n'):
+        def change(manifest,files):
+            files[name]=data;manifest['files'][name]=hashlib.sha256(data).hexdigest()
+        return package(change=change)
+
+    def test_new_package_folder_accepted(self):
+        self.assertEqual(inspect_package(io.BytesIO(self.add('newFeature/sub_pkg/module.py')))['version'],'test.1')
+        self.assertEqual(inspect_package(io.BytesIO(self.add('newFeature/GUIDE.md',b'# Guide\n')))['version'],'test.1')
+
+    def test_unsafe_or_unexpected_paths_still_refused(self):
+        from Updater.update_package import allowed_path
+        for name in ('newFeature/run.sh','newFeature/.hidden/x.py','tests/test_x.py','static/x.py','9bad/x.py','a-b/x.py','a/b/c/d/e.py','newFeature/data.json'):
+            self.assertFalse(allowed_path(name),name)
+        with self.assertRaisesRegex(ValueError,'Invalid runtime file'):inspect_package(io.BytesIO(self.add('newFeature/run.sh',b'echo\n')))

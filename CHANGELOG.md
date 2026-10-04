@@ -5,6 +5,9 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased (1.6.2)
 
 ### Fixed
+- **1.6.0 couldn't install 1.6.1 from the dashboard or GitHub ("Invalid runtime file in manifest").** The update check only accepted files in a fixed list of folders, so the new `failureDetection/` folder made it refuse the whole release. Nothing was queued, so the panel never moved on.
+  - **The fix:** the check now accepts `.py`/`.md` files in any plain package folder. Paths stay restricted: no scripts, hidden folders, `tests/`, or odd names.
+  - **Existing Pis:** the check is also root-installed, so Pis on 1.6.0 need one manual `sudo bash Updater/update.sh` to get past this.
 - **Dashboard/GitHub updates that rolled back with "Permission denied".** The updater service ran with `UMask=0077`, so the new release's Python environment was readable only by root, and the dashboard service couldn't start it. The update then rolled back.
   - **The fix:** the updater now sets its own umask and makes the whole new release readable by the service before switching to it. New installs get `UMask=0022`.
   - **Clearer errors:** a failed `venv`/`pip` step now logs its last error lines to `sudo journalctl -u pm-web-update`, with credentials in URLs removed. The dashboard still only shows a short message.
