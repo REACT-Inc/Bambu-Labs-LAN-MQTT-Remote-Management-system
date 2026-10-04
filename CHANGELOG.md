@@ -11,6 +11,10 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **`/printer`:** shows each nozzle's temperature, hotend and loaded filament, and the hotend rack.
 - **Left/right nozzle indicators (#5).** The dashboard's **Filament** section and Discord `/filaments` show which nozzle each AMS and external spool feeds, what each nozzle has loaded and which nozzle is in use. Both external spools are listed and editable (the left one uses `ams_id 254`).
 - Single-nozzle printers look and behave as before.
+- **Remote desktop for MeshCentral laptops (#61, dashboard).** Each online laptop whose agent supports it has a **🖥 Remote desktop** button in **Devices**.
+  - **What it opens:** MeshCentral's own desktop viewer for that laptop, in a new tab. You sign in to MeshCentral with your own account; the dashboard's token never reaches the browser.
+  - **Activity:** each session is recorded.
+  - **Turning it off:** untick it in the MeshCentral settings.
 
 ## 1.6.0-beta.1
 
