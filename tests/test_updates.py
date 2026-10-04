@@ -165,3 +165,28 @@ class UpdateHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('token',result)
         response=await self.client.post('/api/github/install',json={},headers=headers)
         self.assertEqual(response.status,400)
+
+
+class WorkerPermissionTests(unittest.TestCase):
+    """A venv built under the unit's old UMask=0077 was root-only after the chown, so the new release couldn't start."""
+    def test_release_made_readable_and_runnable_for_the_service(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)/'release';(root/'venv/bin').mkdir(parents=True);(root/'venv/lib').mkdir()
+            python=root/'venv/bin/python';python.write_text('#!/bin/sh\n');os.chmod(python,0o700)
+            module=root/'venv/lib/x.py';module.write_text('');os.chmod(module,0o600)
+            (root/'venv/bin/python3').symlink_to('python')
+            for p in (root/'venv/bin',root/'venv/lib',root/'venv',root):os.chmod(p,0o700)
+            worker.readable(root)
+            self.assertEqual(os.stat(python).st_mode&0o777,0o755)
+            self.assertEqual(os.stat(module).st_mode&0o777,0o644)
+            self.assertEqual(os.stat(root/'venv/bin').st_mode&0o777,0o755)
+            self.assertEqual(os.stat(root).st_mode&0o777,0o755)
+
+    def test_failed_step_logs_its_error_without_credentials(self):
+        import contextlib,subprocess,sys
+        err=io.StringIO()
+        script='import sys;print("ERROR: https://user:secret@pypi.example/simple failed",file=sys.stderr);sys.exit(3)'
+        with contextlib.redirect_stderr(err),self.assertRaises(subprocess.CalledProcessError):
+            worker.run([sys.executable,'-c',script])
+        self.assertIn('exit 3',err.getvalue());self.assertIn('https://***@pypi.example',err.getvalue())
+        self.assertNotIn('secret',err.getvalue())

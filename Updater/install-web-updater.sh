@@ -16,7 +16,7 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/usr/bin/python3 -I /usr/local/lib/pm-updater/worker.py
 TimeoutStartSec=30min
-UMask=0077
+UMask=0022
 [Install]
 WantedBy=multi-user.target
 UNIT

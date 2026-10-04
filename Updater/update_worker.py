@@ -27,8 +27,24 @@ def status(identity,phase,message):
 
 
 def run(args,timeout=120):
-    # Detailed pip output can contain credentials; keep it out of the dashboard.
-    subprocess.run(args,check=True,timeout=timeout,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    # Detailed pip output can contain credentials: keep it out of the dashboard, and log only the last lines of a
+    # failure to the journal (sudo journalctl -u pm-web-update), with any user:password@ in URLs removed.
+    result=subprocess.run(args,timeout=timeout,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+    if result.returncode:
+        tail=result.stderr.decode(errors='replace').strip().splitlines()[-15:]
+        print(f'{Path(args[0]).name} failed with exit {result.returncode}:',file=sys.stderr)
+        for line in tail:print('  '+re.sub(r'://[^/@\s]+@','://***@',line)[:500],file=sys.stderr)
+        raise subprocess.CalledProcessError(result.returncode,args[:1])
+
+
+def readable(root):
+    """Let the service user read (and run) everything in a release, whatever umask the venv/pip steps ran with."""
+    for base,dirs,files in os.walk(root,followlinks=False):
+        for path in [Path(base),*(Path(base)/name for name in dirs+files)]:
+            info=os.lstat(path)
+            if stat.S_ISLNK(info.st_mode):continue
+            executable=stat.S_ISDIR(info.st_mode) or info.st_mode&stat.S_IXUSR
+            os.chmod(path,stat.S_IMODE(info.st_mode)|(0o755 if executable else 0o644))
 
 
 def service(action):run(['/usr/bin/systemctl',action,SERVICE])
@@ -145,6 +161,7 @@ def install(identity,package):
     run(['/usr/sbin/runuser','-u','printermanager','--',str(venv/'bin/python'),'-m','pip','install','--disable-pip-version-check','--no-cache-dir','-r',str(release/'requirements.txt')],1200)
     for base,dirs,files in os.walk(venv,followlinks=False):
         for name in ['.',*dirs,*files]:os.chown(Path(base)/name,0,0,follow_symlinks=False)
+    readable(release)
     status(identity,'backing_up','Stopping management briefly and backing up settings and queue data.')
     service('stop')
     backup=STATE/'backups'/identity;backup.mkdir(parents=True,mode=0o700)
@@ -168,6 +185,9 @@ def install(identity,package):
 
 def main():
     if os.geteuid()!=0:raise SystemExit('Root updater service only.')
+    # The release, its venv and the files pip installs must be readable by the service user. The unit's UMask=0077
+    # (still on Pis installed before this fix) made the venv root-only, so the new release failed to start and rolled back.
+    os.umask(0o022)
     STATE.mkdir(mode=0o755,exist_ok=True);RELEASES.mkdir(mode=0o755,exist_ok=True)
     with (STATE/'lock').open('w') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
