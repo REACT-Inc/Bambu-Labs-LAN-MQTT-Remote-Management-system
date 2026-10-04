@@ -2,6 +2,12 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.6.2)
+
+### Fixed
+- **AI failure detection: every frame failed with "array is not writeable" (#70).** HailoRT 4.23 refuses the read-only image array the helper passed it; the picture is now copied into a writeable buffer. Found on a Pi 5 with a Hailo-8 AI HAT+ on Raspberry Pi OS Trixie.
+- **AI failure detection: "Cannot create log file hailort.log".** The helper now runs from the temp folder, so HailoRT can write its log.
+
 ## 1.6.1-beta.1
 
 Built on 1.6.0-beta.1. Adds multi-hotend support for dual-nozzle printers (#68, #5), remote desktop for MeshCentral laptops (#61) and AI print-failure detection with the Raspberry Pi 5 AI HAT (#70).
