@@ -87,22 +87,23 @@ Discord `/move axis:X millimeters:1`, or the **Move axes** pad in the dashboard'
 **In the dashboard:** the pad is locked until you tick *The printer is homed, the travel path is clear and I am watching it*. It stays unlocked until the panel closes. After each move the buttons count down the 3-second gap before the next one.
 
 **Before moving:**
-- **Home the printer** from its own screen.
+- **Home the printer** with **⌂ Home**, `/home`, or from its own screen.
 - **Check the nozzle, bed and travel path are clear.**
-- **Watch the printer while it moves.** The app can't see whether the printer is homed or whether anything is in the way.
+- **Watch the printer while it moves.** The app can't see whether anything is in the way.
 
 The app refuses to move unless all of these hold:
 - the printer is IDLE or FINISH, connected, and without errors
 - the last telemetry is under 15 seconds old
 - no queue job is active or waiting for review
 - at least 3 seconds have passed since the previous move
+- the printer doesn't report the axis as **not homed**. The printer ignores moves on an axis that isn't homed, for example after it released its motors while idle. The app now says so (and the dashboard disables those buttons) instead of sending a move that does nothing, the same as Bambu Studio. Press **⌂ Home** first.
 
 **Distances depend on the printer:**
 
 | Printer | How it's moved | Allowed distances |
 |---|---|---|
 | Newer firmware that reports MQTT axis control (e.g. H2D) | Bambu's `xyz_ctrl` command, the same as Bambu Studio | X/Y: **±1 or ±10 mm**; Z: **±1 mm** |
-| Other printers (e.g. A1 / A1 mini) | Relative G-code, wrapped like Bambu Studio (soft endstops on, movement mode restored afterwards) | X/Y: ±0.1–10 mm; Z: ±0.1–1 mm |
+| Other printers (e.g. A1 / A1 mini) | Relative G-code, byte for byte what Bambu Studio sends (soft endstops on, movement mode restored afterwards, X/Y at F3000 and Z at F900) | X/Y: ±0.1–10 mm; Z: ±0.1–1 mm |
 
 - **Directions** follow printer coordinates: +Z doesn't necessarily mean the bed moves up.
 - **What it never does:** extrude, home automatically, change motor current, or bypass endstops.

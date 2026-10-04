@@ -11,6 +11,9 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Starting:** the new job still needs the normal start confirmation.
   - **Files on the printer:** for jobs whose file is on the original printer's storage, the file is copied to the Pi when you send it, and uploaded to the new printer at start.
 
+### Fixed
+- **Movement commands that didn't move the printer (#1).** The printer ignores jogs on an axis it reports as not homed (its `home_flag`), for example after it released its motors while idle, so moves were accepted but nothing happened. Like Bambu Studio, the app now reads that flag and asks you to press **⌂ Home** / `/home` first. The dashboard disables the buttons for those axes and explains why. The G-code jog now matches Bambu Studio byte for byte, including its speeds (X/Y at F3000, Z at F900).
+
 ## 1.5.0-beta.1
 
 Built on 1.4.0-beta.1. Makes Discord `/printer` on the H2D much lighter on the Pi (#54).
@@ -23,6 +26,7 @@ Built on 1.4.0-beta.1. Makes Discord `/printer` on the H2D much lighter on the P
   - **Live view is lighter too:** it runs at lower priority with at most 2 decoder threads.
   - **Reply first:** `/printer` sends the status card straight away and adds the picture when it arrives, instead of waiting up to 25 seconds (part of #44).
 
+## 1.4.0-beta.1
 
 Built on 1.3.0-beta.1. Fixes the dashboard and printer controls becoming unresponsive on 1.3.0-beta.1 (#40).
 
