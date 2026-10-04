@@ -13,7 +13,6 @@ from Updater.github_updates import GitHubUpdates
 from printer_errors import describe as describe_error
 from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits
-import job_transfer
 from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
 from queueing import MAX_UPLOAD, options, validate_archive
@@ -71,7 +70,6 @@ class Dashboard:
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
             web.get('/api/state', self.state), web.post('/api/upload', self.upload),
             web.post('/api/jobs', self.add_job), web.post('/api/jobs/{id}/{action}', self.job_action),
-            web.get('/api/jobs/{id}/targets', self.job_targets),
             web.post('/api/printers/{name}/{action}', self.control),
             web.get('/api/camera/{name}', self.camera), web.post('/api/settings', self.settings),
             web.get('/api/permissions', self.permissions), web.post('/api/permissions', self.save_permissions),
@@ -167,7 +165,7 @@ class Dashboard:
             state,error,data,connected=self.core.state_data(name)
             printers.append(dict(plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
-        for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
+        for j in jobs: j.pop('asset',None)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
             discord=self.core.bot.is_ready(), printers=printers,jobs=jobs,events=self.store.events(),
             settings={**self.core.settings, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)]},
@@ -222,26 +220,8 @@ class Dashboard:
         elif action=='resolve':
             self.engine.resolve(job_id,data.get('outcome'),data.get('confirmed'),'web administrator')
         elif action=='reprint': self.copy_job(job_id,'web administrator')
-        elif action=='sendto':
-            # Send a finished print to another printer's queue (#57). It still needs the normal start confirmation.
-            # A file that's only on the original printer is copied to the Pi first, then uploaded to the new one at start.
-            printer,checked=data.get('printer'),data.get('checked')
-            job=job_transfer.validate(self.core,self.store,job_id,printer,checked)
-            asset=await asyncio.to_thread(job_transfer.fetch,self.core,job,self.uploads) if job_transfer.needs_fetch(self.core,job) else None
-            try:copy=job_transfer.send(self.core,self.store,job_id,printer,data.get('use_ams',False),data.get('mapping',''),checked,'web administrator',asset)
-            except Exception:
-                if asset:Path(asset).unlink(missing_ok=True)
-                raise
-            return web.json_response({'ok':True,'id':copy['id'],'copied':bool(asset)})
         else: self.store.edit(job_id,action,'web administrator')
         return web.json_response({'ok':True})
-
-    async def job_targets(self,request):
-        job=self.store.get(request.match_info['id'])
-        sliced,how=await asyncio.to_thread(job_transfer.file_model,self.core,job)
-        targets=await asyncio.to_thread(job_transfer.targets,self.core,job)
-        return web.json_response({'job':job['id'],'from':job['printer'],'sliced_for':job_transfer.label(sliced) if sliced else '','how':how,
-            'remote':not job.get('asset'),'targets':targets})
 
     async def control(self,request):
         name=request.match_info['name'];action=request.match_info['action'];data=await request.json()
