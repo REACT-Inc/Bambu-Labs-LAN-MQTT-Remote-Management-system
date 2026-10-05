@@ -62,7 +62,7 @@ def settings_for(config):
     s['threshold'] = min(0.99, max(0.05, float(s['threshold'])))
     # How often to look: "auto" adapts to how busy the Pi is (Throttle), or a fixed number of seconds.
     # The AI HAT (.hef) runs the model itself, so it may look more often than the CPU (.onnx).
-    hat = str(s['model']).lower().endswith('.hef')
+    hat = s['hat'] = str(s['model']).lower().endswith('.hef')
     floor = 5 if hat else 10
     s['min_interval'] = max(floor, int(s['min_interval'] if s['min_interval'] is not None else floor))
     s['max_interval'] = max(s['min_interval'], min(300, int(s['max_interval'])))
@@ -348,12 +348,15 @@ class Throttle:
     dashboard and printer connections are being starved) and how long the round took, then:
     - busy (load over 0.75 per core, or the loop woke over half a second late): 1.5x longer, up to max_interval;
     - quiet (load under 0.5 per core): 20% shorter, down to min_interval (10 s on the CPU, 5 s with the AI HAT);
-    - never more than half the time spent checking (the interval is at least twice the round's length).
+    - on the CPU never more than half the time spent checking (the interval is at least twice the round's length);
+      with the AI HAT it starts at 5 s and the next round may start as soon as the last one is done.
+    All printers are checked at the same time in each round.
     A fixed "interval" in config.json turns this off."""
 
     def __init__(self, settings, load=None):
         self.settings = settings
-        self.current = settings['fixed_interval'] or START_INTERVAL
+        # The AI HAT starts at its fastest pace and only backs off when the Pi gets busy; the CPU starts calmly.
+        self.current = settings['fixed_interval'] or (settings['min_interval'] if settings.get('hat') else START_INTERVAL)
         self.load = load or self.system_load
         self.reason = 'starting'
 
@@ -378,8 +381,11 @@ class Throttle:
             self.reason = f'Pi quiet (load {load:.2f} per core)'
         else:
             self.reason = f'Pi moderately busy (load {load:.2f} per core)'
-        self.current = max(self.settings['min_interval'], 2 * cost, min(self.settings['max_interval'], self.current))
-        self.current = min(self.current, max(self.settings['max_interval'], 2 * cost))
+        # On the CPU the model itself loads the Pi, so at most half the time is spent checking. With the AI HAT a
+        # round is mostly waiting for cameras, so the next round may start as soon as this one is done.
+        busy = (1 if self.settings.get('hat') else 2) * cost
+        self.current = max(self.settings['min_interval'], busy, min(self.settings['max_interval'], self.current))
+        self.current = min(self.current, max(self.settings['max_interval'], busy))
         self.settings['interval'] = self.current   # the snapshot freshness and the docs read this
         return self.current
 
@@ -567,7 +573,7 @@ class FailureMonitor:
         self.settings = settings_for(getattr(core, 'CONFIG', {}))
         self.backend = backend or (HailoBackend(self.settings) if self.settings['enabled'] else None)
         self.judges, self.status, self.task, self.pause_poll = {}, {}, None, 1
-        self.checking = asyncio.Lock()   # the background loop and "Check AI now" never judge at the same moment
+        self.locks = {}   # per printer: the background loop and "Check AI now" never judge one printer at the same moment
         self.throttle = Throttle(self.settings)
         self.geometry = GeometryCheck(core, engine, self.settings)
         self.reprints = AutoReprint(core, engine, self.settings['auto_reprint'], python=self.settings['python'], clock=clock)
@@ -668,7 +674,7 @@ class FailureMonitor:
         if state != 'RUNNING' or not connected:
             raise ValueError(f"Check AI now works while a print is running (the printer reports {state or 'unknown'}). "
                              'Use Test AI now to see what the AI makes of the camera any time.')
-        async with self.checking:
+        async with self.lock(name):
             result = await self.check(name, on_request=True)
         if not result:
             raise ValueError(self.status.get(name, {}).get('message') or 'The check could not run.')
@@ -847,14 +853,27 @@ class FailureMonitor:
                 return False
             await asyncio.sleep(self.pause_poll)
 
+    def lock(self, name):
+        return self.locks.setdefault(name, asyncio.Lock())
+
+    async def locked_check(self, name):
+        async with self.lock(name):
+            return await self.check(name)
+
     async def run(self):
         lateness = 0.0
         while True:
             started = time.monotonic()
             try:
-                for name in self.core.names():
-                    async with self.checking:
-                        await self.check(name)
+                # Every printer at once: their cameras are fetched in parallel (the model itself runs one picture at a
+                # time), so a round takes about as long as the slowest camera, however many printers are printing.
+                names = list(self.core.names())
+                results = await asyncio.gather(*(self.locked_check(name) for name in names), return_exceptions=True)
+                for name, result in zip(names, results):
+                    if isinstance(result, asyncio.CancelledError):
+                        raise result
+                    if isinstance(result, Exception):
+                        log.error('Failure detection error for %s', name, exc_info=result)
                 await self.reprints.tick()
                 await self.models.check()   # once a day: a newer model from the ai-model release
             except asyncio.CancelledError:
