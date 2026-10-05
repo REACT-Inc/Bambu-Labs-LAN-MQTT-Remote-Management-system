@@ -7,6 +7,8 @@ The Pi can watch the printer cameras with an AI model and warn you, or pause the
 
 The app picks the place from the model file's extension.
 
+- [Automatic setup](#automatic-setup)
+- [Publishing a model for every Pi](#publishing-a-model-for-every-pi)
 - [How it decides](#how-it-decides)
 - [What happens on a failure](#what-happens-on-a-failure)
 - [Running on the CPU (.onnx)](#running-on-the-cpu-onnx)
@@ -15,6 +17,45 @@ The app picks the place from the model file's extension.
 - [config.json](#configjson)
 - [Dashboard and Discord](#dashboard-and-discord)
 - [Troubleshooting](#troubleshooting)
+
+## Automatic setup
+
+`install.sh` and `Updater/update.sh` set this up by themselves when a printer has a camera (`camera_type` `rtsp` or `jpeg_tcp`). They run `failureDetection/setup_ai.py`, which repeats everything that was first done by hand on the team Pi:
+
+1. **CPU packages:** installs OpenCV, numpy and Pillow for the system Python (`python3-opencv`, `python3-numpy`, `python3-pil`).
+2. **AI HAT, when one is on PCIe** (Hailo, vendor `0x1e60`):
+   - installs `hailo-all` (or `hailo-h10-all` for a Hailo-10H), `dkms` and the kernel headers;
+   - if `/dev/hailo0` is missing (the driver wasn't built for the running kernel, as happened on Raspberry Pi OS Trixie), reinstalls `hailort-pcie-driver` so it's rebuilt;
+   - if the driver only loads after a reboot, says **REBOOT RECOMMENDED** and uses the CPU until then.
+3. **Model:** downloads it from the repository's [`ai-model` release](#publishing-a-model-for-every-pi) into `/opt/3d-printer-management-models/`, checked against GitHub's SHA-256.
+   - It picks `print_failure_<chip>.hef` for a working AI HAT, otherwise `print_failure.onnx`.
+   - **A model you copied there yourself is never replaced.** To go back to the release model, delete yours and run the setup again.
+4. **Test:** pushes one test picture through the real helper as the service user. A model that doesn't run is never enabled.
+5. **Config:** adds a `failure_detection` section to `config.json`, **only if there isn't one**, with `"action": "notify"`. Your own settings are never changed. The service is then restarted.
+
+It never stops an install: each step reports and carries on.
+
+**Running it by hand,** for example after adding a camera, fitting an AI HAT or rebooting:
+
+```bash
+sudo /usr/bin/python3 /opt/3d-printer-management/failureDetection/setup_ai.py --restart
+```
+
+**Skipping it:** set `PM_AI=0`. **Using another repository's models:** set `PM_AI_REPO=owner/name`. By default it follows **Settings → GitHub releases**, including a private token.
+
+Updates installed from the dashboard don't run it, because they never run scripts as root. The next `update.sh` or install does.
+
+## Publishing a model for every Pi
+
+Every Pi fetches its model from a GitHub release tagged **`ai-model`** in the repository it updates from. The dashboard's updater ignores this tag, because it isn't a version number. Attach:
+
+| File | |
+|---|---|
+| `print_failure.onnx` | YOLOv8 export (`yolo export model=best.pt format=onnx opset=11`). Runs on the CPU. |
+| `print_failure.json` | Optional: `{"classes": [...], "labels": [...], "threshold": 0.4, "input_size": 640}`. Without it, the classes default to `spaghetti, stringing, warping` with `spaghetti, warping` counted and threshold 0.4. |
+| `print_failure_hailo8.hef` / `_hailo8l` / `_hailo10h` | Optional: the same model compiled for an AI HAT chip. |
+
+To publish a better model, replace the asset. Pis that downloaded the old one get the new one on their next update; Pis with a model copied in by hand keep theirs. If the dataset's licence asks for credit (CC BY 4.0 does), give it in the release notes.
 
 ## How it decides
 
