@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.7.1)
+## 1.7.1-beta.1
+
+Built on 1.7.0-beta.1. Adds **Test AI now** for checking the AI on demand, and makes training-picture collection much denser and no longer silent when it can't save.
 
 ### Added
 - **Test AI now.** A button in each printer's AI panel runs the AI on a fresh camera picture at any time, printing or not.
