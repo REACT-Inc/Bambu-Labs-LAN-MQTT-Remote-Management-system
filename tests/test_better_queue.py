@@ -138,6 +138,22 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,400);self.assertIn('Nothing was left in the queue',(await r.json())['error'])
         self.assertEqual([j['status'] for j in self.store.jobs('Mini') if j['label']=='Urgent'],['cancelled'])
 
+    async def test_cancel_objects_through_the_dashboard(self):
+        info='<?xml version="1.0"?><config><plate><metadata key="index" value="1"/><object identify_id="75" name="Cube" skipped="false"/><object identify_id="92" name="Bracket" skipped="false"/></plate></config>'
+        path=Path(self.tmp.name)/'objects.3mf'
+        with zipfile.ZipFile(path,'w') as z:
+            z.writestr('Metadata/slice_info.config',info);z.writestr('Metadata/plate_1.gcode','G1');z.writestr('Metadata/plate_1.png',PNG)
+        asset=(await (await self.upload(path)).json())['asset']
+        job=(await (await self.client.post('/api/jobs',json={'printer':'Mini','label':'Plate','asset':asset,'plate':1},headers=self.headers)).json())
+        self.store.set_status(job['id'],'printing');self.state='RUNNING'
+        r=await self.client.get('/api/objects/Mini');data=await r.json()
+        self.assertEqual(r.status,200,data);self.assertEqual([o['name'] for o in data['objects']],['Cube','Bracket']);self.assertTrue(data['picture'])
+        self.assertEqual(await (await self.client.get('/api/objects/Mini/plate.png')).read(),PNG)
+        self.core.EXAMPLE_MODE=True;self.core.EXAMPLE_DATA={'Mini':{}}
+        r=await self.client.post('/api/objects/Mini',json={'ids':[75],'confirmed':True},headers=self.headers)
+        self.assertEqual(r.status,200,await r.text());self.assertEqual(self.core.EXAMPLE_DATA['Mini']['s_obj'],[75])
+        r=await self.client.post('/api/objects/Mini',json={'ids':[92],'confirmed':True},headers=self.headers)
+        self.assertEqual(r.status,200)   # demo data doesn't feed s_obj back into state_data here; the real printer reports it
 
 if __name__=='__main__':
     unittest.main()

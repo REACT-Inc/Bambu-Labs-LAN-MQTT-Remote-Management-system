@@ -7,6 +7,7 @@ You can change temperatures, speed, fans and lights, and jog the axes, from the 
 In demo mode, controls only change the simulated data.
 
 - [Pause, resume, stop and light](#pause-resume-stop-and-light)
+- [Cancelling single objects](#cancelling-single-objects)
 - [Temperatures](#temperatures)
 - [Chamber heating (H2D)](#chamber-heating-h2d)
 - [Print speed](#print-speed)
@@ -30,6 +31,23 @@ In demo mode, controls only change the simulated data.
 - **After the print command may have been sent:** the job becomes *needs review*. See [Print queue](print-queue.md#when-a-job-needs-review).
 
 Light control uses the standard `chamber_light` command. Whether it works depends on the model and firmware.
+
+## Cancelling single objects
+
+Like Bambu Studio and Bambu Handy, you can stop printing one or more objects on the plate while the rest carries on, for example when one part has come loose.
+
+1. **Open the printer's panel** while it's printing. **Objects on this plate** lists the plate's objects next to the plate preview. Copies of the same model are numbered, like *Cube #1* and *Cube #2*.
+2. **Choose and confirm:** tick the objects to stop, then press **Cancel N objects…** and confirm.
+
+**What happens:**
+- The printer skips them from the next layer, and they show as *(cancelled)*. This can't be undone for that print.
+- At least one object has to keep printing; to cancel everything, use **Stop**.
+- Cancelling works while the print is running or paused.
+
+**Limits:**
+- **Only prints started from the queue or Print now:** the app needs the print file to know the objects. Prints started from Bambu Studio or the printer's screen aren't covered.
+- **The file must list its objects:** recent Bambu Studio versions write them into the sliced file.
+- **Command used:** Bambu Studio's `skip_objects`, with the full list of skipped objects. Older firmware may refuse it; a refusal is shown in Activity and posted to Discord.
 
 ## Temperatures
 
