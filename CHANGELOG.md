@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.7.2)
+## 1.7.2-beta.1
+
+Built on 1.7.1-beta.1. Puts the AI HAT to work: every printing printer is checked every 5 seconds, sensitivity can be changed per printer, flickering failures add up, the AI zooms in on suspicious spots, and new models install safely with automatic rollback.
 
 ### Added
 - **Check AI now.** A button in each printer's AI panel runs a real check of a printing printer straight away.
