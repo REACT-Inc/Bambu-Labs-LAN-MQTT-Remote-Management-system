@@ -207,10 +207,14 @@ class Dashboard:
             if not info['sliced']:
                 raise ValueError("This .3mf isn't sliced: it has no plate G-code. In Bambu Studio, slice it and use "
                                  "File → Export → Export plate sliced file (or Export all sliced file), then upload that.")
+            # Keep the original name next to the upload, so the printer gets 'Bracket.gcode.3mf' rather than pm_<id>.
+            # Some clients percent-encode the name in the form data (Bracket%20v2.gcode.3mf); decode that.
+            original=Path(__import__('urllib.parse').parse.unquote(part.filename).replace('\\','/')).name[:200]
+            path.with_suffix('.name').write_text(original)
             return web.json_response({'asset':token,'filename':Path(part.filename).name,'plates':info['plates'],
                 'model':job_transfer.label(info['model']) if info['model'] else '','model_key':info['model']})
         except BaseException:
-            path.unlink(missing_ok=True);raise
+            path.unlink(missing_ok=True);path.with_suffix('.name').unlink(missing_ok=True);raise
 
     def upload_path(self,asset):
         if not __import__('re').fullmatch('[0-9a-f]{32}',str(asset)): raise ValueError('Invalid upload.')
@@ -254,6 +258,8 @@ class Dashboard:
             sliced,model=job_transfer.sliced_for(path),job_transfer.printer_model(self.core,printer)
             if sliced and model and sliced!=model:
                 raise ValueError(f'This file was sliced for the {job_transfer.label(sliced)}, not the {job_transfer.label(model)}. Re-slice it for {printer}.')
+            try:remote=Path(path).with_suffix('.name').read_text().strip()   # the uploaded file's own name
+            except OSError:remote=''
         return self.store.add(printer,str(data.get('label','')),path,remote,opts,author,self.core.EXAMPLE_MODE)
 
     async def add_job(self,request):

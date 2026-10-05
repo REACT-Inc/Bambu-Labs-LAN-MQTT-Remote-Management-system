@@ -85,7 +85,7 @@ class RemoteFileTests(unittest.TestCase):
         path=job_transfer.fetch(self.core,job,self.uploads,download)
         self.assertEqual(calls,[('Mini 1','cache/part.gcode.3mf')]);self.assertTrue(Path(path).is_file())
         copy=job_transfer.send(self.core,self.store,job['id'],'Mini 2',False,'',None,'x',asset=path)
-        self.assertEqual((copy['printer'],copy['asset'],copy['remote']),('Mini 2',path,f"pm_{copy['id']}.gcode.3mf"))  # uploaded at start
+        self.assertEqual((copy['printer'],copy['asset'],copy['remote']),('Mini 2',path,'part.gcode.3mf'))  # uploaded at start, under the original file's name
         self.assertIn('file copied from that printer',self.store.events()[0]['detail'])
 
     def test_the_real_file_is_checked_after_copying(self):

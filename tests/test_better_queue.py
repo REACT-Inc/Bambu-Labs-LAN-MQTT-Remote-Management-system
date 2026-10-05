@@ -101,7 +101,8 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get('/api/uploads/../plate/1')).status,404)
         r=await self.upload(make_3mf(Path(self.tmp.name)/'raw.3mf',plates=((1,'x',False),)))
         self.assertEqual(r.status,400);self.assertIn("isn't sliced",(await r.json())['error'])
-        self.assertEqual(len(list((Path(self.tmp.name)/'uploads').iterdir())),1)       # the refused upload was deleted
+        self.assertEqual(len(list((Path(self.tmp.name)/'uploads').glob('*.3mf'))),1)    # the refused upload was deleted
+        self.assertEqual(len(list((Path(self.tmp.name)/'uploads').glob('*.name'))),1)   # and its name file
 
     async def test_suggestion_and_model_check(self):
         asset=(await (await self.upload(make_3mf(Path(self.tmp.name)/'part.3mf'))).json())['asset']
@@ -137,6 +138,38 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/api/jobs',json={'printer':'Mini','label':'Urgent','asset':asset,'plate':1,'print_now':True,'confirmed':True},headers=self.headers)
         self.assertEqual(r.status,400);self.assertIn('Nothing was left in the queue',(await r.json())['error'])
         self.assertEqual([j['status'] for j in self.store.jobs('Mini') if j['label']=='Urgent'],['cancelled'])
+
+    async def test_uploaded_file_keeps_its_name_on_the_printer(self):
+        asset=(await (await self.upload(make_3mf(Path(self.tmp.name)/'Bracket v2.gcode.3mf'))).json())['asset']
+        body={'printer':'Mini','label':'Bracket','asset':asset,'plate':1}
+        first=await (await self.client.post('/api/jobs',json=body,headers=self.headers)).json()
+        self.assertEqual(self.store.get(first['id'])['remote'],'Bracket_v2.gcode.3mf')
+        # A second waiting job with the same file gets its own name, so neither can swap the other's file.
+        second=await (await self.client.post('/api/jobs',json=body,headers=self.headers)).json()
+        self.assertEqual(self.store.get(second['id'])['remote'],f"Bracket_v2-{second['id'][:6]}.gcode.3mf")
+        # Once the first is done its name is free again; a reprint keeps the original name.
+        self.store.set_status(first['id'],'finished');self.store.set_status(second['id'],'cancelled')
+        await self.client.post(f"/api/jobs/{first['id']}/reprint",json={},headers=self.headers)
+        self.assertEqual([j['remote'] for j in self.store.jobs('Mini') if j['status']=='queued'],['Bracket_v2.gcode.3mf'])
+
+
+class PrinterFileNameTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.store=Store(Path(self.tmp.name)/'db')
+    def tearDown(self):self.store.db.close();self.tmp.cleanup()
+
+    def test_safe_names(self):
+        name=lambda w:self.store.printer_file_name('P',w,'abcdef123456')
+        self.assertEqual(name('Bracket v2.gcode.3mf'),'Bracket_v2.gcode.3mf')
+        self.assertEqual(name('My Part (final).3mf'),'My_Part_final.gcode.3mf')
+        self.assertEqual(name('../../etc/passwd.3mf'),'passwd.gcode.3mf')
+        self.assertEqual(name('C:\\Users\\x\\Benchy.gcode.3mf'),'Benchy.gcode.3mf')
+        self.assertEqual(name(''),'print.gcode.3mf')
+        self.assertLessEqual(len(name('x'*300+'.3mf')),80+len('.gcode.3mf'))
+
+    def test_old_pm_names_fall_back_to_the_job_name(self):
+        job=self.store.add('P','Phone stand','/tmp/a.3mf','pm_0123456789ab.gcode.3mf',options(),'t')
+        self.assertEqual(job['remote'],'Phone_stand.gcode.3mf')
 
 
 if __name__=='__main__':
