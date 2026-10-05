@@ -232,7 +232,28 @@ function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrin
  if(document.activeElement!==$('aiWatch'))$('aiWatch').checked=!!ai.watching;
  $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (it never pauses on its own; set "action": "pause" to allow that)';
  const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI unavailable'}[ai.status]||ai.status;
+ const g=ai.geometry||{};$('aiGeometry').textContent=!g.enabled?'Print-file comparison is off.':(g.calibrated?'📐 Camera calibrated to the bed. ':'📐 Not calibrated: calibrate the camera to compare detections with the print file. ')+(g.message||'');
+ $('aiCalibrate').textContent=g.calibrated?'Recalibrate camera to bed…':'Calibrate camera to bed…';$('aiCalibrate').hidden=!g.enabled;
  $('aiStatus').textContent=!ai.watching?'Off for this printer.':label+(ai.message?' — '+ai.message:'')+(ai.score!=null&&ai.score!==undefined?` (last score ${Number(ai.score).toFixed(2)})`:'');}
+// Camera-to-bed calibration (#79): four clicked corners map the bed into the picture.
+let calCorners=[];
+const CAL_NAMES=['front-left','front-right','back-right','back-left'];
+function drawCalibration(){const c=$('calCanvas'),img=$('calImage');c.width=img.clientWidth;c.height=img.clientHeight;const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
+ const pts=calCorners.map(([u,v])=>[u*c.width,v*c.height]);
+ if(pts.length>1){g.strokeStyle='#baf778';g.lineWidth=2;g.beginPath();pts.forEach(([x,y],i)=>i?g.lineTo(x,y):g.moveTo(x,y));if(pts.length===4)g.closePath();g.stroke();}
+ if(pts.length===4){g.fillStyle='rgba(186,247,120,.15)';g.fill();}
+ pts.forEach(([x,y],i)=>{g.fillStyle='#baf778';g.beginPath();g.arc(x,y,7,0,7);g.fill();g.fillStyle='#14200d';g.font='bold 11px sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(String(i+1),x,y);});
+ $('calStep').textContent=calCorners.length<4?`Click corner ${calCorners.length+1}: ${CAL_NAMES[calCorners.length]}.`:'All four corners set. Save, or Undo to adjust.';
+ $('calSave').disabled=calCorners.length!==4;$('calUndo').disabled=!calCorners.length;}
+$('aiCalibrate').addEventListener('click',()=>{const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;calCorners=(ai?.geometry?.corners||[]).map(c=>[...c]);
+ $('calClear').hidden=!ai?.geometry?.calibrated;$('calStep').textContent='Loading a camera picture…';const img=$('calImage'),name=encodeURIComponent(selectedPrinter);
+ img.onload=drawCalibration;img.onerror=()=>{if(!img.dataset.retried){img.dataset.retried='1';img.src='/api/camera/'+name+'?t='+Date.now();}else $('calStep').textContent='No camera picture available. Check the camera, then try again.';};
+ delete img.dataset.retried;img.src='/api/snapshot/'+name+'?t='+Date.now();$('calibrateDialog').showModal();});
+$('calCanvas').addEventListener('click',e=>{if(calCorners.length>=4)return;const r=e.target.getBoundingClientRect();calCorners.push([Math.min(1,Math.max(0,(e.clientX-r.left)/r.width)),Math.min(1,Math.max(0,(e.clientY-r.top)/r.height))]);drawCalibration();});
+$('calUndo').addEventListener('click',()=>{calCorners.pop();drawCalibration();});
+window.addEventListener('resize',()=>{if($('calibrateDialog').open)drawCalibration();});
+$('calibrateForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/calibration',{corners:calCorners});closeDialog($('calibrateDialog'));notice('Camera calibration saved.');await refresh();}catch(err){$('calStep').textContent=err.message;}});
+$('calClear').addEventListener('click',async()=>{try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/calibration',{clear:true});closeDialog($('calibrateDialog'));notice('Camera calibration removed.');await refresh();}catch(err){$('calStep').textContent=err.message;}});
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
 $('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};

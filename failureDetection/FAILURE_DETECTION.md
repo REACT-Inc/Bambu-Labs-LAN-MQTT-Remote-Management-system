@@ -10,6 +10,7 @@ The app picks the place from the model file's extension.
 - [Automatic setup](#automatic-setup)
 - [Publishing a model for every Pi](#publishing-a-model-for-every-pi)
 - [How it decides](#how-it-decides)
+- [Comparing with the print file](#comparing-with-the-print-file)
 - [What happens on a failure](#what-happens-on-a-failure)
 - [Running on the CPU (.onnx)](#running-on-the-cpu-onnx)
 - [Setting up the AI HAT](#setting-up-the-ai-hat)
@@ -75,6 +76,35 @@ How odd frames are handled:
 - **Suspect frames:** two or more failing frames that don't yet meet the rules show **suspect** on the dashboard. Nothing is sent.
 
 With the defaults, a real failure is reported about 4–5 minutes after it becomes visible. Raise `min_minutes` or `needed` if you get false alarms. Lower them, with care, to react faster.
+
+## Comparing with the print file
+
+The model only sees a picture. It can't know whether a stringy-looking shape is spaghetti or the part's own supports and thin walls. The print file does know: the sliced G-code says exactly where plastic goes, layer by layer. With a **calibrated camera**, the app compares each detection with it:
+
+| Where the detection is | What the app does |
+|---|---|
+| **Off the part**: the file puts no plastic there (with a margin) | Keeps the full score. Material where nothing should be printed is strong evidence of spaghetti or a part knocked loose. The report says *"outside where the print file puts plastic"*. |
+| **On the part**: plastic is expected there by the current layer | Counts it at half its score (`on_part_weight`). It's more likely the part's own geometry, which cuts false alarms on supports, lattices and thin features. A real failure on the part still gets through when the model is confident. |
+
+**How it works:**
+- **Reading the file:** when a print starts from the **queue** or **Print now**, the app reads that plate's G-code once, in a low-priority background process. It builds a 2 mm grid of where each layer puts plastic and how tall the part is; large files take a minute or so on a Pi. The grid is cached in `/var/lib/3d-printer-management/geometry/`.
+- **Matching:** each check uses the printer's reported layer number, so only plastic printed *so far* counts.
+- **Calibration** (once per camera): open the printer → **More → AI failure watch → Calibrate camera to bed…** and click the printable area's four corners on the picture: **front-left** (where X and Y are 0), **front-right**, **back-right**, **back-left**.
+  - **Accuracy:** exact on the bed surface. For taller parts, the area around the part is widened by the part's height, because the camera sees the top of a tall part further from its base.
+  - **Recalibrate** after moving or bumping the camera.
+- **When it's skipped:** prints started from Bambu Studio or the printer's screen (the app doesn't have their file), an uncalibrated camera, or a model without boxes (classification). In those cases scores are used as they are, exactly as before.
+
+Settings (optional), under `failure_detection`:
+
+```json
+"geometry": {"enabled": true, "on_part_weight": 0.5, "margin_mm": 5}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Compare with the print file when possible. |
+| `on_part_weight` | `0.5` | Share (0–1) of the score a detection on the part keeps. `1` treats on-part and off-part alike. |
+| `margin_mm` | `5` | How close to printed plastic still counts as "on the part". The part's height is added to it. |
 
 ## What happens on a failure
 
