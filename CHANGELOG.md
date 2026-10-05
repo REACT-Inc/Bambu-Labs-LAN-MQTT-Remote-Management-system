@@ -13,6 +13,16 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Honest result:** the reply says **Cleared** only once the printer stops reporting the error; otherwise it says the error is still reported.
   - **Queue:** a FAILED printer whose error was cleared starts its next queued job normally (the plate-clear confirmation is still required).
   - **Logged:** every clear is recorded in Activity with who did it.
+- **Alerts beyond Discord: Home Assistant, ntfy and webhooks (#9).**
+  - **Setup:** under the dashboard's **Settings → Other alerts**, add targets that receive the same alerts as Discord (print finished or failed, printer errors and health alerts, AI failure alerts…): all of them, or only the important ones.
+  - **Target types:**
+    - **ntfy:** push to your phone.
+    - **Home Assistant:** an automation webhook, or a notify service with a long-lived token.
+    - **Any JSON webhook.**
+    - **Discord channel webhook.**
+  - **No bot needed:** the targets work even without the Discord bot.
+  - **Testing:** **Send test** checks each target, and the last result is shown.
+  - **Privacy:** tokens never leave the Pi.
 
 ## Unreleased (1.7.5)
 
