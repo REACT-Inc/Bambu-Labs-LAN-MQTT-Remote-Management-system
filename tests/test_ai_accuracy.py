@@ -97,6 +97,14 @@ class TrainingTests(unittest.TestCase):
         self.assertIn('README.txt',names)
         self.assertEqual(sorted(n.split('/')[0] for n in names if n.endswith('.jpg')),['failed','finished','other'])
 
+    def test_low_disk_is_reported(self):
+        from unittest.mock import patch
+        with patch('shutil.disk_usage',return_value=SimpleNamespace(free=300*1024**2)):
+            self.assertIsNone(self.pictures.save('James','job1',b'jpg',0.1,'watching'))
+        self.assertIn('only 0.3 GB free',self.pictures.summary()['problem'])
+        self.tick(120);self.assertIsNotNone(self.pictures.save('James','job1',b'jpg',0.1,'watching'))
+        self.assertEqual(self.pictures.summary()['problem'],'')
+
     def test_defaults(self):
         self.assertEqual((self.pictures.settings['every_minutes'],self.pictures.settings['max_pictures']),(1.0,5000))
 
