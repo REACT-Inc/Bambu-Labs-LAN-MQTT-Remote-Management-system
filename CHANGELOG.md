@@ -2,7 +2,18 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.6.3)
+## 1.7.0-beta.1
+
+Built on 1.6.2-beta.1. A big AI release:
+- **Automatic setup:** AI failure detection sets itself up on install (#75).
+- **Print file comparison:** it compares what the camera sees with the print file (#79).
+- **Automatic reprint:** a paused failure reprints on an available printer whose bed the camera checked is empty (#67).
+- **Self-updating:** it keeps its model up to date.
+- **Better accuracy:** it looks closer and collects training pictures from your own cameras.
+
+Also new: cancelling single objects during a print (#84), **Print now** that can ignore a reported error, and uploaded files keeping their own name on the printer.
+
+**Updating:** 1.6.2 installs this from the dashboard. Run `sudo bash Updater/update.sh` from the release folder once to also get OpenCV and the AI HAT driver checks set up automatically.
 
 ### Added
 ### Fixed
