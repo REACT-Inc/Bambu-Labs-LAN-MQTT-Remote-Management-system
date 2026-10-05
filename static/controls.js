@@ -292,6 +292,17 @@ $('aiTest').addEventListener('click',async e=>{const b=e.target;b.disabled=true;
   trainingLoaded=0;loadTraining(true);}
  catch(err){notice(err.message);}finally{b.disabled=false;b.textContent='Test AI now';}});
 window.addEventListener('resize',()=>{if(!$('aiTestResult').hidden)drawAiTest();});
+// Check AI now: a real check while printing; acts (pause / notify, as set) straight away if this frame looks failed.
+async function aiCheckNow(button){button.disabled=true;button.textContent='Checking…';
+ try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/check',{});const pct=v=>Math.round(v*100)+'%';
+  const action=r.state?.status==='paused'?'The print was paused.':r.acted?'Reported in Discord and Activity.':'';
+  notice(r.already?`Score ${pct(r.score)}. This print was already reported, so nothing more was done.`:
+   r.acted?`⚠️ The AI sees a failure (score ${pct(r.score)}, threshold ${pct(r.threshold)}). ${action}`:
+   `✅ No failure in this picture: score ${pct(r.score)}, below the ${pct(r.threshold)} threshold.`);await refresh();}
+ catch(err){notice(err.message);}finally{button.disabled=false;button.textContent='Check AI now';}}
+$('aiCheck').addEventListener('click',e=>{const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai||{};
+ if(ai.action==='pause')confirmAction('Check now and pause if needed?',`The AI checks a fresh picture of ${printerLabel(selectedPrinter)} now. If it scores at or above the threshold, the print is paused straight away and reported.`,'Check the print now and pause it if the AI sees a failure.',()=>aiCheckNow(e.target));
+ else aiCheckNow(e.target);});
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
 $('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};

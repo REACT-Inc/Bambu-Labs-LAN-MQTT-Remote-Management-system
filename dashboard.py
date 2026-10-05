@@ -80,6 +80,7 @@ class Dashboard:
             web.post('/api/ai/{name}/calibration',self.ai_calibration),
             web.post('/api/ai/{name}/reprint',self.ai_reprint),
             web.post('/api/ai/{name}/test',self.ai_test),
+            web.post('/api/ai/{name}/check',self.ai_check),
             web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
@@ -171,6 +172,14 @@ class Dashboard:
         name=request.match_info['name']
         if name not in self.core.names():raise ValueError('Unknown printer.')
         return web.json_response(await self.failure.test(name))
+
+    async def ai_check(self, request):
+        """Check AI now: a real check of a printing printer that acts (pause / notify) if this frame looks failed."""
+        name=request.match_info['name']
+        if name not in self.core.names():raise ValueError('Unknown printer.')
+        result=await self.failure.check_now(name)
+        self.failure.store_event(name,'AI check on request',f"Score {result['score']:.2f} (threshold {result['threshold']:g})"+(' • acted' if result['acted'] else ''))
+        return web.json_response({**result,'state':self.failure.state(name)})
 
     async def ai_training(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')

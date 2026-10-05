@@ -190,7 +190,7 @@ class FakeCore:
     def names(self):return ['H2D']
     def printer_config(self,name):return {'camera_type':self.camera}
     def state_data(self,name):return (self.current,0,{'subtask_name':'benchy'},True)
-    async def snapshot(self,name,timeout=25):
+    async def snapshot(self,name,timeout=25,max_age=60):
         self.pictures+=1;return b'jpeg%d'%self.pictures
     def save_settings(self,updated):self.settings=dict(updated)
 
