@@ -28,6 +28,33 @@ function showCamera(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
   :snap.error&&!snap.time?snap.error:'Live view: about one frame per second. Nothing is recorded.';
  if(!livePrinter)$('liveStatus').textContent=!p?.has_camera?'No camera.':snap.time?'Snapshot from '+new Date(snap.time*1000).toLocaleTimeString()+' · ▶ for live view':(snap.error||'Waiting for the first snapshot…');
  renderStill(p);}
+// AI boxes over the camera view, like Test AI now: what the model found in the frame it checked last.
+let aiOverlayOn=true;try{aiOverlayOn=localStorage.getItem('aiOverlay')!=='off';}catch{}
+$('aiOverlayOn').checked=aiOverlayOn;
+$('aiOverlayOn').addEventListener('change',e=>{aiOverlayOn=e.target.checked;try{localStorage.setItem('aiOverlay',aiOverlayOn?'on':'off');}catch{}drawAiOverlay();});
+function shownImage(){const live=$('liveImage'),still=$('stillImage');return !live.hidden&&live.naturalWidth?live:!still.hidden&&still.naturalWidth?still:null;}
+function drawAiOverlay(){const c=$('aiOverlay'),g=c.getContext('2d'),ai=devPrinter()?.ai,img=shownImage();
+ c.width=c.clientWidth;c.height=c.clientHeight;g.clearRect(0,0,c.width,c.height);
+ const fresh=ai?.boxes_at&&Date.now()/1000-ai.boxes_at<Math.max(20,3*(ai.interval||5));
+ $('aiOverlayToggle').hidden=!(ai?.enabled&&ai.watching&&img);
+ if(!aiOverlayOn||!img||!fresh)return;
+ // The picture is letterboxed inside the frame (object-fit: contain): map 0-1 picture fractions onto it.
+ const scale=Math.min(c.width/img.naturalWidth,c.height/img.naturalHeight),w=img.naturalWidth*scale,h=img.naturalHeight*scale,ox=(c.width-w)/2,oy=(c.height-h)/2;
+ const rect=([x0,y0,x1,y1])=>[ox+x0*w,oy+y0*h,(x1-x0)*w,(y1-y0)*h];
+ g.setLineDash([6,5]);g.strokeStyle='rgba(255,255,255,.45)';g.lineWidth=1;g.font='11px sans-serif';g.fillStyle='rgba(255,255,255,.7)';g.textBaseline='top';
+ (ai.zoom||[]).forEach(z=>{const [x,y,bw,bh]=rect(z);g.strokeRect(x,y,bw,bh);g.fillText('🔍 AI zoom',x+4,y+4);});
+ g.setLineDash([]);g.font='bold 13px sans-serif';g.textBaseline='bottom';
+ (ai.boxes||[]).forEach(d=>{const strong=d.counts&&d.score>=ai.threshold,maybe=d.counts&&d.score>=ai.hold;
+  const color=strong?'#ff5c52':maybe?'#f3d684':d.counts?'rgba(243,214,132,.6)':'#8dc6ff';const [x,y,bw,bh]=rect(d.box);
+  g.strokeStyle=color;g.lineWidth=strong?3:2;g.strokeRect(x,y,bw,bh);
+  const text=`${d.label} ${Math.round(d.score*100)}%`,tw=g.measureText(text).width+8,ty=Math.max(oy+18,y);
+  g.fillStyle=color;g.fillRect(x,ty-18,tw,18);g.fillStyle='#111';g.fillText(text,x+4,ty-3);});
+ const age=Math.round(Date.now()/1000-ai.boxes_at);g.font='11px sans-serif';g.textBaseline='bottom';
+ const note=`AI ${age}s ago${ai.boxes?.length?'':' · nothing found'}`;const nw=g.measureText(note).width+10;
+ g.fillStyle='rgba(0,0,0,.55)';g.fillRect(ox+w-nw-6,oy+h-22,nw,18);g.fillStyle='#fff';g.fillText(note,ox+w-nw-1,oy+h-8);}
+['liveImage','stillImage'].forEach(id=>$(id).addEventListener('load',drawAiOverlay));
+window.addEventListener('resize',()=>{if($('detailDialog').open)drawAiOverlay();});
+setInterval(()=>{if($('detailDialog').open&&state)drawAiOverlay();},1000);
 $('startLive').onclick=()=>{$('stillImage').hidden=true;startLiveView();};
 $('stopLive').onclick=()=>{stopLive();showCamera();};
 $('detailDialog').addEventListener('close',stopLive);

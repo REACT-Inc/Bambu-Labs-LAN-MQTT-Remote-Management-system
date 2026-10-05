@@ -744,11 +744,13 @@ class FailureMonitor:
         result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, hold=tuning['hold'], verdict=verdict, where=where,
                       detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted)
         if judge.acted:   # already reported (and maybe paused) for this print: keep that status, don't act again
-            self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames));return result
+            self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), **self.overlay(name, detections, tuning))
+            return result
         if on_request and verdict != 'failure' and score >= threshold:
             verdict = result['verdict'] = 'failure'   # a person asked for a decision: this frame decides
             status = 'failure'
-        self._set(name, status=status, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), message=message, job=job)
+        self._set(name, status=status, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), message=message, job=job,
+                  **self.overlay(name, detections, tuning))
         if verdict == 'failure':
             judge.acted = result['acted'] = True
             await self.act(name, job, judge, labels, on_request=on_request, score=score)
@@ -792,10 +794,20 @@ class FailureMonitor:
             self.training.save(name, 'manual-test', picture, score, 'suspect' if score >= threshold else 'watching', force=True)
         except OSError:
             pass
+        self._set(name, **self.overlay(name, detections, tuning))   # the camera view shows these boxes too
         self.store_event(name, 'AI test', f'Score {score:.2f} (threshold {threshold:g})' + (f' • {where}' if where else ''))
         return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, failing=score_on_file >= threshold,
                     labels=sorted(self.settings['labels']), detections=detections, crops=crops, where=where,
                     picture=base64.b64encode(picture).decode(), checked=self.clock())
+
+    def overlay(self, name, detections, tuning):
+        """What the dashboard draws over the camera picture: the boxes the model found in the last checked frame
+        (picture fractions), and where it zooms in next."""
+        boxes = [dict(label=d.get('label', '?'), score=round(float(d.get('score', 0)), 3), box=d['box'],
+                      counts=d.get('label') in tuning['labels'], **({'on_part': d['on_part']} if 'on_part' in d else {}))
+                 for d in detections if d.get('box')][:10]
+        zoom = self.focus.crops(name, []) if tuning['focus'] and self.settings['crops'] == 'auto' else []
+        return dict(boxes=boxes, boxes_at=self.clock(), zoom=zoom, hold=tuning['hold'], threshold=tuning['threshold'])
 
     def crops(self, name, tuning):
         """Close-ups for this check: around the calibrated bed (or the defaults), plus where Focus found the print
