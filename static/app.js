@@ -107,7 +107,7 @@ ${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
-${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${aiLine(x.ai)}
+${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${(x.alerts||[]).length?`<div class="pc-clear">${actionButton('clearerrors','Clear error…',n,'ghost small-btn')}</div>`:''}${aiLine(x.ai)}
 <div class="pc-actions">${actions}<span class="spacer"></span>${actionButton('printerQueue',waiting?`${waiting} queued →`:'Queue →',n,'ghost')}</div></article>`;}
 async function downloadFileListing(printer,button){if(button)button.disabled=true;notice('Reading printer storage…');
  try{const r=await api('files/'+encodeURIComponent(printer),undefined,'GET'),url=URL.createObjectURL(new Blob([r.text],{type:'text/plain'})),a=document.createElement('a');
@@ -180,6 +180,14 @@ $('printNow').onclick=()=>{$('jobError').textContent='';if(!$('jobForm').reportV
  confirmAction('Print now?',`${data.label} on ${printerLabel(data.printer)}, plate ${data.plate}, straight away. ${data.use_ams?'AMS mapping: '+data.mapping+'.':'External spool.'}`,
   'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',
   async()=>{await api('jobs',{...data,print_now:true,confirmed:true});jobDone(`Starting on ${printerLabel(data.printer)}.`);});};
+// Clear printer errors and health alerts (#34): the printer is told to dismiss its error the way Bambu Studio does,
+// and the answer only says "Cleared" once the printer stops reporting it.
+function confirmClearAlerts(printer,ids){const p=state?.printers.find(x=>x.name===printer),all=(p?.alerts||[]),chosen=ids==='all'?all:all.filter(a=>ids.includes(a.id));
+ if(!chosen.length){notice('The printer reports no error or alert to clear.');return;}
+ const list=chosen.map(a=>`“${a.message}” (${a.code})`).join('; ');
+ confirmAction(chosen.length>1?`Clear ${chosen.length} alerts on ${printerLabel(printer)}?`:`Clear this alert on ${printerLabel(printer)}?`,
+  `${list}. Check the printer first: clearing only dismisses the message, it doesn't fix the cause. Health (HMS) alerts are hidden in the dashboard until the printer stops reporting them.`,
+  'I checked the printer.',async()=>{notice('Clearing… waiting for the printer to confirm.');const r=await api('printers/'+encodeURIComponent(printer)+'/clearerrors',{ids,confirmed:true});notice(r.message);});}
 $('confirmForm').onsubmit=async e=>{e.preventDefault();const callback=pendingConfirmation;pendingConfirmation=null;$('confirmDialog').close();if(callback){try{await callback();await refresh();}catch(e){notice(e.message);}}};
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b){const card=e.target.closest('.printer-card[data-printer]');if(card)openPrinter(card.dataset.printer);return}const {action,printer,job,outcome}=b.dataset;try{
  if(action==='files'){await downloadFileListing(printer,b);return}
@@ -189,6 +197,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  if(action==='lighton'||action==='lightoff'){await toggleLight(printer);return;}
  if(action==='resume'){await printAction(printer,'resume');return;}
  if(action==='stop'){confirmStop(printer);return;}
+ if(action==='clearerrors'){confirmClearAlerts(printer,'all');return;}
  if(action==='swapapprove'){openSwapApproval(job);return;}
  if(action==='sendto'){openSendTo(job);return;}
  if(action==='start'){const j=state.jobs.find(x=>x.id===job),bad=printerError(j.printer);

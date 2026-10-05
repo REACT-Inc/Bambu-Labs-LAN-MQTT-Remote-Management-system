@@ -12,6 +12,7 @@ from dashboard import Dashboard
 from discord_Intergration.discord_queue import install
 from discord_Intergration.extra_discord import install as install_extras
 from discord_Intergration.controls_discord import install as install_controls
+from discord_Intergration.clear_errors_discord import install as install_clear_errors
 from swapMod.plate_swap_discord import install as install_plate_swap
 from team import Team
 from discord_Intergration.team_discord import install as install_team
@@ -73,6 +74,7 @@ async def main():
     install_team(core,team)
     install_extras(core,store)
     install_controls(core,dashboard.controls)
+    install_clear_errors(core,dashboard.alerts)
     install_plate_swap(core,engine)
     diagnostics.install_discord(core,store)
     issue_reports.install_discord(core,dashboard.issue_reports)

@@ -81,6 +81,7 @@ Details: [Print queue](print-queue.md).
 |---|---|---|
 | `/pause name?` · `/resume name?` | E | Pause or resume the current print |
 | `/stop name?` | E | Cancel the current print (confirmation) |
+| `/clearerror name?` | E | Show and clear the printer's errors and health alerts (confirmation). Error notifications also have a **Clear error** button |
 | `/lighton name?` · `/lightoff name?` | E | Chamber light |
 | `/temperature target degrees name?` | A | `nozzle` (active), `left nozzle` / `right nozzle` (dual-nozzle printers), `bed` or `chamber` target in °C (0 = off) |
 | `/chamber degrees name?` | A | H2D chamber target: 0 = off or 40–65 °C |
