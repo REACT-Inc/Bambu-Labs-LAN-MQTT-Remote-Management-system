@@ -197,7 +197,7 @@ class FakeCore:
 
 class FakeBackend:
     def __init__(self,score=0.95):self.score_value=score;self.calls=0
-    async def score(self,jpeg):
+    async def score(self,jpeg,crops=None):
         self.calls+=1
         if isinstance(self.score_value,Exception):raise self.score_value
         return self.score_value,[{'label':'spaghetti','score':self.score_value}]
