@@ -100,10 +100,7 @@ async def main():
     async def discord_task():
         if not core.DISCORD_BOT_TOKEN:
             core.log.warning('No Discord token configured: dashboard-only mode.');return
-        try:
-            await core.bot.start(core.DISCORD_BOT_TOKEN)
-        except Exception:
-            core.log.exception('Discord stopped. Dashboard remains available; correct token/access and restart the service.')
+        await core.run_discord(core.bot,core.DISCORD_BOT_TOKEN)   # retries until connected; reconnects by itself after
     task=asyncio.create_task(discord_task())
     scheduler=asyncio.create_task(team.scheduler())
     try:
