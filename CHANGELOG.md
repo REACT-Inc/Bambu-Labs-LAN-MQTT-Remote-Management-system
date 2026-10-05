@@ -4,6 +4,13 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 
 ## Unreleased (1.7.1)
 
+### Added
+- **Test AI now.** A button in each printer's AI panel runs the AI on a fresh camera picture at any time, printing or not.
+  - **What it shows:** the picture with coloured boxes around everything it found, each with its confidence, plus where it zoomed in.
+  - **Verdict:** whether that frame would count as failing against your threshold.
+  - **Training picture:** each test picture is kept for training.
+  - **Safe:** it never counts towards the failure rules and never pauses anything.
+
 ### Changed
 - **Training pictures every minute.** While printing, each printer now keeps a camera still every minute (was every 5) plus every suspicious frame, so training sets fill up much faster. The cap rose to 5,000 pictures (about 1 GB), and nothing is saved when less than 2 GB is free.
 - **The AI panel says why training pictures aren't being saved,** for example *"only 1.4 GB free on the Pi"*. Before, it skipped silently.

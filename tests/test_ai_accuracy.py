@@ -1,5 +1,5 @@
 """Better detection on your own cameras: close-up crops, merging, and training-picture collection."""
-import io,json,sys,tempfile,unittest,zipfile
+import base64,io,json,sys,tempfile,unittest,zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -125,3 +125,48 @@ class RouteTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+
+
+class TestNowTests(unittest.IsolatedAsyncioTestCase):
+    """"Test AI now": a check on a fresh picture at any time, which never touches the failure rules."""
+    def monitor(self,state='IDLE',camera='jpeg_tcp',picture=b'\xff\xd8pic\xff\xd9',score=0.7):
+        from unittest.mock import AsyncMock
+        from failureDetection.detection import FailureMonitor
+        self.tmp=tempfile.TemporaryDirectory()
+        core=SimpleNamespace(DATA_DIR=Path(self.tmp.name),settings={},names=lambda:['James'],printer_config=lambda n:{'camera_type':camera},
+            state_data=lambda n:(state,0,{'layer_num':0},True),capture_still=AsyncMock(return_value=picture),snapshot=AsyncMock(return_value=None),
+            notify=AsyncMock(),save_settings=lambda s:None,event_listener=lambda *a:self.events.append(a),RED=1,
+            CONFIG={'failure_detection':{'enabled':True,'model':'m.onnx','threshold':0.4,'labels':['spaghetti','warping'],'classes':['spaghetti','stringing','warping']}})
+        self.events=[];self.crops=[]
+        test=self
+        class Backend:
+            async def score(self,jpeg,crops=None):
+                test.crops.append(crops);return score,[{'label':'spaghetti','score':score,'box':[0.3,0.2,0.7,0.3]}]
+        return FailureMonitor(core,SimpleNamespace(),backend=Backend())
+    def tearDown(self):self.tmp.cleanup()
+
+    async def test_works_when_idle_and_keeps_the_picture(self):
+        m=self.monitor()
+        r=await m.test('James')
+        self.assertEqual((r['score'],r['threshold'],r['failing']),(0.7,0.4,True))
+        self.assertEqual(r['detections'][0]['label'],'spaghetti');self.assertTrue(r['crops'])   # close-ups used
+        self.assertEqual(base64.b64decode(r['picture']),b'\xff\xd8pic\xff\xd9')
+        self.assertEqual(m.training.summary()['count'],1)                                       # kept for training
+        self.assertEqual(m.state('James')['status'],'idle');self.assertNotIn('James',m.judges)  # failure rules untouched
+        self.assertEqual(self.events[0][1],'AI test')
+        await m.test('James');self.assertEqual(m.training.summary()['count'],2)                 # every test is kept
+
+    async def test_below_threshold(self):
+        r=await self.monitor(score=0.12).test('James')
+        self.assertFalse(r['failing'])
+
+    async def test_clear_errors(self):
+        with self.assertRaisesRegex(ValueError,'no camera'):await self.monitor(camera='').test('James')
+        self.tmp.cleanup()
+        with self.assertRaisesRegex(ValueError,'No camera picture'):await self.monitor(picture=None).test('James')
+
+
+class TestRouteTests(unittest.TestCase):
+    def test_route(self):
+        import inspect,dashboard
+        self.assertIn("'/api/ai/{name}/test'",inspect.getsource(dashboard.Dashboard.__init__))

@@ -79,6 +79,7 @@ class Dashboard:
             web.post('/api/ai/{name}',self.ai_watch),
             web.post('/api/ai/{name}/calibration',self.ai_calibration),
             web.post('/api/ai/{name}/reprint',self.ai_reprint),
+            web.post('/api/ai/{name}/test',self.ai_test),
             web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
@@ -164,6 +165,12 @@ class Dashboard:
             await reprints.availability(job,refresh=True)
         else:raise ValueError('Unknown action.')
         return web.json_response(self.failure.state(name))
+
+    async def ai_test(self, request):
+        """Run the AI once on a fresh camera picture now, printing or not (for testing)."""
+        name=request.match_info['name']
+        if name not in self.core.names():raise ValueError('Unknown printer.')
+        return web.json_response(await self.failure.test(name))
 
     async def ai_training(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')

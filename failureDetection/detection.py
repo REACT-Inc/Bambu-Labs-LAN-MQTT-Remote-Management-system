@@ -413,6 +413,47 @@ class FailureMonitor:
             judge.acted = True
             await self.act(name, job, judge, labels)
 
+    async def test(self, name):
+        """"Test AI now": one check on a fresh camera picture at any time, printing or not. It doesn't count towards
+        the failure rules and never pauses anything; the picture is kept as a training picture."""
+        if not self.enabled:
+            raise ValueError('AI failure detection is not enabled in config.json.')
+        if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
+            raise ValueError('This printer has no camera set up (camera_type in config.json).')
+        picture = None
+        capture = getattr(self.core, 'capture_still', None)
+        if capture:
+            try:
+                picture = await capture(name, 20)
+            except Exception:
+                picture = None
+        picture = picture or await self.core.snapshot(name, timeout=20)
+        if not picture:
+            raise ValueError('No camera picture right now. Check the camera, then try again.')
+        crops = crops_for(self.geometry.corners(name)) if self.settings['crops'] == 'auto' else []
+        try:
+            score, detections = await self.backend.score(picture, crops)
+        except Exception as exc:
+            raise ValueError(f'The AI could not check the picture: {str(exc)[:300]}') from exc
+        state, _, data, _ = self.core.state_data(name)
+        where = ''
+        if state in ('RUNNING', 'PAUSE'):
+            try:
+                score_on_file, where = self.geometry.adjust(name, score, detections, int(data.get('layer_num') or 0))
+            except (TypeError, ValueError):
+                score_on_file = score
+        else:
+            score_on_file = score
+        threshold = self.settings['threshold']
+        try:
+            self.training.save(name, 'manual-test', picture, score, 'suspect' if score >= threshold else 'watching', force=True)
+        except OSError:
+            pass
+        self.store_event(name, 'AI test', f'Score {score:.2f} (threshold {threshold:g})' + (f' • {where}' if where else ''))
+        return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, failing=score_on_file >= threshold,
+                    labels=sorted(self.settings['labels']), detections=detections, crops=crops, where=where,
+                    picture=base64.b64encode(picture).decode(), checked=self.clock())
+
     async def act(self, name, job, judge, labels):
         minutes = (judge.frames[-1][0] - min(t for t, s in judge.frames if s >= self.settings['threshold'])) / 60
         detail = (f"{judge.failing()} of the last {len(judge.frames)} camera frames over {minutes:.0f} min look like a failed print"
