@@ -31,6 +31,10 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 
 ### Fixed
 - **Print now couldn't override a printer error.** After a failed print (FAILED state or an error code), Print now was always refused. The queue's **Start ignoring error** didn't have this problem. The dialog now offers **Print now ignoring error…** while the chosen printer reports FAILED or an error. It asks for the same inspection confirmation, is recorded in Activity, and doesn't clear the printer's error. A printer that's still printing is always refused.
+- **Uploaded files keep their own name on the printer.** Files used to be sent as `pm_<id>.gcode.3mf`. They're now sent under the uploaded file's name, for example `Bracket_v2.gcode.3mf`, so the printer's screen, its file list and Discord `/printer` show something recognisable.
+  - **Safe names:** spaces and symbols become `_`.
+  - **No clashes:** a second waiting job with the same file on the same printer gets its job ID added, so one job can never replace another's file.
+  - **Reprints:** keep the original name.
 
 ## 1.6.2-beta.1
 
