@@ -83,7 +83,7 @@ Details: [Print queue](print-queue.md).
 | `/stop name?` | E | Cancel the current print (confirmation) |
 | `/lighton name?` · `/lightoff name?` | E | Chamber light |
 | `/temperature target degrees name?` | A | `nozzle`, `bed` or `chamber` target in °C (0 = off) |
-| `/chamber degrees name?` | A | H2D chamber target: 0 = off or 40–65 °C |
+| `/chamber degrees name?` | A | Heated-chamber models: 0 = off or 40 °C up to the configured model's limit |
 | `/speed mode name?` | E | `silent`, `standard`, `sport` or `ludicrous` |
 | `/fan percent name? target?` | E | One fan, 0–100 % (autocomplete lists the printer's fans) |
 | `/fanall percent` | E | All manually controllable fans on **every printer** (reports the result per printer) |
