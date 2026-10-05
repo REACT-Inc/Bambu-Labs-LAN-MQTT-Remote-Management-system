@@ -255,3 +255,24 @@ $('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarg
  try{await api('jobs/'+encodeURIComponent(sendJob)+'/sendto',{printer:target,use_ams:$('sendToAms').checked,mapping:$('sendToAms').checked?$('sendToMapping').value:'',checked:$('sendToChecked').checked});
   $('sendToDialog').close();notice(`Added to ${printerLabel(target)}'s queue. Start it from the queue when that printer is ready.`);await refresh();}
  catch(e){$('sendToReason').textContent=e.message;}finally{$('sendToSubmit').classList.remove('pending');}};
+// Other alerts (#9): Home Assistant, ntfy, webhooks. Tokens never come back from the server; blank keeps the saved one.
+const ALERT_TYPES={ntfy:'ntfy',home_assistant:'Home Assistant',webhook:'Webhook (JSON)',discord_webhook:'Discord webhook'};
+let alertTargets=[];
+function renderAlertTargets(){$('alertTargets').innerHTML=alertTargets.length?alertTargets.map((t,i)=>`<fieldset class="alert-target" data-index="${i}">
+ <div class="alert-target-row"><label>Type<select data-field="type">${Object.entries(ALERT_TYPES).map(([v,n])=>`<option value="${v}"${t.type===v?' selected':''}>${n}</option>`).join('')}</select></label>
+ <label>Name<input data-field="name" maxlength="60" value="${esc(t.name||'')}" placeholder="e.g. Phone"></label>
+ <label>Send<select data-field="events"><option value="all"${t.events!=='important'?' selected':''}>All alerts</option><option value="important"${t.events==='important'?' selected':''}>Important only</option></select></label></div>
+ <label>URL<input data-field="url" type="url" required value="${esc(t.url||'')}" placeholder="https://ntfy.sh/my-printers"></label>
+ <label>Token (optional)<input data-field="token" type="password" autocomplete="new-password" placeholder="${t.has_token?'Blank keeps the saved token':'For ntfy access tokens or Home Assistant notify'}"></label>
+ <div class="alert-target-row"><label class="checkbox"><input data-field="enabled" type="checkbox"${t.enabled!==false?' checked':''}> On</label>${t.has_token?'<label class="checkbox"><input data-field="clear_token" type="checkbox"> Remove saved token</label>':''}
+ ${t.id?'<button type="button" data-alert-test>Send test</button>':''}<button type="button" class="ghost" data-alert-remove>Remove</button><small class="muted">${esc(t.status||'')}</small></div></fieldset>`).join(''):'<p class="muted">No other alert targets yet.</p>';}
+function readAlertTargets(){return [...document.querySelectorAll('#alertTargets .alert-target')].map(f=>{const t=alertTargets[Number(f.dataset.index)]||{},get=k=>f.querySelector(`[data-field="${k}"]`);
+ return {id:t.id,type:get('type').value,name:get('name').value,url:get('url').value.trim(),events:get('events').value,enabled:get('enabled').checked,token:get('token').value,clear_token:!!get('clear_token')?.checked};});}
+async function loadAlertTargets(){try{alertTargets=(await api('alerttargets',undefined,'GET')).targets;renderAlertTargets();}catch(e){$('alertsStatus').textContent=e.message;}}
+$('addAlertTarget').onclick=()=>{alertTargets=readAlertTargets().map((t,i)=>({...alertTargets[i],...t}));alertTargets.push({type:'ntfy',events:'all',enabled:true});renderAlertTargets();};
+$('alertTargets').addEventListener('click',async e=>{const f=e.target.closest('.alert-target');if(!f)return;const i=Number(f.dataset.index);
+ if(e.target.closest('[data-alert-remove]')){alertTargets=readAlertTargets().map((t,j)=>({...alertTargets[j],...t}));alertTargets.splice(i,1);renderAlertTargets();return;}
+ if(e.target.closest('[data-alert-test]')){const b=e.target;b.disabled=true;try{const r=await api('alerttargets/test',{id:alertTargets[i].id});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Test: '+r.result;}catch(err){$('alertsStatus').textContent=err.message;}finally{b.disabled=false;}}});
+$('alertsForm').onsubmit=async e=>{e.preventDefault();try{const r=await api('alerttargets',{targets:readAlertTargets()});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Saved. Use Send test to check each target.';}catch(err){$('alertsStatus').textContent=err.message;}};
+const tabWithAlerts=tab;tab=function(name){tabWithAlerts(name);if(name==='settings')loadAlertTargets();};
+

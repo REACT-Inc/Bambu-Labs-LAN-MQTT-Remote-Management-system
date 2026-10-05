@@ -20,6 +20,7 @@ from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
 from failureDetection.detection import FailureMonitor
 from printer_alerts import Alerts
+from alert_targets import AlertTargets
 from object_skip import ObjectSkip
 from queueing import MAX_UPLOAD, options, validate_archive
 import diagnostics
@@ -69,6 +70,8 @@ class Dashboard:
         self.app.on_startup.append(self.snapshots.start);self.app.on_shutdown.append(self.snapshots.stop)
         # Clearing printer errors and health alerts (#34), shared with Discord; the queue asks it about FAILED printers.
         self.alerts = engine.alerts = core.printer_alerts = Alerts(core, store)
+        self.alert_targets = core.alert_targets = AlertTargets(core, core.log)   # Home Assistant, ntfy, webhooks (#9)
+        self.app.on_cleanup.append(self.alert_targets.close)
         self.failure = FailureMonitor(core, engine)
         core.failure_monitor = self.failure   # Discord /printer shows the AI watch line (#70)
         self.app.on_startup.append(self.failure.start);self.app.on_shutdown.append(self.failure.stop)
@@ -98,6 +101,8 @@ class Dashboard:
             web.get('/api/camera/{name}', self.camera), web.post('/api/settings', self.settings),
             web.get('/api/permissions', self.permissions), web.post('/api/permissions', self.save_permissions),
             web.get('/api/diagnostics', self.diagnostic_report), web.get('/api/errors', self.recent_errors),
+            web.get('/api/alerttargets', self.alert_targets_get), web.post('/api/alerttargets', self.alert_targets_save),
+            web.post('/api/alerttargets/test', self.alert_targets_test),
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
         ])
 
@@ -293,7 +298,7 @@ class Dashboard:
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
             discord=self.core.bot.is_ready(), printers=printers,jobs=jobs,events=self.store.events(),
-            settings={**self.core.settings, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)]},
+            settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)]},
             csrf=request['session']['csrf']))
 
     async def upload(self, request):
@@ -518,6 +523,19 @@ class Dashboard:
         atomic_json(self.auth_file,await asyncio.to_thread(password_hash,password))
         self.sessions.clear()
         return web.json_response({'ok':True})
+
+    async def alert_targets_get(self,request):
+        return web.json_response({'targets':self.alert_targets.public()})
+
+    async def alert_targets_save(self,request):
+        data=await request.json()
+        targets=self.alert_targets.save(data.get('targets'))
+        self.store.event('Settings','Other alerts saved',f'{len(targets)} target(s) • web administrator')
+        return web.json_response({'targets':targets})
+
+    async def alert_targets_test(self,request):
+        result=await self.alert_targets.test((await request.json()).get('id'))
+        return web.json_response({'result':result,'targets':self.alert_targets.public()})
 
     async def test_notification(self,request):
         if not self.core.bot.is_ready(): raise ValueError('Discord is not connected.')
