@@ -32,6 +32,13 @@ def letterbox(image, width, height):
     return canvas, scale, pad_x, pad_y
 
 
+def input_batch(frame):
+    """A batch of one, as a writeable contiguous uint8 array. np.asarray() on a Pillow image is read-only, which
+    HailoRT refuses ("array is not writeable"), so the image is copied with np.array()."""
+    import numpy as np
+    return np.ascontiguousarray(np.expand_dims(np.array(frame, dtype=np.uint8), 0))
+
+
 def parse(outputs, class_names, failure_labels, threshold=0.05):
     """Turn raw model outputs into [{'label', 'score', 'box'}] (box in model-input pixels for NMS output, else None)."""
     detections = []
@@ -76,7 +83,7 @@ def main():
                     request = json.loads(line)
                     image = Image.open(io.BytesIO(base64.b64decode(request['jpeg'])))
                     frame, _, _, _ = letterbox(image, width, height)
-                    result = pipeline.infer({info.name: np.expand_dims(np.asarray(frame, dtype=np.uint8), 0)})
+                    result = pipeline.infer({info.name: input_batch(frame)})
                     reply = parse(result, class_names, failure_labels)
                 except Exception as exc:   # one bad frame never stops the helper
                     reply = {'error': f'{type(exc).__name__}: {exc}'[:300]}

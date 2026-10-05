@@ -26,6 +26,8 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
+import tempfile
 import time
 from collections import deque
 from pathlib import Path
@@ -97,9 +99,12 @@ class HailoBackend:
         s = self.settings
         if not Path(s['model']).is_file():
             raise RuntimeError(f"Model file not found: {s['model'] or '(set failure_detection.model)'}")
+        # HailoRT writes hailort.log into its working folder; the app folder is read-only for the service.
+        logs = Path(tempfile.gettempdir())
         self.process = await asyncio.create_subprocess_exec(
             s['python'], str(WORKER), s['model'], json.dumps(s['classes']), json.dumps(s['labels']),
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=1024 * 1024)
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=1024 * 1024,
+            cwd=str(logs), env={**os.environ, 'HAILORT_LOGGER_PATH': str(logs)})
         self.stderr = deque(maxlen=20)
         self.drain = asyncio.create_task(self._drain(self.process))   # never let the helper block on a full stderr pipe
         line = await asyncio.wait_for(self.process.stdout.readline(), 60)

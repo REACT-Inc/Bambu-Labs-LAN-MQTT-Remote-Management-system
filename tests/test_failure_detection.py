@@ -93,6 +93,19 @@ class WorkerParseTests(unittest.TestCase):
         self.assertEqual(result['score'],0.9);self.assertIsNone(result['detections'][0]['box'])
 
 
+class WorkerInputTests(unittest.TestCase):
+    def test_input_is_writeable_for_hailort(self):
+        try:
+            import numpy  # noqa: F401  (installed with hailo-all on the Pi; optional here)
+            from PIL import Image
+        except ImportError:
+            self.skipTest('numpy/Pillow not installed')
+        from failureDetection.hailo_worker import input_batch,letterbox
+        frame,_,_,_=letterbox(Image.new('RGB',(1920,1080)),640,640)
+        batch=input_batch(frame)
+        self.assertEqual(batch.shape,(1,640,640,3));self.assertTrue(batch.flags.writeable);self.assertTrue(batch.flags.c_contiguous)
+
+
 class FakeCore:
     EXAMPLE_MODE=False;RED=1
     def __init__(self,state='RUNNING',camera='rtsp'):
