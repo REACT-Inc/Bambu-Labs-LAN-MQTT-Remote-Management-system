@@ -95,9 +95,9 @@ That makes the print area about 1.6–2× bigger to the model, without the table
 ### 2. Train on your own pictures (the real fix)
 
 While a printer prints, the app keeps training pictures from its camera:
-- a still every 5 minutes;
-- **every frame the AI found suspicious**;
-- capped at 1,500 pictures (oldest removed first), never filling the disk.
+- a still **every minute**;
+- **every frame the AI found suspicious** (every check, 30 s apart);
+- capped at 5,000 pictures, about 1 GB (oldest removed first), and never saved when less than 2 GB is free.
 
 To use them:
 1. **Download:** open any printer → **More → AI failure watch → Download training pictures**. The ZIP is sorted into `failed/`, `finished/` and `other/` by how each print ended.
@@ -106,7 +106,7 @@ To use them:
 4. **Retrain:** generate a new dataset version and run the Colab training cell again (see [Running on the CPU](#running-on-the-cpu-onnx)).
 5. **Install the new model:** copy the new `best.onnx` over `/opt/3d-printer-management-models/print_failure.onnx`, or publish it in the [`ai-model` release](#publishing-a-model-for-every-pi) so every Pi updates itself.
 
-Even 50–100 labelled pictures from your own cameras usually make a big difference. Spaghetti tests are the quickest way to get failure pictures. Settings (optional): `"collect": {"enabled": true, "every_minutes": 5, "max_pictures": 1500}`.
+Even 50–100 labelled pictures from your own cameras usually make a big difference. Spaghetti tests are the quickest way to get failure pictures. Settings (optional): `"collect": {"enabled": true, "every_minutes": 1, "max_pictures": 5000}`. With several printers going, 5,000 pictures is roughly a day or two of printing; download them before they roll over.
 
 ## Comparing with the print file
 

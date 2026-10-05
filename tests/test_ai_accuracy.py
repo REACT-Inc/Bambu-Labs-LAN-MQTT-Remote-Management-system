@@ -75,10 +75,10 @@ class TrainingTests(unittest.TestCase):
 
     def test_periodic_and_flagged_frames(self):
         self.assertIsNotNone(self.pictures.save('James','job1',b'jpg',0.1,'watching'))
-        self.tick(60);self.assertIsNone(self.pictures.save('James','job1',b'jpg',0.1,'watching'))   # not 5 min yet
+        self.tick(30);self.assertIsNone(self.pictures.save('James','job1',b'jpg',0.1,'watching'))   # not a minute yet
         self.assertIsNotNone(self.pictures.save('James','job1',b'jpg',0.5,'suspect'))               # suspicious: kept
-        self.tick(20);self.assertIsNone(self.pictures.save('James','job1',b'jpg',0.5,'suspect'))    # at most once a minute
-        self.tick(300);self.assertIsNotNone(self.pictures.save('James','job1',b'jpg',0.1,'watching'))
+        self.tick(10);self.assertIsNone(self.pictures.save('James','job1',b'jpg',0.5,'suspect'))    # not twice in one check
+        self.tick(30);self.assertIsNotNone(self.pictures.save('James','job1',b'jpg',0.1,'watching')) # a minute since the last still
         self.assertIsNotNone(self.pictures.save('Keith','job2',b'jpg',0.1,'watching'))              # per printer
         self.assertEqual(self.pictures.summary()['count'],4)
 
@@ -96,6 +96,9 @@ class TrainingTests(unittest.TestCase):
         names=zipfile.ZipFile(target).namelist()
         self.assertIn('README.txt',names)
         self.assertEqual(sorted(n.split('/')[0] for n in names if n.endswith('.jpg')),['failed','finished','other'])
+
+    def test_defaults(self):
+        self.assertEqual((self.pictures.settings['every_minutes'],self.pictures.settings['max_pictures']),(1.0,5000))
 
     def test_off_and_clear(self):
         off=TrainingPictures(SimpleNamespace(DATA_DIR=Path(self.tmp.name)),{'enabled':False})
