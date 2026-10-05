@@ -209,7 +209,7 @@ def main():
         inputs = InputVStreamParams.make(group, format_type=FormatType.UINT8)
         outputs = OutputVStreamParams.make(group, format_type=FormatType.FLOAT32)
         with InferVStreams(group, inputs, outputs) as pipeline, group.activate(group.create_params()):
-            print(json.dumps({'ready': True, 'input': [width, height]}), flush=True)
+            print(json.dumps({'ready': True, 'input': [width, height], 'backend': 'hailo'}), flush=True)
             for line in sys.stdin:
                 try:
                     request = json.loads(line)

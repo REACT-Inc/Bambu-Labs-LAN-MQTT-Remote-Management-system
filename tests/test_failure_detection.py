@@ -321,6 +321,63 @@ class WorkerProcessTests(unittest.IsolatedAsyncioTestCase):
             finally:detection.WORKER=original
 
 
+class FallbackTests(unittest.IsolatedAsyncioTestCase):
+    """A .hef that won't start (no AI HAT, driver missing) falls back to the .onnx next to it, says so, and slows down."""
+    def helper(self,d):
+        fake=Path(d)/'fake.py'
+        fake.write_text('import json,sys\n'
+                        'if sys.argv[1].endswith(".hef"):\n    print("HailoRTStatusException: 74",file=sys.stderr,flush=True);sys.exit(1)\n'
+                        'print(json.dumps({"ready":True,"input":[640,640],"backend":"cpu"}),flush=True)\n'
+                        'for line in sys.stdin:\n    print(json.dumps({"score":0.3,"detections":[]}),flush=True)\n')
+        return fake
+
+    async def run_with(self,d,make_onnx):
+        import failureDetection.detection as detection
+        model=Path(d)/'print_failure.hef';model.write_bytes(b'x')
+        if make_onnx:(Path(d)/'print_failure.onnx').write_bytes(b'x')
+        original=detection.WORKER;detection.WORKER=self.helper(d)
+        backend=HailoBackend(settings(model=str(model),python=sys.executable))
+        try:
+            self.assertEqual(backend.settings['min_interval'],5)
+            with self.assertLogs('failure-detection','INFO') as logs:
+                await backend.warm()
+            return backend,'\n'.join(logs.output)
+        finally:
+            await backend.close();detection.WORKER=original
+
+    async def test_falls_back_to_the_cpu_model(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            backend,logs=await self.run_with(d,True)
+        self.assertIn('falling back to the CPU model print_failure.onnx',logs)
+        self.assertIn('AI model ready: print_failure.onnx on CPU (fallback)',logs)
+        info=backend.describe()
+        self.assertEqual((info['backend'],info['active_model']),('CPU','print_failure.onnx'))
+        self.assertIn('HailoRTStatusException',info['backend_note'])
+        self.assertEqual(backend.settings['min_interval'],10)
+
+    async def test_no_fallback_reports_the_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            backend,logs=await self.run_with(d,False)
+        self.assertIn('AI model did not start',logs)
+        self.assertEqual(backend.describe()['backend'],'unavailable')
+        self.assertIn('HailoRTStatusException',backend.describe()['backend_note'])
+
+    async def test_hat_model_logs_where_it_runs(self):
+        import tempfile,failureDetection.detection as detection
+        with tempfile.TemporaryDirectory() as d:
+            fake=Path(d)/'fake.py';model=Path(d)/'m.hef';model.write_bytes(b'x')
+            fake.write_text('import json,sys\nprint(json.dumps({"ready":True,"input":[640,640],"backend":"hailo"}),flush=True)\nsys.stdin.read()\n')
+            original=detection.WORKER;detection.WORKER=fake
+            backend=HailoBackend(settings(model=str(model),python=sys.executable))
+            try:
+                with self.assertLogs('failure-detection','INFO') as logs:await backend.warm()
+            finally:await backend.close();detection.WORKER=original
+        self.assertIn('AI model ready: m.hef on AI HAT (Hailo-8)',logs.output[-1])
+        self.assertEqual(backend.describe()['backend_note'],'')
+
+
 class DashboardStateTests(unittest.TestCase):
     def test_discord_line(self):
         import importlib.util,tempfile

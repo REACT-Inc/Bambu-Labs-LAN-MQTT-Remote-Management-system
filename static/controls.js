@@ -239,7 +239,8 @@ function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrin
   $('aiReprint').textContent=(rp.pending?`If this paused print isn't resumed or stopped, it reprints on an available printer in ${h}. `:'')+(rp.note?rp.note+' ':'')+(rp.available||'Press Check available printers to see which printers could take it.');
   $('aiReprintCancel').hidden=!rp.pending;}
  const pace=ai.interval?` Checking every ${Math.round(ai.interval)} s while printing (${ai.interval_reason||'adaptive'}).`:'';
- $('aiStatus').textContent=!ai.watching?'Off for this printer.':label+(ai.message?' — '+ai.message:'')+(ai.score!=null&&ai.score!==undefined?` (last score ${Number(ai.score).toFixed(2)})`:'')+pace;}
+ const where=ai.backend?` Running on: ${ai.backend}${ai.active_model?' ('+ai.active_model+')':''}.${ai.backend_note?' ⚠️ '+ai.backend_note:''}`:'';
+ $('aiStatus').textContent=!ai.watching?'Off for this printer.':label+(ai.message?' — '+ai.message:'')+(ai.score!=null&&ai.score!==undefined?` (last score ${Number(ai.score).toFixed(2)})`:'')+pace+where;}
 // Camera-to-bed calibration (#79): four clicked corners map the bed into the picture.
 let calCorners=[];
 const CAL_NAMES=['front-left','front-right','back-right','back-left'];

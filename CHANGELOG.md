@@ -18,6 +18,13 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Visible:** the AI panel shows the current pace and why.
   - **Fixed pace:** a number in `"interval"` still works.
 - **The failure rule is time-based,** so it means the same at any pace: 60% of the frames from the last 5 minutes have to look failed, over at least 4 minutes (and at least 4 frames). Existing `window`/`needed` settings convert automatically (10 frames × 30 s = 5 minutes, 6 of 10 = 60%).
+- **Install a new AI model safely: `failureDetection/install_model.py`.** Give it the Ultralytics Platform's Hailo export (`best.zip`), a `.hef` or a `.onnx`, and it automates what was done by hand on the team Pi:
+  - **Checks first:** reads the class names in training order and the on-chip NMS thresholds from the export. With `hailortcli`, it checks the model was compiled for this Pi's chip, with the input and outputs the app expects.
+  - **Test run:** it runs the model as the service user with a time limit, optionally on your own failure and healthy pictures (catch rate and false alarms).
+  - **Backups and a record:** it backs up the old model and `config.json`, then installs the new one with a record of where it came from. Only the model setting changes, and file owners and permissions are kept.
+  - **Verified, or undone:** it restarts the service and confirms the app loaded the model on the AI HAT. Otherwise it rolls everything back. `--rollback` undoes the last install.
+- **The log and the AI panel show which processor runs the AI:** `AI model ready: print_failure.hef on AI HAT (Hailo-8)` or `… on CPU`. The model now loads when the service starts instead of at the first check.
+- **Fallback to the CPU:** if the AI HAT model won't start (for example, the driver didn't load after a kernel update), the app uses the `.onnx` next to it, at the CPU's pace, instead of stopping AI checks. The AI panel shows a warning.
 
 ### Fixed
 - **The AI judged only about half the frames.** It checks every 30 seconds but reused camera pictures up to 60 seconds old, so every other check saw the frame it had already judged and skipped it. Now it only reuses a picture newer than its check interval, so every check judges a new frame, and failures are confirmed in half the time.

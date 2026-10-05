@@ -267,6 +267,67 @@ You need a **Raspberry Pi 5** with the AI HAT+ (or AI Kit) fitted, on Raspberry 
 
 The AI part runs in a small helper (`failureDetection/hailo_worker.py`) under the **system** Python, `/usr/bin/python3`, because that's where `hailo-all` installs the Hailo library, numpy and Pillow. The service's own virtual environment doesn't need them.
 
+## Installing a model for the AI HAT
+
+### Getting a .hef without a Hailo account
+
+The [Ultralytics Platform](https://platform.ultralytics.com) can compile your trained model for the AI HAT:
+
+1. Upload your `best.pt`.
+2. Choose **Export → Hailo** with target **Hailo-8** (26 TOPS HAT+) or **Hailo-8L** (13 TOPS AI Kit / HAT+).
+3. Download `best.zip`. It contains:
+   - `best_hailo_model/best.hef`;
+   - `metadata.yaml`, which holds the class names in training order;
+   - `nms_config.json`, which holds the on-chip thresholds.
+
+Two things to know about this export:
+
+- **On-chip cut-off.** The HAT drops every detection below `nms_scores_th` (0.25). A picture the CPU model scores at 0.13 scores **0** on the HAT. This doesn't matter for a `threshold` of 0.25 or higher.
+- **Generic calibration.** The 8-bit quantisation was calibrated on COCO128, which contains no printer pictures. Compare it with the `.onnx` on your own failure pictures before you trust it (`--failure` below). Exporting again with your own pictures as calibration data improves this.
+
+### Installing it
+
+Copy `best.zip` to the Pi, then run:
+
+```bash
+sudo /usr/bin/python3 /opt/3d-printer-management/failureDetection/install_model.py best.zip \
+    --failure ~/pictures/failed --healthy ~/pictures/good
+```
+
+Both picture folders are optional. They can be anywhere: the installer reads them and sends them to the model.
+
+The installer does the following. If any check fails, it says why and **changes nothing**.
+
+1. **Reads the export.** It takes the class names from `metadata.yaml` in training order, and the NMS thresholds from `nms_config.json`. A plain `.hef` or `.onnx` also works; give `--classes spaghetti,stringing,warping` when there's no metadata.
+2. **Checks the model against this Pi.** It runs `hailortcli parse-hef` and `hailortcli fw-control identify`. The model must:
+   - be compiled for this HAT's chip;
+   - take one UINT8 NHWC square input;
+   - end in Hailo NMS;
+   - have as many classes as names.
+
+   It also notes the HailoRT and firmware versions and the CPU architecture.
+3. **Test-runs it** through the real helper as `printermanager`, with a time limit. It uses a blank picture plus your folders, and reports how many failure pictures it catches and how many good ones it flags. `--min-catch 0.8` or `--max-false 0.1` refuse a model that does worse.
+4. **Installs it with backups.**
+   - The old model goes to `/opt/3d-printer-management-models/backups/`.
+   - `config.json` is copied to `config.json.backup-<time>`.
+   - The new file is installed as `print_failure.hef`, root-owned, mode 644.
+   - A record is written next to it in `print_failure.hef.json`: SHA-256, classes, thresholds, chip, calibration data, HailoRT version and test results.
+   - In `config.json`, only `failure_detection.model` changes, plus `classes` and `input_size` when the model's differ. The file keeps its owner and permissions.
+   - The `.onnx` stays in place as the fallback.
+5. **Restarts the service and verifies it.** It waits for the app's own log line `AI model ready: print_failure.hef on AI HAT (Hailo-8)`. If the model doesn't load, or the app falls back to the CPU, it **rolls back** automatically and restarts again.
+
+Other options:
+
+- `--check-only` runs steps 1 to 3 and changes nothing.
+- `--rollback` undoes the last install.
+
+### Which processor is in use
+
+- **Log.** At start-up the app logs `AI model ready: <model> on AI HAT (Hailo-8)` or `… on CPU`.
+- **AI panel.** It shows **Running on: …**.
+- **Fallback.** If a `.hef` won't start, for example because the HAT driver didn't load after a kernel update, the app logs `AI HAT model … did not start …; falling back to the CPU model print_failure.onnx`. It then keeps watching on the CPU at the CPU's pace, and the AI panel shows a ⚠️ note.
+  - The fallback is the `.onnx` with the same name next to the `.hef`, or `failure_detection.fallback_model`.
+
 ## The model
 
 For the CPU, use a YOLOv8 `.onnx` export (see [above](#running-on-the-cpu-onnx)). For the AI HAT, supply a `.hef` model **compiled for your HAT's chip**: Hailo-8L for the 13 TOPS AI Kit / AI HAT+, Hailo-8 for the 26 TOPS HAT+. Two kinds of model are understood:
@@ -337,6 +398,7 @@ Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 | *AI helper did not start: No module named hailo_platform* | `.hef` model: `sudo apt install hailo-all`, or point `python` at the Python that has it. |
 | *…No Hailo device…* / *HAILO_OUT_OF_PHYSICAL_DEVICES* | Check `hailortcli fw-control identify`. Another program (for example `rpicam-apps` with Hailo) may be using the HAT; close it. |
 | *No camera picture this time.* | The camera didn't answer; see [Camera](../docs/printer-controls.md#camera). |
+| *Running on: CPU ⚠️ AI HAT model failed to start* | The `.hef` didn't load and the `.onnx` is used. Check `hailortcli fw-control identify`; after fixing it, restart the service. |
 | False alarms | Raise `threshold`, `needed` or `min_minutes`, or turn watching off for that printer. Better: add pictures of your own good prints to the training data. |
 
 After a failed start, the helper is retried every 5 minutes. Errors are logged to the service log (`sudo journalctl -u 3d-printer-management`).

@@ -311,15 +311,44 @@ class HailoBackend:
     def __init__(self, settings):
         self.settings, self.process, self.lock, self.error, self.retry_at = settings, None, asyncio.Lock(), '', 0
         self.stderr, self.drain = deque(maxlen=20), None
+        self.active, self.backend_name, self.note = '', '', ''   # model in use, where it runs, why (fallback)
+
+    def fallback(self):
+        """The CPU model to use when the AI HAT model won't start: failure_detection.fallback_model, else a .onnx
+        next to the .hef (print_failure.hef -> print_failure.onnx)."""
+        primary = Path(self.settings['model'])
+        if primary.suffix.lower() != '.hef':
+            return None
+        candidate = Path(self.settings.get('fallback_model') or primary.with_suffix('.onnx'))
+        return candidate if candidate.is_file() and candidate != primary else None
 
     async def _start(self):
         s = self.settings
-        if not Path(s['model']).is_file():
-            raise RuntimeError(f"Model file not found: {s['model'] or '(set failure_detection.model)'}")
+        primary = s['model']
+        try:
+            ready = await self._spawn(primary)
+            self.note = ''
+        except Exception as exc:
+            backup = self.fallback()
+            if not backup:
+                raise
+            await self.close()
+            log.warning('AI HAT model %s did not start (%s); falling back to the CPU model %s', Path(primary).name, exc, backup.name)
+            ready = await self._spawn(str(backup))
+            self.note = f'AI HAT model failed to start ({str(exc)[:150]}); using the CPU model instead.'
+            s['min_interval'] = max(10, s['min_interval'])   # the CPU can't keep the HAT's pace
+        self.active = ready['model']
+        self.backend_name = 'AI HAT (Hailo-8)' if ready.get('backend') == 'hailo' else 'CPU'
+        log.info('AI model ready: %s on %s%s', Path(self.active).name, self.backend_name, ' (fallback)' if self.note else '')
+
+    async def _spawn(self, model):
+        s = self.settings
+        if not Path(model).is_file():
+            raise RuntimeError(f"Model file not found: {model or '(set failure_detection.model)'}")
         # HailoRT writes hailort.log into its working folder; the app folder is read-only for the service.
         logs = Path(tempfile.gettempdir())
         self.process = await asyncio.create_subprocess_exec(
-            s['python'], str(WORKER), s['model'], json.dumps(s['classes']), json.dumps(s['labels']), str(s['input_size']),
+            s['python'], str(WORKER), model, json.dumps(s['classes']), json.dumps(s['labels']), str(s['input_size']),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=1024 * 1024,
             cwd=str(logs), env={**os.environ, 'HAILORT_LOGGER_PATH': str(logs)})
         self.stderr = deque(maxlen=20)
@@ -330,6 +359,24 @@ class HailoBackend:
                 await asyncio.wait_for(asyncio.shield(self.drain), 5)
             error = self.stderr[-1] if self.stderr else line.decode(errors='replace')[:200] or 'it exited'
             raise RuntimeError('AI helper did not start: ' + error + self.hint(error))
+        return dict(json.loads(line), model=model)
+
+    async def warm(self):
+        """Start the helper now (at service start) instead of on the first check, so the log says straight away
+        which model loaded where, and the first check isn't slowed down by loading it."""
+        async with self.lock:
+            if self.process is None or self.process.returncode is not None:
+                try:
+                    await self._start()
+                    self.error = ''
+                except Exception as exc:
+                    await self.close()
+                    self.error, self.retry_at = str(exc)[:300], time.monotonic() + 300
+                    log.error('AI model did not start: %s', self.error)
+
+    def describe(self):
+        return dict(backend=self.backend_name or ('not started' if not self.error else 'unavailable'),
+                    active_model=Path(self.active).name if self.active else '', backend_note=self.note or self.error)
 
     def hint(self, error):
         if "No module named 'cv2'" in error:
@@ -423,7 +470,8 @@ class FailureMonitor:
         base = dict(enabled=True, watching=self.watching(name), action=self.settings['action'], status='idle', message='')
         return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name), 'reprint': self.reprints.state(name),
                 'model': Path(self.settings['model']).name, 'model_update': self.models.message,
-                'interval': round(self.throttle.current, 1), 'interval_reason': self.throttle.reason}
+                'interval': round(self.throttle.current, 1), 'interval_reason': self.throttle.reason,
+                **(self.backend.describe() if hasattr(self.backend, 'describe') else {})}
 
     def _set(self, name, **values):
         self.status[name] = {**self.status.get(name, {}), **values, 'checked': self.clock()}
@@ -626,6 +674,8 @@ class FailureMonitor:
 
     async def start(self, app=None):
         if self.enabled and not getattr(self.core, 'EXAMPLE_MODE', False):
+            if hasattr(self.backend, 'warm'):
+                asyncio.create_task(self.backend.warm())   # load the model now; logs where it runs
             if self.reprints.settings['enabled']:
                 self.engine.on_start_approved = self.reprints.capture_reference
             self.task = asyncio.create_task(self.run())
