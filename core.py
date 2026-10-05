@@ -29,6 +29,7 @@ EXAMPLE_DATA = CONFIG.get('example_data') or {
     for p in (PRINTERS or [{'name':'Demo H2D'}, {'name':'Demo A1'}])
 }
 import asyncio
+import contextlib
 import base64
 import copy
 import difflib
@@ -316,10 +317,11 @@ async def require(interaction, root):
         return True
     log.warning('Denied %s for %s (%s)', command_summary(interaction) if getattr(interaction, 'data', None) else '/' + root, who(interaction), command_level(root))
     text = denial_text(root)
+    # Always private, even in the commands channel: nobody else needs to see who was refused what (#23).
     if interaction.response.is_done():
-        await interaction.followup.send(text, ephemeral=ephemeral(interaction))
+        await interaction.followup.send(text, ephemeral=True)
     else:
-        await interaction.response.send_message(text, ephemeral=ephemeral(interaction))
+        await interaction.response.send_message(text, ephemeral=True)
     return False
 
 
@@ -340,6 +342,32 @@ class PrinterTree(app_commands.CommandTree):
             return False
         log.info('%s ran %s in channel %s', who(interaction), command_summary(interaction), interaction.channel_id)
         return True
+
+
+async def run_discord(client, token, sleep=asyncio.sleep, first_delay=15, max_delay=300):
+    """Keep the Discord bot connected (#14). Once connected, discord.py reconnects by itself after a dropped
+    connection. But if the internet is down when the bot first logs in (a Pi booting before its network, or a router
+    restart), start() fails, and the bot used to stay offline until the service was restarted. Now it tries again
+    (15 s, doubling to every 5 min). A rejected token is not retried: that needs fixing in config.json."""
+    delay = first_delay
+    while True:
+        try:
+            await client.start(token)
+            return   # closed on purpose (the service is stopping)
+        except discord.LoginFailure:
+            log.error('Discord rejected the bot token. Fix "discord_token" in config.json and restart; the dashboard keeps working.')
+            return
+        except discord.PrivilegedIntentsRequired:
+            log.error('Discord requires an intent that is not enabled for this bot in the Developer Portal; the dashboard keeps working.')
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning('Discord could not connect (%s: %s); retrying in %d s. The dashboard keeps working.', type(exc).__name__, exc, delay)
+        with contextlib.suppress(Exception):
+            await client.http.close()   # the next login opens a fresh HTTP session
+        await sleep(delay)
+        delay = min(max_delay, delay * 2)
 
 
 class PrinterBot(commands.Bot):
@@ -521,6 +549,23 @@ async def snapshot(name, timeout=25, max_age=60):
         return None
 
 
+def whole(value):
+    """A reported number rounded for display (219.96875 -> '220'), or '?' (#42)."""
+    try:
+        return str(round(float(value)))
+    except (TypeError, ValueError):
+        return '?'
+
+
+def duration(minutes):
+    """Minutes for display: '45 min', '5 h 12 min', or '?' (#42)."""
+    try:
+        total = max(0, round(float(minutes)))
+    except (TypeError, ValueError):
+        return '?'
+    return f'{total // 60} h {total % 60:02d} min' if total >= 60 else f'{total} min'
+
+
 def progress(value):
     try:
         percent = max(0, min(100, float(value)))
@@ -546,18 +591,18 @@ def printer_embed(name):
                  RED if error or not connected else STATE_COLORS.get(state, GRAY))
     field(embed, 'File', safe(data.get('subtask_name', 'No file reported')), False)
     field(embed, 'Progress', progress(data.get('mc_percent')), False)
-    field(embed, 'Time remaining', str(data.get('mc_remaining_time', '?')) + ' min')
+    field(embed, 'Time remaining', duration(data.get('mc_remaining_time')))
     field(embed, 'Layer', f"{data.get('layer_num', '?')} / {data.get('total_layer_num', '?')}")
     sides = filament_sides.nozzles(data)
     if sides:
         # Dual-nozzle printers: each nozzle's temperature, fitted hotend and loaded filament (multi-hotend).
         for n in sides:
-            heat = f"{n['current'] if n['current'] is not None else '?'}°C → {n['target'] if n['target'] else 'off'}{'°C' if n['target'] else ''}"
+            heat = f"{whole(n['current'])}°C → {whole(n['target']) + '°C' if n['target'] else 'off'}"
             details = [heat, n['hotend']['label'] if n['hotend'] else '', n['filament'] and 'Loaded: ' + n['filament']]
             field(embed, f"{n['side']} nozzle" + (' • in use' if n['active'] else ''), '\n'.join(d for d in details if d))
     else:
-        field(embed, 'Nozzle', f"{data.get('nozzle_temper', '?')}°C → {data.get('nozzle_target_temper', '?')}°C")
-    field(embed, 'Bed', f"{data.get('bed_temper', '?')}°C → {data.get('bed_target_temper', '?')}°C")
+        field(embed, 'Nozzle', f"{whole(data.get('nozzle_temper'))}°C → {whole(data.get('nozzle_target_temper'))}°C")
+    field(embed, 'Bed', f"{whole(data.get('bed_temper'))}°C → {whole(data.get('bed_target_temper'))}°C")
     rack = filament_sides.hotends(data)[1]
     if rack:
         field(embed, 'Hotend rack', '\n'.join(f"Slot {h['slot'] + 1}: {h['label']}" for h in rack), False)
@@ -620,7 +665,7 @@ def filament_embed(name):
         return f" • ◀ loaded in the {filament_sides.SIDES[nozzle].lower()} nozzle" if nozzle is not None else ''
 
     for unit in units[:24]:
-        text = f"Humidity: {unit.get('humidity', '?')} • Temperature: {unit.get('temp', '?')}°C\n"
+        text = f"Humidity: {unit.get('humidity', '?')} • Temperature: {whole(unit.get('temp'))}°C\n"
         try:
             unit_id = int(unit.get('id'))
         except (TypeError, ValueError):
@@ -914,9 +959,9 @@ def progress_description(data):
         f"**File:** {safe(data.get('subtask_name', 'Unknown'))}\n"
         f"**Status:** {safe(data.get('gcode_state', data.get('state', 'Unknown')))}\n"
         f"{progress(data.get('mc_percent'))}\n"
-        f"**Remaining:** {safe(data.get('mc_remaining_time', '?'))} min • "
+        f"**Remaining:** {duration(data.get('mc_remaining_time'))} • "
         f"**Layer:** {safe(data.get('layer_num', '?'))}/{safe(data.get('total_layer_num', '?'))}\n"
-        f"**Nozzle:** {safe(data.get('nozzle_temper', '?'))}°C • **Bed:** {safe(data.get('bed_temper', '?'))}°C"
+        f"**Nozzle:** {whole(data.get('nozzle_temper'))}°C • **Bed:** {whole(data.get('bed_temper'))}°C"
     )
 
 

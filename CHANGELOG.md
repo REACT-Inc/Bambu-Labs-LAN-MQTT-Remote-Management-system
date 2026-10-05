@@ -10,6 +10,9 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Print now:** the same applies when queueing a new print; **Print now ignoring error** is gone.
 
 ### Fixed
+- **The Discord bot reconnects without a restart (#14).** Once connected, it already reconnected by itself after the internet dropped. But if the internet was down when the bot first logged in (a Pi booting before its network, or a router restart), it stayed offline until the service was restarted. Now it tries again after 15 seconds, backing off to every 5 minutes. A rejected token is reported in the log, without retrying.
+- **Permission refusals are always private (#23).** "You can't use this command" used to be posted publicly in the commands channel. Now only the person who ran the command sees it, in every channel.
+- **Rounded numbers in Discord (#42).** `/printer`, progress notifications and `/filaments` showed values as reported, such as `219.96875°C` or `312 min`. They now show `220°C` and `5 h 12 min`. The dashboard already rounded them.
 - **Fewer camera pictures at once.** Since 1.7.2 the AI checks every printer in each round. It now fetches at most two camera pictures at a time instead of every printer's at once, which is easier on the Pi and on Bambu cameras that take one connection at a time. Each round still finishes within a few seconds with seven printers.
 - **Saving AI training pictures no longer slows the app.** Each save used to list every kept picture (up to 5,000 on the SD card) on the app's main thread. Now the saving happens in the background, and the folder is tidied only once every 20 or so pictures. The picture cap is still never exceeded.
 

@@ -137,7 +137,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.i.user.id=7
         await self.core.bot.tree.get_command('plateswap').get_command('configure').callback(self.i,'A1',True,'A1',2)
         engine.plate_swap.configure.assert_not_called()
-        self.assertFalse(self.i.response.send_message.call_args.kwargs['ephemeral'])
+        self.assertTrue(self.i.response.send_message.call_args.kwargs['ephemeral'])   # a refusal is always private (#23)
         self.i.user.id=42
         await self.core.bot.tree.get_command('plateswap').get_command('configure').callback(self.i,'A1',True,'A1',2)
         engine.plate_swap.configure.assert_not_called()
@@ -151,7 +151,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         self.i.user.id=7
         await self.core.bot.tree.get_command('move').callback(self.i,'X',1,'A1')
         controls.apply.assert_not_called()
-        self.assertFalse(self.i.response.send_message.call_args.kwargs['ephemeral'])
+        self.assertTrue(self.i.response.send_message.call_args.kwargs['ephemeral'])   # a refusal is always private (#23)
         self.i.user.id=42
         await self.core.bot.tree.get_command('temperature').callback(self.i,'bed',60,'A1')
         self.assertFalse(self.i.response.defer.call_args.kwargs['ephemeral'])
