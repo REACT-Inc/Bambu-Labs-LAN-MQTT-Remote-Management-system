@@ -1,7 +1,8 @@
-"""AI print-failure detection with a Raspberry Pi 5 AI HAT (#70). Off unless config.json enables it.
+"""AI print-failure detection (#70): a .hef model on a Raspberry Pi 5 AI HAT, or a .onnx model on the CPU.
+Off unless config.json enables it.
 
 While a printer reports RUNNING, the monitor takes one still from its camera every `interval` seconds (the cheap
-single-still path, reusing the dashboard's recent stills), has the AI HAT score it, and keeps the last `window`
+single-still path, reusing the dashboard's recent stills), has the model score it, and keeps the last `window`
 scores. It only calls a print a failure when the evidence holds up over time:
 
 - at least `needed` of the last `window` frames score at or above `threshold`,
@@ -26,6 +27,8 @@ import contextlib
 import hashlib
 import json
 import logging
+import os
+import tempfile
 import time
 from collections import deque
 from pathlib import Path
@@ -33,7 +36,7 @@ from pathlib import Path
 log = logging.getLogger('failure-detection')
 WORKER = Path(__file__).with_name('hailo_worker.py')
 DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval=30, window=10,
-                needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3')
+                needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640)
 
 
 def settings_for(config):
@@ -46,6 +49,7 @@ def settings_for(config):
     s['min_minutes'] = max(1.0, float(s['min_minutes']))
     s['warm_up'] = max(0.0, float(s['warm_up']))
     s['action'] = 'pause' if s['action'] == 'pause' else 'notify'
+    s['input_size'] = min(1280, max(160, int(s['input_size']) // 32 * 32))
     s['classes'] = [str(c) for c in s['classes']] or ['failure']
     s['labels'] = [str(c) for c in s['labels']] or list(s['classes'])
     return s
@@ -87,7 +91,8 @@ class Judge:
 
 
 class HailoBackend:
-    """Talks to hailo_worker.py running under the system Python (where the AI HAT library is installed)."""
+    """Talks to hailo_worker.py running under the system Python: a .hef model runs on the AI HAT (hailo-all),
+    a .onnx model on the CPU (python3-opencv). Both are Raspberry Pi OS packages, so the service venv needs neither."""
 
     def __init__(self, settings):
         self.settings, self.process, self.lock, self.error, self.retry_at = settings, None, asyncio.Lock(), '', 0
@@ -97,9 +102,12 @@ class HailoBackend:
         s = self.settings
         if not Path(s['model']).is_file():
             raise RuntimeError(f"Model file not found: {s['model'] or '(set failure_detection.model)'}")
+        # HailoRT writes hailort.log into its working folder; the app folder is read-only for the service.
+        logs = Path(tempfile.gettempdir())
         self.process = await asyncio.create_subprocess_exec(
-            s['python'], str(WORKER), s['model'], json.dumps(s['classes']), json.dumps(s['labels']),
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=1024 * 1024)
+            s['python'], str(WORKER), s['model'], json.dumps(s['classes']), json.dumps(s['labels']), str(s['input_size']),
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=1024 * 1024,
+            cwd=str(logs), env={**os.environ, 'HAILORT_LOGGER_PATH': str(logs)})
         self.stderr = deque(maxlen=20)
         self.drain = asyncio.create_task(self._drain(self.process))   # never let the helper block on a full stderr pipe
         line = await asyncio.wait_for(self.process.stdout.readline(), 60)
@@ -107,7 +115,14 @@ class HailoBackend:
             if not line:
                 await asyncio.wait_for(asyncio.shield(self.drain), 5)
             error = self.stderr[-1] if self.stderr else line.decode(errors='replace')[:200] or 'it exited'
-            raise RuntimeError('AI HAT helper did not start: ' + error)
+            raise RuntimeError('AI helper did not start: ' + error + self.hint(error))
+
+    def hint(self, error):
+        if "No module named 'cv2'" in error:
+            return ' (for a .onnx model: sudo apt install python3-opencv)'
+        if "No module named 'hailo_platform'" in error:
+            return ' (for a .hef model: sudo apt install hailo-all)'
+        return ''
 
     async def _drain(self, process):
         async for raw in process.stderr:
@@ -120,7 +135,7 @@ class HailoBackend:
         async with self.lock:
             if self.process is None or self.process.returncode is not None:
                 if time.monotonic() < self.retry_at:
-                    raise RuntimeError(self.error or 'AI HAT helper unavailable')
+                    raise RuntimeError(self.error or 'AI helper unavailable')
                 try:
                     await self._start()
                     self.error = ''
@@ -134,7 +149,7 @@ class HailoBackend:
                 reply = json.loads(await asyncio.wait_for(self.process.stdout.readline(), 30))
             except Exception as exc:
                 await self.close()
-                raise RuntimeError(f'AI HAT helper stopped ({type(exc).__name__})') from exc
+                raise RuntimeError(f'AI helper stopped ({type(exc).__name__})') from exc
             if 'error' in reply:
                 raise RuntimeError(reply['error'])
             return float(reply.get('score') or 0), reply.get('detections') or []

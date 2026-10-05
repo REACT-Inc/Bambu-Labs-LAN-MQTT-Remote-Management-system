@@ -4,7 +4,16 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 
 ## Unreleased (1.6.2)
 
+### Added
+- **AI failure detection without an AI HAT (#70).** A YOLOv8 `.onnx` model now runs on the Pi's CPU, for example `best.onnx` straight from training.
+  - **No compiling:** no Hailo compiler and no x86 PC are needed. Install `sudo apt install python3-opencv` and point `failure_detection.model` at the `.onnx` file.
+  - **Same behaviour:** the same rules, reporting and accurate pausing apply as with the HAT.
+  - **Light on the Pi:** OpenCV is limited to 2 threads so the dashboard stays responsive.
+  - **Choosing:** a `.hef` model still runs on the AI HAT. The app picks by file extension.
+
 ### Fixed
+- **AI failure detection: every frame failed with "array is not writeable" (#70).** HailoRT 4.23 refuses the read-only image array the helper passed it; the picture is now copied into a writeable buffer. Found on a Pi 5 with a Hailo-8 AI HAT+ on Raspberry Pi OS Trixie.
+- **AI failure detection: "Cannot create log file hailort.log".** The helper now runs from the temp folder, so HailoRT can write its log.
 - **1.6.0 couldn't install 1.6.1 from the dashboard or GitHub ("Invalid runtime file in manifest").** The update check only accepted files in a fixed list of folders, so the new `failureDetection/` folder made it refuse the whole release. Nothing was queued, so the panel never moved on.
   - **The fix:** the check now accepts `.py`/`.md` files in any plain package folder. Paths stay restricted: no scripts, hidden folders, `tests/`, or odd names.
   - **Existing Pis:** the check is also root-installed, so Pis on 1.6.0 need one manual `sudo bash Updater/update.sh` to get past this.

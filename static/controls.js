@@ -231,7 +231,7 @@ function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedP
 function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;
  if(document.activeElement!==$('aiWatch'))$('aiWatch').checked=!!ai.watching;
  $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (it never pauses on its own; set "action": "pause" to allow that)';
- const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI HAT unavailable'}[ai.status]||ai.status;
+ const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI unavailable'}[ai.status]||ai.status;
  $('aiStatus').textContent=!ai.watching?'Off for this printer.':label+(ai.message?' — '+ai.message:'')+(ai.score!=null&&ai.score!==undefined?` (last score ${Number(ai.score).toFixed(2)})`:'');}
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
