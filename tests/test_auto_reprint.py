@@ -182,7 +182,7 @@ class MonitorTests(unittest.IsolatedAsyncioTestCase):
             async def control(name,action,author):states[name]='PAUSE'
             engine=SimpleNamespace(store=store,control=control)
             monitor=FailureMonitor(core,engine,backend=SimpleNamespace(),clock=Clock());monitor.pause_poll=0
-            judge=SimpleNamespace(frames=[(0,0.9),(300,0.9)],failing=lambda:2)
+            judge=SimpleNamespace(frames=[(0,0.9),(300,0.9)],failing=lambda:2,failing_times=lambda:[0,300])
             await monitor.act('Mini 1','x.3mf',judge,'spaghetti')
             self.assertTrue(monitor.reprints.state('Mini 1')['pending'])
             text=core.notify.await_args.args[2]

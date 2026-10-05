@@ -5,10 +5,16 @@ While a printer reports RUNNING, the monitor takes one still from its camera eve
 single-still path, reusing the dashboard's recent stills), has the model score it, and keeps the last `window`
 scores. It only calls a print a failure when the evidence holds up over time:
 
-- at least `needed` of the last `window` frames score at or above `threshold`,
+- at least `needed` of the last `window` frames are failing: at or above `threshold`, or, once two frames reached
+  the threshold, at or above the lower `hold` score (a real failure doesn't come and go, but the AI's score of it
+  flickers around the threshold),
 - the failing frames span at least `min_minutes` (a few bad frames in a row aren't enough),
-- the newest frame is still failing, and
+- the newest frame is still failing (at or above `hold`), and
 - the print has been running for at least `warm_up` minutes (heat-up, purge and first layer look odd).
+
+Each printer's sensitivity (threshold, hold, minutes, share of frames, zoom) can be changed in its AI panel
+(settings.json "ai_tuning"), from presets or one by one. The monitor also zooms in on the print by itself (Focus):
+where the model saw something suspicious, or where a model with a "print"/"bed" class sees the print.
 
 A frame identical to the previous one (camera stuck, or a cached still) is skipped. One or two bad frames only
 show "suspect" on the dashboard. A failure is recorded in Activity, sent to Discord with the camera picture and,
@@ -44,7 +50,8 @@ log = logging.getLogger('failure-detection')
 WORKER = Path(__file__).with_name('hailo_worker.py')
 DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval='auto', window=10,
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
-                geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60)
+                geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
+                hold=None, focus=True)
 START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
 GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
 
@@ -74,11 +81,124 @@ def settings_for(config):
     s['crops'] = 'off' if s['crops'] in ('off', False, None) else 'auto'
     s['input_size'] = min(1280, max(160, int(s['input_size']) // 32 * 32))
     s['classes'] = [str(c) for c in s['classes']] or ['failure']
-    s['labels'] = [str(c) for c in s['labels']] or list(s['classes'])
+    # Classes that show where the print is (a model trained with a "print" or "bed" class) never count as failures.
+    s['labels'] = [str(c) for c in s['labels']] or [c for c in s['classes'] if c.lower() not in AREA_CLASSES] or list(s['classes'])
+    s['hold'] = hold_for(s['threshold'], s['hold'])
+    s['focus'] = bool(s['focus'])
     g = {**GEOMETRY_DEFAULTS, **(s['geometry'] if isinstance(s['geometry'], dict) else {})}
     s['geometry'] = dict(enabled=bool(g['enabled']), on_part_weight=min(1.0, max(0.0, float(g['on_part_weight']))),
                          margin_mm=min(50.0, max(0.0, float(g['margin_mm']))))
     return s
+
+
+def hold_for(threshold, hold=None):
+    """The score that keeps counting once the threshold was reached: by default 0.15 under the threshold."""
+    value = threshold - 0.15 if hold is None else float(hold)
+    return round(min(threshold, max(0.05, value)), 3)
+
+
+# Per-printer sensitivity, set in the dashboard. "normal" is config.json's own settings.
+TUNING_LIMITS = dict(threshold=(0.05, 0.95), hold=(0.05, 0.95), min_minutes=(1.0, 30.0), needed_share=(0.1, 1.0))
+PRESETS = {
+    'cautious': dict(threshold=0.6, hold=0.5, min_minutes=6, needed_share=0.7),
+    'normal': {},
+    'sensitive': dict(threshold=0.35, hold=0.2, min_minutes=3, needed_share=0.4),
+    'very_sensitive': dict(threshold=0.25, hold=0.12, min_minutes=2, needed_share=0.3),
+}
+PRESET_NAMES = {'cautious': 'Cautious (fewer false alarms)', 'normal': 'Normal (config.json)', 'sensitive': 'Sensitive',
+                'very_sensitive': 'Very sensitive (catches more, more false alarms)', 'custom': 'Custom'}
+
+
+def tuned(settings, saved):
+    """settings with one printer's dashboard tuning applied (saved: {'preset': ..., 'threshold': ..., ...})."""
+    saved = saved if isinstance(saved, dict) else {}
+    preset = saved.get('preset') if saved.get('preset') in PRESETS else 'custom' if saved else 'normal'
+    values = dict(PRESETS.get(preset, {}))
+    if preset == 'custom':
+        values = {k: saved[k] for k in TUNING_LIMITS if saved.get(k) is not None}
+    result = dict(settings)
+    for key, (low, high) in TUNING_LIMITS.items():
+        if key in values:
+            try:
+                result[key] = round(min(high, max(low, float(values[key]))), 3)
+            except (TypeError, ValueError):
+                pass
+    if 'hold' not in values:
+        result['hold'] = hold_for(result['threshold'], None if result['threshold'] != settings['threshold'] else settings['hold'])
+    result['hold'] = min(result['hold'], result['threshold'])
+    result['window_minutes'] = max(settings['window_minutes'], result['min_minutes'] + 1)
+    if saved.get('focus') is not None:
+        result['focus'] = bool(saved['focus'])
+    result['preset'] = preset
+    return result
+
+
+AREA_CLASSES = {'print', 'object', 'part', 'model', 'bed', 'plate', 'build_plate', 'buildplate', 'printbed'}
+FOCUS_MIN = 0.1      # a failure-class detection this sure is worth a closer look next time
+FOCUS_KEEP = 600     # seconds a suspicious spot keeps getting a close-up after it was last seen
+AREA_KEEP = 3600     # seconds the print's area (from an area class) is kept
+
+
+def padded(box, factor, minimum):
+    """box (0-1 of the picture) grown factor times around its centre, at least minimum wide and high, inside the picture."""
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    w, h = min(1.0, max(minimum, (x1 - x0) * factor)), min(1.0, max(minimum, (y1 - y0) * factor))
+    left, top = min(max(0.0, cx - w / 2), 1.0 - w), min(max(0.0, cy - h / 2), 1.0 - h)
+    return [round(left, 4), round(top, 4), round(left + w, 4), round(top + h, 4)]
+
+
+def overlap(a, b):
+    """Intersection over union of two boxes."""
+    w = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    h = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - w * h
+    return w * h / union if union > 0 else 0.0
+
+
+class Focus:
+    """Finds the print in the picture by itself, so the model gets a close look where it matters.
+
+    The failure model only knows failures, so it can't point at the bed. But even a weak detection (10% and up) is
+    usually on the print: the next checks add a close-up around it (2.5x its size) for 10 minutes. A small spaghetti
+    nest that scores 30% in the whole picture often scores much higher enlarged. A model trained with a "print" or
+    "bed" class (AREA_CLASSES) also gives the print's area, which gets its own close-up."""
+
+    def __init__(self, clock=time.time):
+        self.clock, self.spots = clock, {}   # name -> {'job', 'focus', 'focus_at', 'focus_score', 'area', 'area_at'}
+
+    def reset(self, name, job):
+        if self.spots.get(name, {}).get('job') != job:
+            self.spots[name] = {'job': job}
+
+    def update(self, name, detections, labels):
+        spot, now = self.spots.setdefault(name, {'job': None}), self.clock()
+        boxed = [d for d in detections if d.get('box')]
+        areas = [d['box'] for d in boxed if str(d.get('label', '')).lower() in AREA_CLASSES and d.get('label') not in labels]
+        if areas:
+            union = [min(b[0] for b in areas), min(b[1] for b in areas), max(b[2] for b in areas), max(b[3] for b in areas)]
+            spot.update(area=padded(union, 1.3, 0.3), area_at=now)
+        suspicious = [d for d in boxed if (not labels or d.get('label') in labels) and d.get('score', 0) >= FOCUS_MIN]
+        if suspicious:
+            best = max(suspicious, key=lambda d: d['score'])
+            spot.update(focus=padded(best['box'], 2.5, 0.3), focus_at=now, focus_score=best['score'])
+
+    def crops(self, name, base):
+        """The extra close-ups for this printer, leaving out any that duplicate one of base."""
+        spot, now, extra = self.spots.get(name, {}), self.clock(), []
+        for key, keep in (('area', AREA_KEEP), ('focus', FOCUS_KEEP)):
+            box = spot.get(key)
+            if box and now - spot.get(key + '_at', 0) <= keep and all(overlap(box, other) < 0.8 for other in base + extra):
+                extra.append(box)
+        return extra
+
+    def describe(self, name):
+        spot, now = self.spots.get(name, {}), self.clock()
+        if spot.get('area') and now - spot.get('area_at', 0) <= AREA_KEEP:
+            return 'zooming in on the print the model found'
+        if spot.get('focus') and now - spot.get('focus_at', 0) <= FOCUS_KEEP:
+            return f"zooming in on a suspicious spot ({spot.get('focus_score', 0):.0%}, {int((now - spot['focus_at']) // 60)} min ago)"
+        return ''
 
 
 # Close-ups checked as well as the whole picture (fractions of the picture). The model shrinks every picture to its
@@ -218,6 +338,7 @@ class GeometryCheck:
 
 
 MIN_FAILING = 4   # never decide on fewer failing frames than this, however slowly the AI is looking
+STRONG_NEEDED = 2   # frames at or above the threshold before frames at or above hold count too
 
 
 class Throttle:
@@ -287,21 +408,33 @@ class Judge:
         self.frames.append((now, float(score)))
         while self.frames and now - self.frames[0][0] > self.settings['window_minutes'] * 60:
             self.frames.popleft()   # only the last window_minutes count
-        failing = [t for t, s in self.frames if s >= self.settings['threshold']]
+        failing = self.failing_times()
         if self.flagged:
             return 'failure'
         if (len(failing) >= self.needed() and failing[-1] - failing[0] >= self.settings['min_minutes'] * 60
-                and self.frames[-1][1] >= self.settings['threshold']):
+                and self.frames[-1][1] >= self.settings['hold'] and self.strong() >= STRONG_NEEDED):
             self.flagged = True
             return 'failure'
         return 'suspect' if len(failing) >= 2 else 'watching'
+
+    def strong(self):
+        return sum(1 for _, s in self.frames if s >= self.settings['threshold'])
+
+    def failing_times(self):
+        """Times of the failing frames in the window: those at or above the threshold, and once STRONG_NEEDED frames
+        reached it, every frame from the first of them on that is at or above the lower hold score."""
+        th, hold = self.settings['threshold'], self.settings['hold']
+        if self.strong() < STRONG_NEEDED:
+            return [t for t, s in self.frames if s >= th]
+        first = next(t for t, s in self.frames if s >= th)
+        return [t for t, s in self.frames if t >= first and s >= hold]
 
     def needed(self):
         """Failing frames needed now: needed_share of the frames in the window, never fewer than MIN_FAILING."""
         return max(MIN_FAILING, math.ceil(self.settings['needed_share'] * len(self.frames)))
 
     def failing(self):
-        return sum(1 for _, s in self.frames if s >= self.settings['threshold'])
+        return len(self.failing_times())
 
 
 class HailoBackend:
@@ -440,6 +573,7 @@ class FailureMonitor:
         self.reprints = AutoReprint(core, engine, self.settings['auto_reprint'], python=self.settings['python'], clock=clock)
         self.models = ModelUpdates(core, self, clock=clock)
         self.training = TrainingPictures(core, self.settings['collect'], clock=clock)
+        self.focus = Focus(clock)
         if self.settings['enabled']:
             self.models.apply_saved()   # a model an automatic update switched to last time
 
@@ -459,6 +593,51 @@ class FailureMonitor:
         self.core.save_settings({**self.core.settings, 'ai_watch_off': sorted(off)})
         self.store_event(name, 'AI failure watch ' + ('on' if on else 'off'), 'Changed in the dashboard.')
 
+    def tuning(self, name):
+        """This printer's settings with its dashboard sensitivity applied."""
+        return tuned(self.settings, (self.core.settings.get('ai_tuning') or {}).get(name))
+
+    def set_tuning(self, name, data):
+        """Dashboard sensitivity: {'preset': 'sensitive'}, or custom values (threshold, hold, min_minutes,
+        needed_share, focus), or {'preset': 'normal'} for config.json's settings."""
+        if name not in self.core.names():
+            raise ValueError('Unknown printer.')
+        preset = data.get('preset') or 'custom'
+        if preset not in PRESETS and preset != 'custom':
+            raise ValueError('Unknown sensitivity preset.')
+        saved = {'preset': preset} if preset != 'custom' else {}
+        if preset == 'custom':
+            for key, (low, high) in TUNING_LIMITS.items():
+                if data.get(key) is not None:
+                    try:
+                        saved[key] = float(data[key])
+                    except (TypeError, ValueError):
+                        raise ValueError(f'{key} must be a number.') from None
+                    if not low <= saved[key] <= high:
+                        raise ValueError(f'{key} must be between {low:g} and {high:g}.')
+            if saved.get('hold') is not None and saved.get('threshold') is not None and saved['hold'] > saved['threshold']:
+                raise ValueError('The keep-counting score must not be above the failure score.')
+        if data.get('focus') is not None:
+            saved['focus'] = bool(data['focus'])
+        all_tuning = dict(self.core.settings.get('ai_tuning') or {})
+        if saved in ({'preset': 'normal'}, {'preset': 'normal', 'focus': self.settings['focus']}):
+            all_tuning.pop(name, None)
+        else:
+            all_tuning[name] = saved
+        self.core.save_settings({**self.core.settings, 'ai_tuning': all_tuning})
+        t = self.tuning(name)
+        self.store_event(name, 'AI sensitivity changed', f"{PRESET_NAMES[t['preset']]}: failure at {t['threshold']:.0%}, keeps counting "
+                         f"from {t['hold']:.0%}, {t['needed_share']:.0%} of frames over {t['min_minutes']:g} min"
+                         f"{', zoom on suspicious spots' if t['focus'] else ', no zoom'}.")
+        return t
+
+    def tuning_state(self, name):
+        t = self.tuning(name)
+        values = lambda v: {k: v[k] for k in ('threshold', 'hold', 'min_minutes', 'needed_share')}
+        return dict(preset=t['preset'], preset_name=PRESET_NAMES[t['preset']], focus=t['focus'], window_minutes=t['window_minutes'],
+                    **values(t), presets={k: values(tuned(self.settings, {'preset': k})) for k in PRESETS},
+                    nms_floor=0.25 if str(self.settings['model']).lower().endswith('.hef') else 0)
+
     def store_event(self, name, title, detail):
         listener = getattr(self.core, 'event_listener', None)
         if listener:
@@ -471,6 +650,7 @@ class FailureMonitor:
         return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name), 'reprint': self.reprints.state(name),
                 'model': Path(self.settings['model']).name, 'model_update': self.models.message,
                 'interval': round(self.throttle.current, 1), 'interval_reason': self.throttle.reason,
+                'tuning': self.tuning_state(name), 'focus': self.focus.describe(name),
                 **(self.backend.describe() if hasattr(self.backend, 'describe') else {})}
 
     def _set(self, name, **values):
@@ -510,8 +690,11 @@ class FailureMonitor:
         if state != 'RUNNING' or not connected:
             self.judges.pop(name, None)
             self._set(name, status='idle', message='Watches while the printer is printing.', score=None, failing=0, frames=0, job='');return
+        tuning = self.tuning(name)
         if judge is None or judge.job != job:
-            judge = self.judges[name] = Judge(self.settings, self.clock);judge.reset(job)
+            judge = self.judges[name] = Judge(tuning, self.clock);judge.reset(job)
+        judge.settings = tuning   # a sensitivity change applies to the evidence already collected
+        self.focus.reset(name, job)
         picture = None
         if on_request and getattr(self.core, 'capture_still', None):   # a fresh picture, not a reused one
             try:
@@ -523,11 +706,12 @@ class FailureMonitor:
         picture = picture or await self.core.snapshot(name, timeout=20, max_age=max(4, self.throttle.current - 5))
         if not picture:
             self._set(name, status='watching', message='No camera picture this time.');return
-        crops = crops_for(self.geometry.corners(name)) if self.settings['crops'] == 'auto' else []
+        crops = self.crops(name, tuning)
         try:
             score, detections = await self.backend.score(picture, crops)
         except Exception as exc:
             self._set(name, status='unavailable', message=str(exc)[:300]);return
+        self.focus.update(name, detections, tuning['labels'])
         try:
             layer = int(data.get('layer_num') or 0)
         except (TypeError, ValueError):
@@ -544,14 +728,14 @@ class FailureMonitor:
             self.training.save(name, active['id'] if active else job, picture, raw, status)
         except OSError:
             log.warning('Could not save a training picture for %s', name)
-        labels = ', '.join(sorted({d.get('label', '?') for d in detections if d.get('score', 0) >= self.settings['threshold']})) or ''
+        labels = ', '.join(sorted({d.get('label', '?') for d in detections if d.get('score', 0) >= tuning['threshold']})) or ''
         message = ('Warming up: the first minutes of a print are not judged.' if verdict == 'warming_up' else
                    f"{judge.failing()} of the last {len(judge.frames)} frames look like a failure" + (f' ({labels})' if labels else '')
                    + (f', {where}' if where else '') + '.')
         if where:
             labels = f'{labels}, {where}' if labels else where
-        threshold = self.settings['threshold']
-        result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, verdict=verdict, where=where,
+        threshold = tuning['threshold']
+        result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, hold=tuning['hold'], verdict=verdict, where=where,
                       detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted)
         if judge.acted:   # already reported (and maybe paused) for this print: keep that status, don't act again
             self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames));return result
@@ -581,11 +765,13 @@ class FailureMonitor:
         picture = picture or await self.core.snapshot(name, timeout=20)
         if not picture:
             raise ValueError('No camera picture right now. Check the camera, then try again.')
-        crops = crops_for(self.geometry.corners(name)) if self.settings['crops'] == 'auto' else []
+        tuning = self.tuning(name)
+        crops = self.crops(name, tuning)
         try:
             score, detections = await self.backend.score(picture, crops)
         except Exception as exc:
             raise ValueError(f'The AI could not check the picture: {str(exc)[:300]}') from exc
+        self.focus.update(name, detections, tuning['labels'])
         state, _, data, _ = self.core.state_data(name)
         where = ''
         if state in ('RUNNING', 'PAUSE'):
@@ -595,7 +781,7 @@ class FailureMonitor:
                 score_on_file = score
         else:
             score_on_file = score
-        threshold = self.settings['threshold']
+        threshold = tuning['threshold']
         try:
             self.training.save(name, 'manual-test', picture, score, 'suspect' if score >= threshold else 'watching', force=True)
         except OSError:
@@ -605,10 +791,18 @@ class FailureMonitor:
                     labels=sorted(self.settings['labels']), detections=detections, crops=crops, where=where,
                     picture=base64.b64encode(picture).decode(), checked=self.clock())
 
+    def crops(self, name, tuning):
+        """Close-ups for this check: around the calibrated bed (or the defaults), plus where Focus found the print
+        or a suspicious spot."""
+        if self.settings['crops'] != 'auto':
+            return []
+        base = crops_for(self.geometry.corners(name))
+        return base + (self.focus.crops(name, base) if tuning['focus'] else [])
+
     async def act(self, name, job, judge, labels, on_request=False, score=None):
-        failing_times = [t for t, s in judge.frames if s >= self.settings['threshold']]
+        failing_times = judge.failing_times()
         if on_request and not judge.flagged:
-            detail = (f"Checked on request: this camera frame scored {score:.0%} (threshold {self.settings['threshold']:.0%})"
+            detail = (f"Checked on request: this camera frame scored {score:.0%} (threshold {judge.settings['threshold']:.0%})"
                       + (f' ({labels})' if labels else '') + f" • {job or 'current print'}")
         else:
             minutes = (judge.frames[-1][0] - min(failing_times)) / 60 if failing_times else 0

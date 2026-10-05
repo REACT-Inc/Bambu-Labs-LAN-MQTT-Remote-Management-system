@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 sys.path.insert(0,str(Path(__file__).parents[1]))
-from failureDetection.detection import FailureMonitor,HailoBackend,Judge,settings_for
+from failureDetection.detection import FOCUS_KEEP,Focus,FailureMonitor,HailoBackend,Judge,settings_for,tuned
 from failureDetection.hailo_worker import parse
 
 
@@ -70,6 +70,84 @@ class JudgeTests(unittest.TestCase):
         for _ in range(7):self.add(0.9)
         self.assertEqual(self.add(0.9,step=600),'watching')   # 10 min without a picture
         self.assertEqual(len(self.judge.frames),1)
+
+
+class HoldTests(unittest.TestCase):
+    """A real failure's score flickers around the threshold: once two frames reached it, frames at or above the
+    lower hold score keep counting."""
+    def judge(self,**overrides):
+        self.clock=Clock();j=Judge(settings(threshold=0.4,**overrides),self.clock);j.reset('job');self.clock.now+=200;self.n=0;return j
+    def feed(self,j,scores):
+        out=[]
+        for score in scores:
+            self.clock.now+=30;self.n+=1;out.append(j.add(score,f'f{self.n}'))
+        return out
+
+    def test_flickering_failure_is_caught(self):
+        flicker=[0.45,0.3,0.42,0.33,0.38,0.31,0.44,0.29,0.36,0.41,0.32,0.35]   # only 4 of 12 frames reach 40%
+        self.assertIn('failure',self.feed(self.judge(),flicker))                # default hold 25%
+        self.assertNotIn('failure',self.feed(self.judge(hold=0.4),flicker))     # without hold it never adds up
+
+    def test_one_strong_frame_is_not_enough(self):
+        j=self.judge()
+        self.assertNotIn('failure',self.feed(j,[0.5]+[0.35]*15))
+        self.assertLessEqual(j.failing(),1)
+
+    def test_newest_frame_must_reach_hold(self):
+        j=self.judge()
+        self.assertNotIn('failure',self.feed(j,[0.5,0.45]+[0.3]*6+[0.1]))
+        self.assertEqual(self.feed(j,[0.3]),['failure'])
+
+    def test_hold_defaults_below_the_threshold(self):
+        self.assertEqual(settings(threshold=0.6)['hold'],0.45)
+        self.assertEqual(settings(threshold=0.1)['hold'],0.05)
+        self.assertEqual(settings(threshold=0.5,hold=0.9)['hold'],0.5)   # never above the threshold
+
+
+class TuningTests(unittest.TestCase):
+    def test_presets_and_custom_values(self):
+        base=settings(threshold=0.4)
+        self.assertEqual(tuned(base,None)['threshold'],0.4);self.assertEqual(tuned(base,None)['preset'],'normal')
+        sensitive=tuned(base,{'preset':'sensitive'})
+        self.assertEqual((sensitive['threshold'],sensitive['hold'],sensitive['min_minutes'],sensitive['needed_share']),(0.35,0.2,3,0.4))
+        custom=tuned(base,{'threshold':0.3,'min_minutes':12,'needed_share':5})
+        self.assertEqual((custom['preset'],custom['threshold'],custom['hold'],custom['needed_share']),('custom',0.3,0.15,1.0))
+        self.assertEqual(custom['window_minutes'],13)   # the window always covers the minutes asked for
+        self.assertEqual(tuned(base,{'preset':'normal','focus':False})['focus'],False)
+        self.assertEqual(base['threshold'],0.4)   # the shared settings are never changed
+
+    def test_area_classes_never_count_as_failures(self):
+        s=settings_for({'failure_detection':{'classes':['spaghetti','print','bed']}})
+        self.assertEqual(s['labels'],['spaghetti'])
+
+
+class FocusTests(unittest.TestCase):
+    def setUp(self):self.clock=Clock();self.focus=Focus(self.clock);self.focus.reset('A1','job')
+
+    def test_zooms_in_on_a_suspicious_spot_for_a_while(self):
+        self.focus.update('A1',[{'label':'spaghetti','score':0.3,'box':[0.6,0.2,0.7,0.3]},{'label':'spaghetti','score':0.05,'box':[0,0,0.1,0.1]}],['spaghetti'])
+        crops=self.focus.crops('A1',[])
+        self.assertEqual(len(crops),1)
+        x0,y0,x1,y1=crops[0]
+        self.assertAlmostEqual(x1-x0,0.3);self.assertAlmostEqual((x0+x1)/2,0.65)   # 2.5x the box, at least 30% of the picture
+        self.assertIn('suspicious spot (30%',self.focus.describe('A1'))
+        self.clock.now+=FOCUS_KEEP+1
+        self.assertEqual(self.focus.crops('A1',[]),[]);self.assertEqual(self.focus.describe('A1'),'')
+
+    def test_weak_or_unlabelled_detections_are_ignored(self):
+        self.focus.update('A1',[{'label':'spaghetti','score':0.08,'box':[0.1,0.1,0.2,0.2]},{'label':'spaghetti','score':0.9,'box':None}],['spaghetti'])
+        self.assertEqual(self.focus.crops('A1',[]),[])
+
+    def test_print_class_gives_the_area(self):
+        self.focus.update('A1',[{'label':'print','score':0.8,'box':[0.4,0.4,0.6,0.6]}],['spaghetti'])
+        self.assertEqual(self.focus.crops('A1',[]),[[0.35,0.35,0.65,0.65]])
+        self.assertIn('print the model found',self.focus.describe('A1'))
+
+    def test_skips_a_close_up_already_covered_and_resets_per_print(self):
+        self.focus.update('A1',[{'label':'spaghetti','score':0.5,'box':[0.4,0.4,0.6,0.6]}],['spaghetti'])
+        self.assertEqual(self.focus.crops('A1',[[0.26,0.25,0.75,0.76]]),[])
+        self.focus.reset('A1','job');self.assertEqual(len(self.focus.crops('A1',[])),1)   # same print: kept
+        self.focus.reset('A1','next');self.assertEqual(self.focus.crops('A1',[]),[])
 
 
 class WorkerParseTests(unittest.TestCase):
@@ -218,6 +296,41 @@ class MonitorTests(unittest.IsolatedAsyncioTestCase):
     async def run_checks(self,m,count,step=30):
         for _ in range(count):
             self.clock.now+=step;await m.check('H2D')
+
+    async def test_sensitivity_preset_catches_low_scores(self):
+        core=FakeCore();m=self.monitor(core,'notify',backend=FakeBackend(0.4))
+        await self.run_checks(m,20);core.notify.assert_not_awaited()   # 40% is under config's 60%
+        tuning=m.set_tuning('H2D',{'preset':'sensitive'})
+        self.assertEqual(core.settings['ai_tuning'],{'H2D':{'preset':'sensitive'}});self.assertEqual(tuning['threshold'],0.35)
+        await self.run_checks(m,12);core.notify.assert_awaited_once()
+        self.assertEqual(m.state('H2D')['tuning']['preset'],'sensitive')
+        self.assertIn('AI sensitivity changed',[e[1] for e in core.events])
+
+    async def test_tuning_validation_and_reset(self):
+        core=FakeCore();m=self.monitor(core)
+        with self.assertRaisesRegex(ValueError,'between'):m.set_tuning('H2D',{'threshold':2})
+        with self.assertRaisesRegex(ValueError,'not be above'):m.set_tuning('H2D',{'threshold':0.3,'hold':0.5})
+        with self.assertRaisesRegex(ValueError,'Unknown sensitivity'):m.set_tuning('H2D',{'preset':'max'})
+        with self.assertRaisesRegex(ValueError,'Unknown printer'):m.set_tuning('X',{'preset':'normal'})
+        m.set_tuning('H2D',{'threshold':0.3,'hold':0.2,'min_minutes':2,'needed_share':0.5,'focus':False})
+        state=m.state('H2D')['tuning']
+        self.assertEqual((state['preset'],state['threshold'],state['focus']),('custom',0.3,False))
+        self.assertEqual(state['presets']['normal']['threshold'],0.6);self.assertEqual(state['nms_floor'],0.25)
+        m.set_tuning('H2D',{'preset':'normal','focus':True})
+        self.assertEqual(core.settings['ai_tuning'],{})
+
+    async def test_close_up_follows_a_suspicious_spot(self):
+        class Spotting(FakeBackend):
+            def __init__(self):super().__init__(0.2);self.crops=[]
+            async def score(self,jpeg,crops=None):
+                self.crops.append(crops);return 0.2,[{'label':'spaghetti','score':0.2,'box':[0.7,0.1,0.8,0.2]}]
+        core=FakeCore();backend=Spotting();m=self.monitor(core,backend=backend)
+        await self.run_checks(m,2)
+        self.assertEqual(len(backend.crops[0]),3)    # the default close-ups
+        self.assertEqual(len(backend.crops[1]),4)    # plus one around the spot seen last time
+        self.assertIn('suspicious spot',m.state('H2D')['focus'])
+        m.set_tuning('H2D',{'preset':'normal','focus':False})
+        await self.run_checks(m,1);self.assertEqual(len(backend.crops[2]),3)
 
     async def test_off_without_config(self):
         m=FailureMonitor(FakeCore(),None)
