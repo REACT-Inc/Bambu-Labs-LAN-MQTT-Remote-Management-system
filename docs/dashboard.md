@@ -49,7 +49,7 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 
 ## Print queue
 
-- **The queue:** each printer's waiting jobs in order. The first job has **Start next** and **Start ignoring error**, and every waiting job has **↑ ↓ Remove**.
+- **The queue:** each printer's waiting jobs in order. The first job has **Start next**. When the printer reports an error, the button says so and asks before starting anyway. and every waiting job has **↑ ↓ Remove**.
 - **Needs review:** jobs whose outcome is uncertain show **Mark finished / failed / cancelled**.
 - **History:** finished jobs, each with **Queue again**, and **Print on another printer…** to send it to a different printer of the same model (see [Print queue](print-queue.md)).
 - **Filter:** a printer filter at the top.

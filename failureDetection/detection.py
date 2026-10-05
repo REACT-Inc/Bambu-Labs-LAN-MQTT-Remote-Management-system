@@ -52,6 +52,7 @@ DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], thres
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
                 geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
                 hold=None, focus=True)
+CAMERAS = 2   # camera pictures fetched at the same time
 START_DELAY = 5   # seconds after start-up before the AI helper is started
 START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
 GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
@@ -574,6 +575,9 @@ class FailureMonitor:
         self.settings = settings_for(getattr(core, 'CONFIG', {}))
         self.backend = backend or (HailoBackend(self.settings) if self.settings['enabled'] else None)
         self.judges, self.status, self.task, self.pause_poll = {}, {}, None, 1
+        # At most CAMERAS camera pictures are fetched at once: every printer is checked each round, but a Pi decoding
+        # seven camera streams together (and Bambu cameras that take one connection at a time) would struggle.
+        self.cameras = asyncio.Semaphore(CAMERAS)
         self.locks = {}   # per printer: the background loop and "Check AI now" never judge one printer at the same moment
         self.throttle = Throttle(self.settings)
         self.geometry = GeometryCheck(core, engine, self.settings)
@@ -710,7 +714,9 @@ class FailureMonitor:
                 picture = None
         # A reused picture must be newer than the check interval: an older one would be the frame the last check
         # already judged (skipped as a duplicate), halving how many frames count.
-        picture = picture or await self.core.snapshot(name, timeout=20, max_age=max(4, self.throttle.current - 5))
+        if not picture:
+            async with self.cameras:
+                picture = await self.core.snapshot(name, timeout=20, max_age=max(4, self.throttle.current - 5))
         if not picture:
             self._set(name, status='watching', message='No camera picture this time.');return
         crops = self.crops(name, tuning)
@@ -732,7 +738,8 @@ class FailureMonitor:
         status = {'warming_up': 'watching', 'watching': 'watching', 'suspect': 'suspect', 'failure': 'failure'}[verdict]
         active = self.engine.store.active(name) if getattr(self.engine, 'store', None) else None
         try:   # training pictures from this camera (never lets a disk problem stop the watch)
-            self.training.save(name, active['id'] if active else job, picture, raw, status)
+            # Disk work (writing, and sometimes tidying thousands of files) stays off the event loop.
+            await asyncio.to_thread(self.training.save, name, active['id'] if active else job, picture, raw, status)
         except OSError:
             log.warning('Could not save a training picture for %s', name)
         labels = ', '.join(sorted({d.get('label', '?') for d in detections if d.get('score', 0) >= tuning['threshold']})) or ''
@@ -792,7 +799,7 @@ class FailureMonitor:
             score_on_file = score
         threshold = tuning['threshold']
         try:
-            self.training.save(name, 'manual-test', picture, score, 'suspect' if score >= threshold else 'watching', force=True)
+            await asyncio.to_thread(self.training.save, name, 'manual-test', picture, score, 'suspect' if score >= threshold else 'watching', force=True)
         except OSError:
             pass
         self._set(name, **self.overlay(name, detections, tuning))   # the camera view shows these boxes too

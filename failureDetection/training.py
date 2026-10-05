@@ -14,12 +14,14 @@ and retrain (failureDetection/FAILURE_DETECTION.md, "Better accuracy for your pr
 import os
 import re
 import shutil
+import threading
 import time
 import zipfile
 from pathlib import Path
 
 DEFAULTS = dict(enabled=True, every_minutes=1.0, max_pictures=5000, min_free_mb=2048)
-FLAGGED_GAP = 25   # seconds: keeps every suspicious check (the monitor looks every 30 s)
+FLAGGED_GAP = 25   # seconds between kept suspicious frames per printer
+HEADROOM = 20   # a tidy-up removes this many extra old pictures, so it lists the folder (slow on an SD card) rarely
 README = """Training pictures from your printers' cameras
 =============================================
 
@@ -56,6 +58,8 @@ class TrainingPictures:
         data = getattr(core, 'DATA_DIR', None)
         self.folder = Path(data) / 'training' if data else None   # no data folder (tests): nothing is kept
         self.last, self.last_flagged, self.problem = {}, {}, ''   # problem: why the last picture wasn't kept
+        self.count = None   # pictures kept, counted once and then kept up to date
+        self.lock = threading.Lock()   # saves run in worker threads (one per printer at a time)
 
     def pictures(self):
         return sorted(self.folder.glob('*/*/*.jpg'), key=lambda p: p.name) if self.folder and self.folder.is_dir() else []
@@ -97,16 +101,26 @@ class TrainingPictures:
             self.problem = f'Not saving: {exc.strerror or type(exc).__name__} writing {target.parent}.'
             raise
         self.problem = ''
-        self.prune()
+        with self.lock:
+            self.count = len(self.pictures()) if self.count is None else self.count + 1
+            if self.count > self.settings['max_pictures']:
+                self.prune()
         return target
 
     def prune(self):
+        """Remove the oldest pictures down to the cap, minus some headroom, so this runs once every HEADROOM saves
+        instead of after every one."""
         pictures = self.pictures()
-        for old in pictures[:max(0, len(pictures) - self.settings['max_pictures'])]:
+        keep = self.settings['max_pictures'] - min(HEADROOM, self.settings['max_pictures'] // 10)
+        for old in pictures[:max(0, len(pictures) - keep)]:
             old.unlink(missing_ok=True)
+        self.count = min(len(pictures), keep)
         for folder in (self.folder.glob('*/*') if self.folder else []):
-            if folder.is_dir() and not any(folder.iterdir()):
-                folder.rmdir()
+            try:
+                if folder.is_dir() and not any(folder.iterdir()):
+                    folder.rmdir()
+            except OSError:   # a picture was just saved there
+                pass
 
     def summary(self):
         pictures = self.pictures()
@@ -128,5 +142,6 @@ class TrainingPictures:
     def clear(self):
         if self.folder and self.folder.is_dir():
             shutil.rmtree(self.folder)
+        self.count = None
         self.last.clear()
         self.last_flagged.clear()
