@@ -5,6 +5,11 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased (1.6.3)
 
 ### Added
+- **AI failure detection compares what it sees with the print file (#79).** For prints started from the queue or Print now, the app reads the plate's G-code to learn where plastic should be, layer by layer, and how tall the part is.
+  - **Off the part:** with a camera calibrated to the bed (click the four bed corners once in the printer's AI panel), a detection where the file puts no plastic keeps its full score and is reported as *outside where the print file puts plastic*.
+  - **On the part:** a detection on the part counts for half, since it's more likely the part's own supports or thin features.
+  - **Light on the Pi:** the G-code is read once per print in a low-priority background process and cached.
+  - **Otherwise unchanged:** uncalibrated cameras and prints started elsewhere work exactly as before.
 - **AI failure detection sets itself up on install and update (#75).** On a Pi with a camera printer, `install.sh` and `update.sh` now do everything that was first done by hand:
   - **Packages:** install OpenCV for CPU models.
   - **AI HAT:** detect it and install its software. If the driver didn't load (seen on Raspberry Pi OS Trixie), install the kernel headers and rebuild it.

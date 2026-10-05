@@ -44,7 +44,7 @@ def input_batch(frame):
 
 
 def parse(outputs, class_names, failure_labels, threshold=0.05):
-    """Turn raw model outputs into [{'label', 'score', 'box'}] (box in model-input pixels for NMS output, else None)."""
+    """Turn raw model outputs into [{'label', 'score', 'box'}] (box as 0-1 fractions of the model input for NMS output, else None)."""
     detections = []
     for value in outputs.values():
         batch = value[0] if isinstance(value, (list, tuple)) and value and isinstance(value[0], (list, tuple)) else value
@@ -64,6 +64,18 @@ def parse(outputs, class_names, failure_labels, threshold=0.05):
                 if float(score) >= threshold:
                     detections.append(dict(label=label, score=round(float(score), 4), box=None))
     return summarise(detections, failure_labels)
+
+
+def to_picture(detections, width, height, scale, pad_x, pad_y, image_width, image_height):
+    """Boxes come back as fractions of the letterboxed model input; turn them into fractions of the camera picture
+    (so they can be drawn on it and matched against the bed calibration)."""
+    for detection in detections:
+        box = detection.get('box')
+        if box:
+            xs = [min(1.0, max(0.0, (box[i] * width - pad_x) / scale / image_width)) for i in (0, 2)]
+            ys = [min(1.0, max(0.0, (box[i] * height - pad_y) / scale / image_height)) for i in (1, 3)]
+            detection['box'] = [round(xs[0], 4), round(ys[0], 4), round(xs[1], 4), round(ys[1], 4)]
+    return detections
 
 
 def summarise(detections, failure_labels):
@@ -117,10 +129,11 @@ def main_cpu(model, class_names, failure_labels, size):
         try:
             request = json.loads(line)
             image = Image.open(io.BytesIO(base64.b64decode(request['jpeg'])))
-            frame, _, _, _ = letterbox(image, size, size)
+            frame, scale, pad_x, pad_y = letterbox(image, size, size)
             # The letterboxed frame is already RGB, as Ultralytics models expect.
             net.setInput(cv2.dnn.blobFromImage(np.array(frame), 1 / 255.0, (size, size), swapRB=False, crop=False))
-            reply = summarise(decode_yolov8(net.forward(), class_names, size, size), failure_labels)
+            detections = to_picture(decode_yolov8(net.forward(), class_names, size, size), size, size, scale, pad_x, pad_y, image.width, image.height)
+            reply = dict(summarise(detections, failure_labels), image=[image.width, image.height])
         except Exception as exc:   # one bad frame never stops the helper
             reply = {'error': f'{type(exc).__name__}: {exc}'[:300]}
         print(json.dumps(reply), flush=True)
@@ -148,9 +161,11 @@ def main():
                 try:
                     request = json.loads(line)
                     image = Image.open(io.BytesIO(base64.b64decode(request['jpeg'])))
-                    frame, _, _, _ = letterbox(image, width, height)
+                    frame, scale, pad_x, pad_y = letterbox(image, width, height)
                     result = pipeline.infer({info.name: input_batch(frame)})
                     reply = parse(result, class_names, failure_labels)
+                    to_picture(reply['detections'], width, height, scale, pad_x, pad_y, image.width, image.height)
+                    reply['image'] = [image.width, image.height]
                 except Exception as exc:   # one bad frame never stops the helper
                     reply = {'error': f'{type(exc).__name__}: {exc}'[:300]}
                 print(json.dumps(reply), flush=True)

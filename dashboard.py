@@ -73,6 +73,7 @@ class Dashboard:
             web.get('/api/live/{name}',self.cameras.stream),
             web.post('/api/plateswap/{name}/{action}',self.plate_swap),
             web.post('/api/ai/{name}',self.ai_watch),
+            web.post('/api/ai/{name}/calibration',self.ai_calibration),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
@@ -125,6 +126,16 @@ class Dashboard:
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
         data=await request.json()
         self.failure.set_watching(name,bool(data.get('watch')))
+        return web.json_response(self.failure.state(name))
+
+    async def ai_calibration(self, request):
+        name=request.match_info['name']
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        data=await request.json()
+        corners=None if data.get('clear') else data.get('corners')
+        if corners is not None and (not isinstance(corners,list) or len(corners)!=4):raise ValueError('Click the four bed corners.')
+        self.failure.geometry.set_corners(name,corners)
+        self.failure.store_event(name,'AI camera calibration '+('cleared' if corners is None else 'saved'),'Bed corners for comparing the camera with the print file.')
         return web.json_response(self.failure.state(name))
 
     async def files(self, request):
