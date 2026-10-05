@@ -320,12 +320,16 @@ class Dashboard:
         """Print straight away without waiting in the queue (#7): the job goes to the front and starts now, with the
         usual checks and confirmation. If it can't start, it's cancelled, so nothing is left waiting in the queue."""
         if data.get('confirmed') is not True: raise ValueError('Confirm the plate is clear and the file is sliced for this printer.')
+        override=data.get('override_error',False)
+        if type(override) is not bool: raise ValueError('Error override must be a boolean.')
         printer=data.get('printer')
-        if printer in self.core.names():self.engine.ready(printer)   # fail fast before anything is added
+        # Fail fast before anything is added. Like the queue's Start ignoring error, the override allows a FAILED
+        # state or a reported error code (e.g. after a failed print); it doesn't clear the error on the printer.
+        if printer in self.core.names():self.engine.ready(printer,override)
         job=self.add(data,author)
         try:
             self.store.move_to_front(job['id'])
-            await self.engine.start(job['id'],True,author)
+            await self.engine.start(job['id'],True,author,override)
         except Exception as exc:
             if self.store.get(job['id'])['status']=='queued':
                 self.store.set_status(job['id'],'cancelled',f'Print now could not start: {exc}'[:300])
