@@ -11,6 +11,14 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **No repeats:** a print already reported isn't paused again.
   - **Confirmation:** asked first when the action is "pause".
 
+- **The AI adapts how often it looks.** With the new default `"interval": "auto"`:
+  - **Quiet Pi:** it checks more often, down to every 10 s on the CPU or 5 s with the AI HAT.
+  - **Busy Pi:** it backs off, up to every 60 s.
+  - **Limit:** it never spends more than half its time checking.
+  - **Visible:** the AI panel shows the current pace and why.
+  - **Fixed pace:** a number in `"interval"` still works.
+- **The failure rule is time-based,** so it means the same at any pace: 60% of the frames from the last 5 minutes have to look failed, over at least 4 minutes (and at least 4 frames). Existing `window`/`needed` settings convert automatically (10 frames × 30 s = 5 minutes, 6 of 10 = 60%).
+
 ### Fixed
 - **The AI judged only about half the frames.** It checks every 30 seconds but reused camera pictures up to 60 seconds old, so every other check saw the frame it had already judged and skipped it. Now it only reuses a picture newer than its check interval, so every check judges a new frame, and failures are confirmed in half the time.
 

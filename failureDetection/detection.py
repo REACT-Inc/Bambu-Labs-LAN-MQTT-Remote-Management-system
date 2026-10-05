@@ -27,6 +27,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import math
 import os
 import sys
 import tempfile
@@ -41,9 +42,10 @@ from failureDetection.training import TrainingPictures
 
 log = logging.getLogger('failure-detection')
 WORKER = Path(__file__).with_name('hailo_worker.py')
-DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval=30, window=10,
+DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval='auto', window=10,
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
-                geometry={}, auto_reprint={}, crops='auto', collect={})
+                geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60)
+START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
 GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
 
 
@@ -51,10 +53,22 @@ def settings_for(config):
     raw = (config or {}).get('failure_detection')
     s = {**DEFAULTS, **(raw if isinstance(raw, dict) else {})}
     s['threshold'] = min(0.99, max(0.05, float(s['threshold'])))
-    s['interval'] = max(10, int(s['interval']))
+    # How often to look: "auto" adapts to how busy the Pi is (Throttle), or a fixed number of seconds.
+    # The AI HAT (.hef) runs the model itself, so it may look more often than the CPU (.onnx).
+    hat = str(s['model']).lower().endswith('.hef')
+    floor = 5 if hat else 10
+    s['min_interval'] = max(floor, int(s['min_interval'] if s['min_interval'] is not None else floor))
+    s['max_interval'] = max(s['min_interval'], min(300, int(s['max_interval'])))
+    s['fixed_interval'] = None if s['interval'] == 'auto' else min(300, max(floor, int(s['interval'])))
+    s['interval'] = s['fixed_interval'] or START_INTERVAL
     s['window'] = min(60, max(3, int(s['window'])))
     s['needed'] = min(s['window'], max(2, int(s['needed'])))
     s['min_minutes'] = max(1.0, float(s['min_minutes']))
+    # The decision is time-based, so it means the same however often the AI looks: the old "6 of the last 10
+    # frames" (30 s apart) is "60% of the frames from the last 5 minutes". Both still have to span min_minutes.
+    s['window_minutes'] = max(s['min_minutes'] + 1, s['window'] * (s['fixed_interval'] or START_INTERVAL) / 60)
+    s['needed_share'] = s['needed'] / s['window']
+    s['gap_seconds'] = max(120, 4 * s['max_interval'])   # a longer camera gap starts the evidence again
     s['warm_up'] = max(0.0, float(s['warm_up']))
     s['action'] = 'pause' if s['action'] == 'pause' else 'notify'
     s['crops'] = 'off' if s['crops'] in ('off', False, None) else 'auto'
@@ -203,6 +217,52 @@ class GeometryCheck:
                     'Used for prints started from the queue or Print now.')
 
 
+MIN_FAILING = 4   # never decide on fewer failing frames than this, however slowly the AI is looking
+
+
+class Throttle:
+    """Adaptive check interval: look more often while the Pi is quiet, back off while it's busy.
+
+    After each round of checks it looks at the Pi's load (per core), how late the event loop woke up (a sign the
+    dashboard and printer connections are being starved) and how long the round took, then:
+    - busy (load over 0.75 per core, or the loop woke over half a second late): 1.5x longer, up to max_interval;
+    - quiet (load under 0.5 per core): 20% shorter, down to min_interval (10 s on the CPU, 5 s with the AI HAT);
+    - never more than half the time spent checking (the interval is at least twice the round's length).
+    A fixed "interval" in config.json turns this off."""
+
+    def __init__(self, settings, load=None):
+        self.settings = settings
+        self.current = settings['fixed_interval'] or START_INTERVAL
+        self.load = load or self.system_load
+        self.reason = 'starting'
+
+    @staticmethod
+    def system_load():
+        try:
+            return os.getloadavg()[0] / max(1, os.cpu_count() or 1)
+        except OSError:
+            return 0.0
+
+    def next(self, cost, lateness=0.0):
+        """cost: seconds the last round of checks took; lateness: how late the last sleep woke up."""
+        if self.settings['fixed_interval']:
+            self.current, self.reason = self.settings['fixed_interval'], 'fixed in config.json'
+            return self.current
+        load = self.load()
+        if load > 0.75 or lateness > 0.5:
+            self.current *= 1.5
+            self.reason = f'Pi busy (load {load:.2f} per core), looking less often'
+        elif load < 0.5:
+            self.current *= 0.8
+            self.reason = f'Pi quiet (load {load:.2f} per core)'
+        else:
+            self.reason = f'Pi moderately busy (load {load:.2f} per core)'
+        self.current = max(self.settings['min_interval'], 2 * cost, min(self.settings['max_interval'], self.current))
+        self.current = min(self.current, max(self.settings['max_interval'], 2 * cost))
+        self.settings['interval'] = self.current   # the snapshot freshness and the docs read this
+        return self.current
+
+
 class Judge:
     """The per-print evidence for one printer, and the decision."""
 
@@ -211,7 +271,7 @@ class Judge:
         self.reset('')
 
     def reset(self, job):
-        self.job, self.started, self.frames, self.last_hash, self.flagged, self.acted = job, self.clock(), deque(maxlen=self.settings['window']), None, False, False
+        self.job, self.started, self.frames, self.last_hash, self.flagged, self.acted = job, self.clock(), deque(maxlen=600), None, False, False
 
     def add(self, score, frame_hash):
         """Record one scored frame; returns 'warming_up', 'duplicate', 'watching', 'suspect' or 'failure'."""
@@ -222,17 +282,23 @@ class Judge:
         if now - self.started < self.settings['warm_up'] * 60:
             return 'warming_up'
         # A long camera gap breaks the run of evidence.
-        if self.frames and now - self.frames[-1][0] > self.settings['interval'] * 4:
+        if self.frames and now - self.frames[-1][0] > self.settings['gap_seconds']:
             self.frames.clear()
         self.frames.append((now, float(score)))
+        while self.frames and now - self.frames[0][0] > self.settings['window_minutes'] * 60:
+            self.frames.popleft()   # only the last window_minutes count
         failing = [t for t, s in self.frames if s >= self.settings['threshold']]
         if self.flagged:
             return 'failure'
-        if (len(failing) >= self.settings['needed'] and failing[-1] - failing[0] >= self.settings['min_minutes'] * 60
+        if (len(failing) >= self.needed() and failing[-1] - failing[0] >= self.settings['min_minutes'] * 60
                 and self.frames[-1][1] >= self.settings['threshold']):
             self.flagged = True
             return 'failure'
         return 'suspect' if len(failing) >= 2 else 'watching'
+
+    def needed(self):
+        """Failing frames needed now: needed_share of the frames in the window, never fewer than MIN_FAILING."""
+        return max(MIN_FAILING, math.ceil(self.settings['needed_share'] * len(self.frames)))
 
     def failing(self):
         return sum(1 for _, s in self.frames if s >= self.settings['threshold'])
@@ -322,6 +388,7 @@ class FailureMonitor:
         self.backend = backend or (HailoBackend(self.settings) if self.settings['enabled'] else None)
         self.judges, self.status, self.task, self.pause_poll = {}, {}, None, 1
         self.checking = asyncio.Lock()   # the background loop and "Check AI now" never judge at the same moment
+        self.throttle = Throttle(self.settings)
         self.geometry = GeometryCheck(core, engine, self.settings)
         self.reprints = AutoReprint(core, engine, self.settings['auto_reprint'], python=self.settings['python'], clock=clock)
         self.models = ModelUpdates(core, self, clock=clock)
@@ -355,7 +422,8 @@ class FailureMonitor:
             return dict(enabled=False, status='off')
         base = dict(enabled=True, watching=self.watching(name), action=self.settings['action'], status='idle', message='')
         return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name), 'reprint': self.reprints.state(name),
-                'model': Path(self.settings['model']).name, 'model_update': self.models.message}
+                'model': Path(self.settings['model']).name, 'model_update': self.models.message,
+                'interval': round(self.throttle.current, 1), 'interval_reason': self.throttle.reason}
 
     def _set(self, name, **values):
         self.status[name] = {**self.status.get(name, {}), **values, 'checked': self.clock()}
@@ -404,7 +472,7 @@ class FailureMonitor:
                 picture = None
         # A reused picture must be newer than the check interval: an older one would be the frame the last check
         # already judged (skipped as a duplicate), halving how many frames count.
-        picture = picture or await self.core.snapshot(name, timeout=20, max_age=max(5, self.settings['interval'] - 5))
+        picture = picture or await self.core.snapshot(name, timeout=20, max_age=max(4, self.throttle.current - 5))
         if not picture:
             self._set(name, status='watching', message='No camera picture this time.');return
         crops = crops_for(self.geometry.corners(name)) if self.settings['crops'] == 'auto' else []
@@ -491,7 +559,7 @@ class FailureMonitor:
 
     async def act(self, name, job, judge, labels, on_request=False, score=None):
         failing_times = [t for t, s in judge.frames if s >= self.settings['threshold']]
-        if on_request and len(failing_times) < self.settings['needed']:
+        if on_request and not judge.flagged:
             detail = (f"Checked on request: this camera frame scored {score:.0%} (threshold {self.settings['threshold']:.0%})"
                       + (f' ({labels})' if labels else '') + f" • {job or 'current print'}")
         else:
@@ -538,7 +606,9 @@ class FailureMonitor:
             await asyncio.sleep(self.pause_poll)
 
     async def run(self):
+        lateness = 0.0
         while True:
+            started = time.monotonic()
             try:
                 for name in self.core.names():
                     async with self.checking:
@@ -549,7 +619,10 @@ class FailureMonitor:
                 raise
             except Exception:
                 log.exception('Failure detection error')
-            await asyncio.sleep(self.settings['interval'])
+            interval = self.throttle.next(time.monotonic() - started, lateness)
+            woke = time.monotonic() + interval
+            await asyncio.sleep(interval)
+            lateness = max(0.0, time.monotonic() - woke)   # a late wake-up means the Pi is struggling
 
     async def start(self, app=None):
         if self.enabled and not getattr(self.core, 'EXAMPLE_MODE', False):
