@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.7.4)
+## 1.7.4-beta.1
+
+Built on 1.7.3-beta.1. Fixes the dashboard and Discord staying down after an update or restart while the service showed "running". **Update from 1.7.2 or 1.7.3 as soon as you can.**
 
 ### Fixed
 - **The dashboard and Discord could stay down after an update or restart, while the service showed "running"** (1.7.2 and 1.7.3).
