@@ -81,6 +81,7 @@ class Dashboard:
             web.post('/api/ai/{name}/reprint',self.ai_reprint),
             web.post('/api/ai/{name}/test',self.ai_test),
             web.post('/api/ai/{name}/check',self.ai_check),
+            web.post('/api/ai/{name}/tuning',self.ai_tuning),
             web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
@@ -180,6 +181,15 @@ class Dashboard:
         result=await self.failure.check_now(name)
         self.failure.store_event(name,'AI check on request',f"Score {result['score']:.2f} (threshold {result['threshold']:g})"+(' • acted' if result['acted'] else ''))
         return web.json_response({**result,'state':self.failure.state(name)})
+
+    async def ai_tuning(self, request):
+        """Per-printer AI sensitivity: a preset, or custom failure score, keep-counting score, minutes, share, zoom."""
+        name=request.match_info['name']
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        data=await request.json()
+        if not isinstance(data,dict):raise ValueError('Send the sensitivity settings.')
+        self.failure.set_tuning(name,data)
+        return web.json_response(self.failure.state(name))
 
     async def ai_training(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')

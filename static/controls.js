@@ -240,7 +240,30 @@ function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrin
   $('aiReprintCancel').hidden=!rp.pending;}
  const pace=ai.interval?` Checking every ${Math.round(ai.interval)} s while printing (${ai.interval_reason||'adaptive'}).`:'';
  const where=ai.backend?` Running on: ${ai.backend}${ai.active_model?' ('+ai.active_model+')':''}.${ai.backend_note?' ⚠️ '+ai.backend_note:''}`:'';
- $('aiStatus').textContent=!ai.watching?'Off for this printer.':label+(ai.message?' — '+ai.message:'')+(ai.score!=null&&ai.score!==undefined?` (last score ${Number(ai.score).toFixed(2)})`:'')+pace+where;}
+ renderAiTuning(ai);
+ const focus=ai.focus?` 🔍 ${ai.focus[0].toUpperCase()+ai.focus.slice(1)}.`:'';
+ $('aiStatus').textContent=!ai.watching?'Off for this printer.':label+(ai.message?' — '+ai.message:'')+(ai.score!=null&&ai.score!==undefined?` (last score ${Number(ai.score).toFixed(2)})`:'')+focus+pace+where;}
+// Sensitivity: a preset, or your own numbers. The form isn't refreshed from the server while you're editing it.
+let aiTuningDirty=false,aiTuningFor='';
+const pct100=v=>Math.round(v*100);
+function aiTuningValues(){return{threshold:Number($('aiThreshold').value)/100,hold:Number($('aiHold').value)/100,min_minutes:Number($('aiMinutes').value),needed_share:Number($('aiShare').value)/100};}
+function fillAiTuning(v){$('aiThreshold').value=pct100(v.threshold);$('aiHold').value=pct100(v.hold);$('aiMinutes').value=v.min_minutes;$('aiShare').value=pct100(v.needed_share);}
+function explainAiTuning(t){const v=aiTuningValues();if(!v.threshold){$('aiTuningText').textContent='';return;}
+ let text=`Flags a print when ${pct100(v.needed_share)}% of the frames from the last ${Math.max(t.window_minutes||0,v.min_minutes+1)} min look failed, over at least ${v.min_minutes} min. A frame looks failed at ${pct100(v.threshold)}% or more; once two frames got there, frames from ${pct100(v.hold)}% keep counting, because the AI's score of a real failure flickers.`;
+ if(t.nms_floor&&Math.min(v.threshold,v.hold)<t.nms_floor)text+=` Note: the AI HAT model reports nothing under ${pct100(t.nms_floor)}%, so lower scores count as 0.`;
+ if(v.hold>v.threshold)text+=' ⚠️ "Keep counting from" must not be above the failure score.';
+ $('aiTuningText').textContent=text;}
+function renderAiTuning(ai){const t=ai.tuning;$('aiTuningForm').hidden=!t;if(!t)return;
+ if(aiTuningFor!==selectedPrinter){aiTuningDirty=false;aiTuningFor=selectedPrinter;}
+ if(aiTuningDirty||$('aiTuningForm').contains(document.activeElement))return;
+ $('aiPreset').value=t.preset;fillAiTuning(t);$('aiFocus').checked=!!t.focus;explainAiTuning(t);}
+function currentTuning(){return state?.printers.find(p=>p.name===selectedPrinter)?.ai?.tuning||{};}
+$('aiPreset').addEventListener('change',()=>{aiTuningDirty=true;const t=currentTuning(),v=(t.presets||{})[$('aiPreset').value];if(v)fillAiTuning(v);explainAiTuning(t);});
+['aiThreshold','aiHold','aiMinutes','aiShare'].forEach(id=>$(id).addEventListener('input',()=>{aiTuningDirty=true;$('aiPreset').value='custom';explainAiTuning(currentTuning());}));
+$('aiFocus').addEventListener('change',()=>{aiTuningDirty=true;});
+$('aiTuningForm').addEventListener('submit',async e=>{e.preventDefault();const preset=$('aiPreset').value;
+ const data={preset,focus:$('aiFocus').checked,...(preset==='custom'?aiTuningValues():{})};
+ try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/tuning',data);aiTuningDirty=false;notice(`AI sensitivity saved for ${printerLabel(selectedPrinter)}.`);await refresh();}catch(err){notice(err.message);}});
 // Camera-to-bed calibration (#79): four clicked corners map the bed into the picture.
 let calCorners=[];
 const CAL_NAMES=['front-left','front-right','back-right','back-left'];

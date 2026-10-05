@@ -63,22 +63,50 @@ To publish a better model, replace the asset. Pis that downloaded the old one ge
 
 ## How it decides
 
-One bad-looking picture is never enough. While a printer reports **RUNNING**, the Pi takes one camera still every `interval` seconds (30 by default). It uses the cheap single-still path and reuses a recent dashboard still when there is one, so it doesn't add camera load. The AI HAT scores each still, and the last `window` scores (10 by default) are kept. A print is only called a failure when **all** of these hold:
+One bad-looking picture is never enough. While a printer reports **RUNNING**, the Pi takes a camera still every few seconds. The interval adapts to how busy the Pi is: 5–60 s with the AI HAT, 10–60 s on the CPU. The model scores each still.
+
+A frame **looks failed** when its score reaches the **failure score** (`threshold`).
+
+The AI's score for a real failure flickers: the same spaghetti nest scores 45%, then 30%, then 42% from one frame to the next. So once **two** frames have reached the failure score, later frames at or above the lower **keep counting** score (`hold`, by default 0.15 below the threshold) count as failing too.
+
+A print is called a failure when **all** of these hold:
 
 | Rule | Default |
 |---|---|
-| At least `needed` of the last `window` frames score at or above `threshold` | 6 of 10, at 0.6 |
+| At least this share of the frames from the last 5 minutes look failed (`window` × `needed`) | 60% |
 | The failing frames span at least `min_minutes` | 4 minutes |
-| The newest frame is still failing | |
+| At least two frames reached the failure score | |
+| The newest frame is still at or above the keep-counting score | |
 | The print has been running for at least `warm_up` minutes, because heat-up, purge lines and the first layer can look odd | 3 minutes |
 
 How odd frames are handled:
 
 - **Duplicate frames:** a frame identical to the previous one (a frozen camera, or a reused still) is skipped and isn't counted twice.
-- **Camera gaps:** if no frame arrives for more than 4 × `interval`, the evidence starts again.
+- **Camera gaps:** if no frame arrives for a few minutes, the evidence starts again.
 - **Suspect frames:** two or more failing frames that don't yet meet the rules show **suspect** on the dashboard. Nothing is sent.
 
-With the defaults, a real failure is reported about 4–5 minutes after it becomes visible. Raise `min_minutes` or `needed` if you get false alarms. Lower them, with care, to react faster.
+### Sensitivity (per printer, in the dashboard)
+
+Open a printer → **More → AI failure watch → Sensitivity**. Pick a preset, or type your own numbers (that switches the preset to **Custom**), then press **Save sensitivity**. The text under the fields explains what the numbers mean. Settings are kept per printer in `settings.json` (`ai_tuning`).
+
+| Preset | Failure score | Keep counting from | Must last | Share of frames |
+|---|---|---|---|---|
+| Cautious | 60% | 50% | 6 min | 70% |
+| Normal | config.json (`threshold`, `hold`, `min_minutes`, `window`/`needed`) | | | |
+| Sensitive | 35% | 20% | 3 min | 40% |
+| Very sensitive | 25% | 12% | 2 min | 30% |
+
+When failures score only 30–45% on your camera, as on the A1 mini, try **Sensitive**. If it raises false alarms, raise the failure score a little or make it last longer. With a `.hef` model, the AI HAT reports nothing under 25% (its on-chip cut-off), so a lower setting acts like 25%.
+
+### Zooming in on the print (automatic)
+
+The failure model only knows what failures look like, not where the bed is. So the monitor uses the model's own detections to find the print:
+
+- **Suspicious spots:** when a failure detection of 10% or more turns up, the next checks add a close-up around it, 2.5× its size, for 10 minutes. A small nest that scores 30% in the whole picture often scores much higher enlarged, which gets it over the failure score.
+- **The print's area:** a model trained with a `print` or `bed` class (also `object`, `part`, `plate`) gets a close-up around that area. These classes never count as failures. To get one, label the printed part as `print` in Roboflow along with the failures, and retrain.
+- **Status:** the AI panel shows 🔍 when it's zooming in.
+
+You can turn this off per printer in **Sensitivity**. `"focus": false` under `failure_detection` turns it off by default.
 
 ## Better accuracy for your printers
 
@@ -375,6 +403,8 @@ Add a `failure_detection` section (see [Configuration](../docs/configuration.md#
 | `window` | `10` | How many recent frames are kept (3–60). |
 | `needed` | `6` | Failing frames needed within the window. |
 | `min_minutes` | `4` | Minimum minutes between the first and last failing frame. |
+| `hold` | `threshold` − 0.15 | Once two frames reached `threshold`, frames at or above this keep counting as failing. |
+| `focus` | `true` | Add close-ups around suspicious spots (and a `print`/`bed` class) automatically. |
 | `warm_up` | `3` | Minutes at the start of a print that aren't judged. |
 | `action` | `"notify"` | `"notify"` only reports; `"pause"` also pauses the print. |
 | `python` | `/usr/bin/python3` | The Python that has OpenCV (`.onnx`) or `hailo_platform` (`.hef`) installed. |
@@ -399,6 +429,7 @@ Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 | *…No Hailo device…* / *HAILO_OUT_OF_PHYSICAL_DEVICES* | Check `hailortcli fw-control identify`. Another program (for example `rpicam-apps` with Hailo) may be using the HAT; close it. |
 | *No camera picture this time.* | The camera didn't answer; see [Camera](../docs/printer-controls.md#camera). |
 | *Running on: CPU ⚠️ AI HAT model failed to start* | The `.hef` didn't load and the `.onnx` is used. Check `hailortcli fw-control identify`; after fixing it, restart the service. |
-| False alarms | Raise `threshold`, `needed` or `min_minutes`, or turn watching off for that printer. Better: add pictures of your own good prints to the training data. |
+| Failures missed, scores stay around 30–45% | Choose **Sensitive** under Sensitivity, and keep **Zoom in on the print** on. Best: train on your own pictures. |
+| False alarms | Choose **Cautious**, or raise the failure score or how long it must last, or turn watching off for that printer. Better: add pictures of your own good prints to the training data. |
 
 After a failed start, the helper is retried every 5 minutes. Errors are logged to the service log (`sudo journalctl -u 3d-printer-management`).
