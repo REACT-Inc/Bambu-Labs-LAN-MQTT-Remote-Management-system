@@ -255,6 +255,8 @@ $('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarg
  try{await api('jobs/'+encodeURIComponent(sendJob)+'/sendto',{printer:target,use_ams:$('sendToAms').checked,mapping:$('sendToAms').checked?$('sendToMapping').value:'',checked:$('sendToChecked').checked});
   $('sendToDialog').close();notice(`Added to ${printerLabel(target)}'s queue. Start it from the queue when that printer is ready.`);await refresh();}
  catch(e){$('sendToReason').textContent=e.message;}finally{$('sendToSubmit').classList.remove('pending');}};
+// pm-doctor (#43) runs separately on port 8081 of the same host.
+$('doctorLink').href=`${location.protocol}//${location.hostname}:8081/`;
 // Other alerts (#9): Home Assistant, ntfy, webhooks. Tokens never come back from the server; blank keeps the saved one.
 const ALERT_TYPES={ntfy:'ntfy',home_assistant:'Home Assistant',webhook:'Webhook (JSON)',discord_webhook:'Discord webhook'};
 let alertTargets=[];

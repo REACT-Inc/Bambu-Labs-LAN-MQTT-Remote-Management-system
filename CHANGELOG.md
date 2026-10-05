@@ -13,6 +13,14 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Honest result:** the reply says **Cleared** only once the printer stops reporting the error; otherwise it says the error is still reported.
   - **Queue:** a FAILED printer whose error was cleared starts its next queued job normally (the plate-clear confirmation is still required).
   - **Logged:** every clear is recorded in Activity with who did it.
+- **pm-doctor, an independent watchdog (#43).** It keeps working when the app doesn't start, crashes or freezes while systemd says "running".
+  - **Checks every 30 s:** the app service, restart loops, whether the dashboard answers, start-up tracebacks, disk, memory, temperature, under-voltage, and printer and internet reachability.
+  - **When something's wrong:**
+    - it saves an incident record (secrets removed), including a stack dump of a frozen app;
+    - it alerts once when the problem starts and once when it clears, through a Discord webhook (works without the bot) and optionally a GitHub issue;
+    - if you turn it on, it restarts a frozen app.
+  - **Its own status page** on port 8081, using the dashboard password, with restart and report downloads. On the command line: `sudo pm-doctor` and `sudo pm-doctor report`.
+  - **Independent:** Python standard library only, installed outside the app, with CPU and memory limits. See [docs/doctor.md](docs/doctor.md).
 - **Alerts beyond Discord: Home Assistant, ntfy and webhooks (#9).**
   - **Setup:** under the dashboard's **Settings → Other alerts**, add targets that receive the same alerts as Discord (print finished or failed, printer errors and health alerts, AI failure alerts…): all of them, or only the important ones.
   - **Target types:**

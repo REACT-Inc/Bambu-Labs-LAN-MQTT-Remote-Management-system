@@ -6,6 +6,10 @@
 - [Sending a problem report](#sending-a-problem-report)
 - [Common problems](#common-problems)
 
+## When the dashboard and Discord are both down
+
+**pm-doctor** keeps working when the app doesn't: open `http://<pi address>:8081/` (dashboard password), or run `sudo pm-doctor` over SSH. It shows why the app is down, and keeps incident records with stack dumps of a frozen app. Set a Discord webhook in `/etc/pm-doctor/config.json` to be told when it happens. See [pm-doctor](doctor.md).
+
 ## Where to look first
 
 | What | Where |
