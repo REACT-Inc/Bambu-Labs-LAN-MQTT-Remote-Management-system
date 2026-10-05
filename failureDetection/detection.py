@@ -35,12 +35,14 @@ from collections import deque
 from pathlib import Path
 
 from failureDetection import print_geometry
+from failureDetection.auto_reprint import AutoReprint
+from failureDetection.model_updates import ModelUpdates
 
 log = logging.getLogger('failure-detection')
 WORKER = Path(__file__).with_name('hailo_worker.py')
 DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval=30, window=10,
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
-                geometry={})
+                geometry={}, auto_reprint={})
 GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
 
 
@@ -292,6 +294,10 @@ class FailureMonitor:
         self.backend = backend or (HailoBackend(self.settings) if self.settings['enabled'] else None)
         self.judges, self.status, self.task, self.pause_poll = {}, {}, None, 1
         self.geometry = GeometryCheck(core, engine, self.settings)
+        self.reprints = AutoReprint(core, engine, self.settings['auto_reprint'], python=self.settings['python'], clock=clock)
+        self.models = ModelUpdates(core, self, clock=clock)
+        if self.settings['enabled']:
+            self.models.apply_saved()   # a model an automatic update switched to last time
 
     @property
     def enabled(self):
@@ -318,7 +324,8 @@ class FailureMonitor:
         if not self.enabled:
             return dict(enabled=False, status='off')
         base = dict(enabled=True, watching=self.watching(name), action=self.settings['action'], status='idle', message='')
-        return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name)}
+        return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name), 'reprint': self.reprints.state(name),
+                'model': Path(self.settings['model']).name, 'model_update': self.models.message}
 
     def _set(self, name, **values):
         self.status[name] = {**self.status.get(name, {}), **values, 'checked': self.clock()}
@@ -390,6 +397,17 @@ class FailureMonitor:
         self._set(name, status='paused' if paused else 'failure', message=detail)
         title = '🤖 AI paused a failing print' if paused else '🤖 AI: print may be failing'
         hint = '\nCheck the printer. Resume from the dashboard or /resume if it is fine.' if paused else '\nCheck the printer and stop or pause it if needed.'
+        job = self.engine.store.active(name) if getattr(self.engine, 'store', None) else None
+        if paused and job and self.reprints.settings['enabled']:
+            # Automatic reprint (#67): unless someone resumes or stops it, the job reprints elsewhere after the countdown.
+            self.reprints.flag(name, job)
+            try:
+                available = self.reprints.summary(await self.reprints.availability(job))
+            except Exception as exc:
+                available = f'Could not check the other printers ({type(exc).__name__}).'
+            hours = self.reprints.settings['after_hours']
+            hint += (f"\n{available}\nIf it isn't resumed or stopped within {hours:g} h, it will be reprinted on an available printer."
+                     " To do it now, use Reprint now in the dashboard.")
         await self.core.notify(name, title, detail + hint, getattr(self.core, 'RED', 0xE74C3C), True)
 
     async def confirm_pause(self, name, wait=30):
@@ -407,6 +425,8 @@ class FailureMonitor:
             try:
                 for name in self.core.names():
                     await self.check(name)
+                await self.reprints.tick()
+                await self.models.check()   # once a day: a newer model from the ai-model release
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -415,6 +435,8 @@ class FailureMonitor:
 
     async def start(self, app=None):
         if self.enabled and not getattr(self.core, 'EXAMPLE_MODE', False):
+            if self.reprints.settings['enabled']:
+                self.engine.on_start_approved = self.reprints.capture_reference
             self.task = asyncio.create_task(self.run())
 
     async def stop(self, app=None):
