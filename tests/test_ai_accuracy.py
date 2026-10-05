@@ -275,9 +275,42 @@ class ThrottleTests(unittest.TestCase):
         for _ in range(20):t.next(8.0)                                # a round of checks takes 8 s
         self.assertEqual(t.current,16)
 
+    def test_ai_hat_starts_at_five_seconds_and_may_check_back_to_back(self):
+        t=self.throttle(0.2,model='m.hef')
+        self.assertEqual(t.current,5)                                  # no slow start with the AI HAT
+        self.assertEqual(t.next(0.5),5)
+        self.assertEqual(t.next(7.0),7)                                # cameras slower than 5 s: as soon as done
+        self.assertEqual(self.throttle(0.2).current,30)                # the CPU still starts calmly
+
     def test_fixed_interval(self):
         t=self.throttle(1.5,interval=20)
         self.assertEqual(t.next(1.0),20);self.assertIn('fixed',t.reason)
+
+
+class ParallelCheckTests(unittest.IsolatedAsyncioTestCase):
+    """Every printing printer is checked in each round, at the same time."""
+    async def test_printers_are_checked_together(self):
+        import asyncio,time
+        from failureDetection.detection import FailureMonitor
+        class Core:
+            EXAMPLE_MODE=False;settings={}
+            CONFIG={'failure_detection':{'enabled':True,'model':'m.hef'}}
+            def names(self):return ['A','B','C','D']
+            def printer_config(self,name):return {'camera_type':'rtsp'}
+            def state_data(self,name):return ('RUNNING',0,{'subtask_name':'job'},True)
+            async def snapshot(self,name,timeout=25,max_age=60):
+                await asyncio.sleep(0.2);return name.encode()+str(time.monotonic()).encode()
+        class Backend:
+            def __init__(self):self.seen=[]
+            async def score(self,jpeg,crops=None):self.seen.append(jpeg[:1]);return 0.1,[]
+        backend=Backend();m=FailureMonitor(Core(),SimpleNamespace(),backend)
+        costs=[]
+        def stop(cost,lateness=0.0):
+            costs.append(cost);raise asyncio.CancelledError
+        m.throttle.next=stop
+        with self.assertRaises(asyncio.CancelledError):await m.run()
+        self.assertEqual(sorted(backend.seen),[b'A',b'B',b'C',b'D'])
+        self.assertLess(costs[0],0.6)   # four 0.2 s cameras in about 0.2 s, not 0.8 s
 
 
 class TimeBasedJudgeTests(unittest.TestCase):

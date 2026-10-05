@@ -63,7 +63,11 @@ To publish a better model, replace the asset. Pis that downloaded the old one ge
 
 ## How it decides
 
-One bad-looking picture is never enough. While a printer reports **RUNNING**, the Pi takes a camera still every few seconds. The interval adapts to how busy the Pi is: 5–60 s with the AI HAT, 10–60 s on the CPU. The model scores each still.
+One bad-looking picture is never enough. While a printer reports **RUNNING**, the Pi takes a camera still every few seconds and the model scores it. Every printing printer is checked in each round, all at the same time: the cameras are fetched in parallel, so more printers don't slow the pace down.
+
+- **With the AI HAT:** every 5 seconds from the start. The AI HAT does the work, so this barely loads the Pi. It only backs off, up to 60 s, if the Pi itself gets busy, or when a camera takes longer than 5 s to send a picture.
+- **On the CPU:** it starts at 30 s, speeds up to 10 s while the Pi is quiet, and never spends more than half its time checking.
+- **Fixed pace:** a number in `"interval"` (at least 5 with the AI HAT, 10 on the CPU) turns this off.
 
 A frame **looks failed** when its score reaches the **failure score** (`threshold`).
 
