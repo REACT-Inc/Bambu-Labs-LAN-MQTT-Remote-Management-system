@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import faulthandler
 import os
 import signal
 import threading
@@ -61,6 +62,8 @@ async def retry_listen(runner,hosts,port,every=30):
 
 async def main():
     diagnostics.setup(core.DATA_DIR,core.log)
+    # pm-doctor (#43) sends SIGUSR1 when the app stops answering: every thread's stack goes to the journal.
+    faulthandler.register(signal.SIGUSR1,all_threads=True)
     diagnostics.install_loop_handler(asyncio.get_running_loop(),core.log)
     store=Store(core.DATA_DIR/'management.sqlite3')
     engine=Engine(core,store)
