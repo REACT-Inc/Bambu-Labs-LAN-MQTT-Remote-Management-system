@@ -87,7 +87,7 @@ function miniSwatches(d){const ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),
 // The Content-Security-Policy blocks inline style attributes, so colours and widths are applied through the DOM.
 function applyStyles(root){root.querySelectorAll('[data-color]').forEach(e=>e.style.background=e.dataset.color);root.querySelectorAll('[data-width]').forEach(e=>e.style.width=e.dataset.width+'%');}
 // AI failure watch (#70): only shown on a card while it's watching a print or has something to say.
-const AI_LABELS={watching:'🤖 AI watching',suspect:'🤖 AI: suspect frames',failure:'🤖 AI: print may be failing',paused:'🤖 AI paused this print',unavailable:'🤖 AI HAT unavailable'};
+const AI_LABELS={watching:'🤖 AI watching',suspect:'🤖 AI: suspect frames',failure:'🤖 AI: print may be failing',paused:'🤖 AI paused this print',unavailable:'🤖 AI unavailable'};
 function aiLine(ai){if(!ai?.enabled||!ai.watching||!AI_LABELS[ai.status])return '';const bad=['failure','paused'].includes(ai.status);
  return `<p class="ai-line ai-${esc(ai.status)}" title="${esc(ai.message||'')}">${AI_LABELS[ai.status]}${ai.status==='suspect'||bad?` · ${esc(ai.failing??0)}/${esc(ai.frames??0)} frames`:''}</p>`;}
 function printerCard(x){

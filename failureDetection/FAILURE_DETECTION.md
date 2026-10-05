@@ -1,9 +1,15 @@
-# AI print-failure detection (Raspberry Pi 5 AI HAT)
+# AI print-failure detection
 
-The Pi can watch the printer cameras with a Raspberry Pi **AI HAT+ / AI Kit** (Hailo-8L or Hailo-8) and warn you, or pause the print, when a print looks like it has failed (spaghetti, a print knocked off the bed, a blob on the nozzle). It's **off** until you turn it on in `config.json`.
+The Pi can watch the printer cameras with an AI model and warn you, or pause the print, when a print looks like it has failed (spaghetti, a print knocked off the bed, a blob on the nozzle). It's **off** until you turn it on in `config.json`. The model runs in one of two places:
+
+- **On the Pi's CPU:** a `.onnx` model, for example `best.onnx` straight from YOLOv8 training. No AI HAT and no compiling are needed. One small model every 30 s per printer takes well under a second on a Pi 5. See [Running on the CPU](#running-on-the-cpu-onnx).
+- **On a Raspberry Pi AI HAT+ / AI Kit** (Hailo-8L or Hailo-8): a `.hef` model compiled for the chip. This frees the CPU, but compiling needs Hailo's tools on an x86 PC.
+
+The app picks the place from the model file's extension.
 
 - [How it decides](#how-it-decides)
 - [What happens on a failure](#what-happens-on-a-failure)
+- [Running on the CPU (.onnx)](#running-on-the-cpu-onnx)
 - [Setting up the AI HAT](#setting-up-the-ai-hat)
 - [The model](#the-model)
 - [config.json](#configjson)
@@ -46,6 +52,43 @@ Each print is judged **once**. After a failure it stays flagged until the printe
 
 With the default `"action": "notify"`, it only reports and never touches the printer.
 
+## Running on the CPU (.onnx)
+
+1. **Install OpenCV** for the system Python. It's a Raspberry Pi OS package; the app's own Python environment doesn't change.
+
+   ```bash
+   sudo apt install -y python3-opencv
+   ```
+
+2. **Get a YOLOv8 `.onnx` model**, trained at the default 640 px:
+
+   ```bash
+   yolo export model=best.pt format=onnx opset=11
+   ```
+
+   The [3D Print Failure Detection](https://universe.roboflow.com/purvi-rathore-5amqh/3d-print-failure-detection-efvsh/dataset/4) dataset (CC BY 4.0) trains well in about 15–25 minutes on Google Colab's free GPU. Training on the Pi itself takes over a day.
+
+3. **Copy it** somewhere the service can read:
+
+   ```bash
+   sudo mkdir -p /opt/3d-printer-management-models
+   sudo cp best.onnx /opt/3d-printer-management-models/print_failure.onnx
+   sudo chmod 644 /opt/3d-printer-management-models/print_failure.onnx
+   ```
+
+4. **Configure it** in config.json, then `sudo systemctl restart 3d-printer-management`:
+
+   ```json
+   "failure_detection": {"enabled": true, "model": "/opt/3d-printer-management-models/print_failure.onnx",
+                         "classes": ["spaghetti", "stringing", "warping"], "labels": ["spaghetti", "warping"],
+                         "action": "notify"}
+   ```
+
+   - **`classes`:** must match the `names:` list in the dataset's `data.yaml`, in the same order.
+   - **`stringing`** is left out of `labels`: it's cosmetic, and counting it would cause false alarms.
+
+The helper limits OpenCV to 2 threads, so the dashboard, MQTT and cameras stay responsive. A model trained at a size other than 640 px needs `"input_size"` set to match.
+
 ## Setting up the AI HAT
 
 You need a **Raspberry Pi 5** with the AI HAT+ (or AI Kit) fitted, on Raspberry Pi OS Bookworm (64-bit).
@@ -78,7 +121,7 @@ The AI part runs in a small helper (`failureDetection/hailo_worker.py`) under th
 
 ## The model
 
-Supply a `.hef` model **compiled for your HAT's chip**: Hailo-8L for the 13 TOPS AI Kit / AI HAT+, Hailo-8 for the 26 TOPS HAT+. Two kinds of model are understood:
+For the CPU, use a YOLOv8 `.onnx` export (see [above](#running-on-the-cpu-onnx)). For the AI HAT, supply a `.hef` model **compiled for your HAT's chip**: Hailo-8L for the 13 TOPS AI Kit / AI HAT+, Hailo-8 for the 26 TOPS HAT+. Two kinds of model are understood:
 
 - **Object detection with Hailo's on-chip NMS:** YOLO-style models from the Hailo Model Zoo / Dataflow Compiler. Each class gives boxes with scores.
 - **Classification:** one score per class.
@@ -86,11 +129,11 @@ Supply a `.hef` model **compiled for your HAT's chip**: Hailo-8L for the 13 TOPS
 To train your own:
 
 1. Train a small YOLO model (for example YOLOv8n) on pictures from your own printer cameras, labelled with classes such as `spaghetti`, `detached` and `blob`. Public "3D print failure" / "spaghetti" datasets are a good starting point.
-2. Compile it with Hailo's Dataflow Compiler for your chip.
+2. Export it to `.onnx` and use it on the CPU straight away, or compile it with Hailo's Dataflow Compiler for your HAT's chip.
 
 `classes` must list the model's classes **in output order**. `labels` names the classes that count as a failure. Leave it out to count every class.
 
-Put the model somewhere the service can read, for example `/opt/3d-printer-management-models/print_failure.hef`. Don't use a folder under `/home`: the service is sandboxed with `ProtectHome=true` and can't see it.
+Put the model somewhere the service can read, for example `/opt/3d-printer-management-models/print_failure.onnx` or `.hef`. Don't use a folder under `/home`: the service is sandboxed with `ProtectHome=true` and can't see it.
 
 ## config.json
 
@@ -115,7 +158,7 @@ Add a `failure_detection` section (see [Configuration](../docs/configuration.md#
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | Turn the feature on. |
-| `model` | | Path to the `.hef` model. |
+| `model` | | Path to the model: `.onnx` runs on the CPU, `.hef` on the AI HAT. |
 | `classes` | `["spaghetti"]` | The model's class names, in output order. |
 | `labels` | all classes | Classes that count as a failure. |
 | `threshold` | `0.6` | Score (0.05–0.99) at which a frame counts as failing. |
@@ -125,7 +168,8 @@ Add a `failure_detection` section (see [Configuration](../docs/configuration.md#
 | `min_minutes` | `4` | Minimum minutes between the first and last failing frame. |
 | `warm_up` | `3` | Minutes at the start of a print that aren't judged. |
 | `action` | `"notify"` | `"notify"` only reports; `"pause"` also pauses the print. |
-| `python` | `/usr/bin/python3` | The Python that has `hailo_platform` installed. |
+| `python` | `/usr/bin/python3` | The Python that has OpenCV (`.onnx`) or `hailo_platform` (`.hef`) installed. |
+| `input_size` | `640` | `.onnx` only: the image size the model was trained at. |
 
 Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 
@@ -140,8 +184,9 @@ Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 
 | Shown | What to do |
 |---|---|
-| *AI HAT unavailable: Model file not found* | Check the `model` path and that the service user can read it. |
-| *AI HAT helper did not start: No module named hailo_platform* | `sudo apt install hailo-all`, or point `python` at the Python that has it. |
+| *AI unavailable: Model file not found* | Check the `model` path and that the service user can read it. |
+| *AI helper did not start: No module named 'cv2'* | `.onnx` model: `sudo apt install python3-opencv`. |
+| *AI helper did not start: No module named hailo_platform* | `.hef` model: `sudo apt install hailo-all`, or point `python` at the Python that has it. |
 | *…No Hailo device…* / *HAILO_OUT_OF_PHYSICAL_DEVICES* | Check `hailortcli fw-control identify`. Another program (for example `rpicam-apps` with Hailo) may be using the HAT; close it. |
 | *No camera picture this time.* | The camera didn't answer; see [Camera](../docs/printer-controls.md#camera). |
 | False alarms | Raise `threshold`, `needed` or `min_minutes`, or turn watching off for that printer. Better: add pictures of your own good prints to the training data. |

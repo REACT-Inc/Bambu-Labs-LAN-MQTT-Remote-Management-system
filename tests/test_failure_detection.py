@@ -1,4 +1,4 @@
-"""AI HAT print-failure detection (#70): only multiple failing frames over several minutes flag a print, and a pause is
+"""AI print-failure detection (#70): only multiple failing frames over several minutes flag a print, and a pause is
 sent once, only while printing, and only reported as paused when the printer confirms it."""
 import asyncio,json,os,sys,unittest
 from pathlib import Path
@@ -104,6 +104,81 @@ class WorkerInputTests(unittest.TestCase):
         frame,_,_,_=letterbox(Image.new('RGB',(1920,1080)),640,640)
         batch=input_batch(frame)
         self.assertEqual(batch.shape,(1,640,640,3));self.assertTrue(batch.flags.writeable);self.assertTrue(batch.flags.c_contiguous)
+
+
+def yolo_output(boxes,classes=3,count=50):
+    """A YOLOv8-shaped output (1, 4 + classes, count): boxes are (cx, cy, w, h, class, score) in 640-px input space."""
+    import numpy as np
+    out=np.zeros((1,4+classes,count),dtype=np.float32)
+    for i,(cx,cy,w,h,c,score) in enumerate(boxes):
+        out[0,:4,i]=(cx,cy,w,h);out[0,4+c,i]=score
+    return out
+
+
+class YoloDecodeTests(unittest.TestCase):
+    def setUp(self):
+        try:import numpy  # noqa: F401
+        except ImportError:self.skipTest('numpy not installed')
+        from failureDetection.hailo_worker import decode_yolov8,summarise
+        self.decode,self.summarise=decode_yolov8,summarise
+        self.names=['spaghetti','stringing','warping']
+
+    def test_boxes_classes_and_score(self):
+        out=yolo_output([(320,320,200,100,0,0.91),(100,100,40,40,1,0.97),(500,500,60,60,2,0.03)])
+        detections=self.decode(out,self.names,640,640)
+        self.assertEqual([d['label'] for d in detections],['spaghetti','stringing'])   # 0.03 is below the floor
+        self.assertEqual(detections[0]['box'],[0.3438,0.4219,0.6562,0.5781])
+        # Stringing is the strongest detection but isn't a failure label, so it doesn't count.
+        self.assertEqual(self.summarise(detections,{'spaghetti','warping'})['score'],0.91)
+
+    def test_overlapping_boxes_merged_per_class(self):
+        out=yolo_output([(320,320,200,100,0,0.9),(325,322,200,100,0,0.8),(320,320,200,100,2,0.7)])
+        detections=self.decode(out,self.names,640,640)
+        self.assertEqual(sorted((d['label'],d['score']) for d in detections),[('spaghetti',0.9),('warping',0.7)])
+
+    def test_boxes_first_layout(self):
+        out=yolo_output([(320,320,100,100,2,0.8)]).transpose(0,2,1)
+        self.assertEqual(self.decode(out,self.names,640,640)[0]['label'],'warping')
+
+    def test_nothing_found(self):
+        self.assertEqual(self.summarise(self.decode(yolo_output([]),self.names,640,640),{'spaghetti'}),{'score':0.0,'detections':[]})
+
+
+class CpuWorkerTests(unittest.IsolatedAsyncioTestCase):
+    """The real helper process with OpenCV, on a tiny ONNX model whose output is a fixed YOLOv8-shaped tensor."""
+    async def test_onnx_model_through_the_backend(self):
+        try:
+            import cv2  # noqa: F401
+            import onnx
+            from onnx import helper,TensorProto,numpy_helper
+            from PIL import Image
+        except ImportError:
+            self.skipTest('OpenCV/onnx/Pillow not installed')
+        import io as stdio,tempfile
+        fixed=yolo_output([(320,320,200,100,0,0.88),(100,100,40,40,1,0.95)],count=8400)
+        graph=helper.make_graph(
+            [helper.make_node('ReduceSum',['images'],['total'],keepdims=1),
+             helper.make_node('Mul',['total','zero'],['nothing']),
+             helper.make_node('Add',['fixed','nothing'],['output0'])],
+            'fake_yolo',[helper.make_tensor_value_info('images',TensorProto.FLOAT,[1,3,640,640])],
+            [helper.make_tensor_value_info('output0',TensorProto.FLOAT,[1,7,8400])],
+            [numpy_helper.from_array(fixed,'fixed'),numpy_helper.from_array(__import__('numpy').zeros((1,1,1,1),'float32'),'zero')])
+        model=helper.make_model(graph,opset_imports=[helper.make_opsetid('',11)]);model.ir_version=7
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'best.onnx';onnx.save(model,str(path))
+            picture=stdio.BytesIO();Image.new('RGB',(1280,720),(40,40,40)).save(picture,'JPEG')
+            backend=HailoBackend(settings(model=str(path),python=sys.executable,classes=['spaghetti','stringing','warping'],labels=['spaghetti','warping']))
+            try:
+                score,detections=await backend.score(picture.getvalue())
+            finally:
+                await backend.close()
+        self.assertEqual(score,0.88)
+        self.assertEqual({d['label'] for d in detections},{'spaghetti','stringing'})
+
+    async def test_missing_opencv_gets_a_hint(self):
+        backend=HailoBackend(settings())
+        self.assertIn('python3-opencv',backend.hint("ModuleNotFoundError: No module named 'cv2'"))
+        self.assertIn('hailo-all',backend.hint("ModuleNotFoundError: No module named 'hailo_platform'"))
 
 
 class FakeCore:
