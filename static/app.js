@@ -44,7 +44,7 @@ function pendingClass(action,p){return isPending(action+'|'+p.name,p)?' pending'
 function confirmPause(name){confirmAction('Pause this print?',printerLabel(name)+' — the print pauses until you resume it.','I want to pause this print.',()=>printAction(name,'pause'));}
 function confirmStop(name){confirmAction('Stop this print?',printerLabel(name)+' — this cancels the current job.','I want to cancel this print.',()=>printAction(name,'stop',{confirmed:true}));}
 function actionButton(action,label,extra='',cls=''){return `<button class="${cls}" data-action="${action}" ${extra}>${label}</button>`;}
-function render(){
+function render(){if($('jobDialog').open)renderPrintNowOverride();
  const p=state.printers,j=state.jobs;
  $('printerSubtitle').textContent=state.demo?'Demo data. No real printers are controlled.':'Live telemetry. Shared control with Discord.';
  $('mode').textContent=state.demo?'DEMO MODE':'LIVE';$('mode').classList.toggle('demo',state.demo);
@@ -135,7 +135,7 @@ $('queueFilter').onchange=renderJobs;
 // the AMS mapping is suggested from the printer's loaded trays, and Print now skips the queue.
 let jobUpload=null,jobPlate=null;
 function resetJobUpload(){jobUpload=null;jobPlate=null;$('jobPlates').hidden=true;$('jobPlates').innerHTML='';$('jobFileNote').textContent='';$('jobAmsHint').textContent='';}
-$('addJob').onclick=()=>{$('jobError').textContent='';$('jobDialog').showModal();};
+$('addJob').onclick=()=>{$('jobError').textContent='';$('jobDialog').showModal();renderPrintNowOverride();};
 $('source').onchange=()=>{const upload=$('source').value==='upload';$('uploadLabel').hidden=!upload;$('remoteLabel').hidden=upload;$('jobPlateLabel').hidden=upload;
  $('jobPlates').hidden=!upload||!jobUpload;$('jobFileNote').hidden=!upload;$('jobAmsHint').hidden=!upload;};
 $('jobFile').onchange=async()=>{const f=$('jobFile').files[0];resetJobUpload();$('jobError').textContent='';if(!f)return;
@@ -152,7 +152,9 @@ function renderPlates(){const sliced=jobUpload.plates.filter(p=>p.sliced);if(!sl
   `<span class="plate-fils">${(p.filaments||[]).map(f=>`<i class="fil"${f.colour?` data-color="${esc(f.colour)}"`:''} title="${esc(f.type)} ${esc(f.colour)}"></i>`).join('')}</span></button>`).join('');
  $('jobPlates').hidden=false;applyStyles($('jobPlates'));suggestAms();}
 $('jobPlates').addEventListener('click',e=>{const b=e.target.closest('[data-plate]');if(!b||b.disabled)return;jobPlate=Number(b.dataset.plate);renderPlates();});
-$('jobPrinter').addEventListener('change',()=>{if(jobUpload)suggestAms();});
+$('jobPrinter').addEventListener('change',()=>{if(jobUpload)suggestAms();renderPrintNowOverride();});
+// Print now ignoring error: offered only while the chosen printer reports FAILED or an error code (like the queue's Start ignoring error).
+function renderPrintNowOverride(){const p=state?.printers.find(x=>x.name===$('jobPrinter').value);$('printNowOverride').hidden=!(p&&p.connected&&(p.state==='FAILED'||p.error));}
 async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUpload.asset,printer=$('jobPrinter').value;$('jobAmsHint').textContent='Checking the AMS on that printer…';
  try{const r=await api(`uploads/${encodeURIComponent(asset)}/suggest?printer=${encodeURIComponent(printer)}&plate=${jobPlate}`,undefined,'GET');
   if(jobUpload?.asset!==asset||$('jobPrinter').value!==printer)return;
@@ -171,6 +173,11 @@ $('printNow').onclick=()=>{$('jobError').textContent='';if(!$('jobForm').reportV
  confirmAction('Print now?',`${data.label} on ${printerLabel(data.printer)}, plate ${data.plate}, straight away. ${data.use_ams?'AMS mapping: '+data.mapping+'.':'External spool.'}`,
   'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',
   async()=>{await api('jobs',{...data,print_now:true,confirmed:true});jobDone(`Starting on ${printerLabel(data.printer)}.`);});};
+$('printNowOverride').onclick=()=>{$('jobError').textContent='';if(!$('jobForm').reportValidity())return;let data;try{data=jobData();}catch(e){$('jobError').textContent=e.message;return;}
+ const p=state?.printers.find(x=>x.name===data.printer);
+ confirmAction('Print now ignoring the reported error?',`${data.label} on ${printerLabel(data.printer)}, plate ${data.plate}. The printer reports ${p?.error?'error '+(p.error_text||p.error):p?.state||'an error'}. This bypasses the management error check and allows a FAILED state. It does not clear the printer error or override firmware protections.`,
+  'I inspected the printer, cleared the plate, and verified the material and sliced file. Print despite the reported error.',
+  async()=>{await api('jobs',{...data,print_now:true,confirmed:true,override_error:true});jobDone(`Starting on ${printerLabel(data.printer)} (error check bypassed).`);});};
 $('confirmForm').onsubmit=async e=>{e.preventDefault();const callback=pendingConfirmation;pendingConfirmation=null;$('confirmDialog').close();if(callback){try{await callback();await refresh();}catch(e){notice(e.message);}}};
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b){const card=e.target.closest('.printer-card[data-printer]');if(card)openPrinter(card.dataset.printer);return}const {action,printer,job,outcome}=b.dataset;try{
  if(action==='files'){await downloadFileListing(printer,b);return}

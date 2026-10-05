@@ -77,7 +77,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         async def notify(*a):pass
         self.state='IDLE'
         self.core=SimpleNamespace(DATA_DIR=d,SETTINGS_FILE=str(d/'settings.json'),settings={},SETTINGS_USER_IDS=set(),EXAMPLE_MODE=True,
-            names=lambda:list(configs),printer_config=configs.get,state_data=lambda n:(self.state,0,dict(AMS),True),last_seen={},
+            names=lambda:list(configs),printer_config=configs.get,state_data=lambda n:(self.state,getattr(self,'error',0),dict(AMS),True),last_seen={},
             bot=SimpleNamespace(is_ready=lambda:False),log=__import__('logging').getLogger('test'),notify=notify,BLUE=1,YELLOW=2,GREEN=3,RED=4)
         self.store=Store(d/'db');self.engine=Engine(self.core,self.store);self.dashboard=Dashboard(self.core,self.store,self.engine)
         atomic_json(d/'auth.json',password_hash('test-password-123'))
@@ -137,6 +137,26 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/api/jobs',json={'printer':'Mini','label':'Urgent','asset':asset,'plate':1,'print_now':True,'confirmed':True},headers=self.headers)
         self.assertEqual(r.status,400);self.assertIn('Nothing was left in the queue',(await r.json())['error'])
         self.assertEqual([j['status'] for j in self.store.jobs('Mini') if j['label']=='Urgent'],['cancelled'])
+
+    async def test_print_now_can_ignore_a_failed_state_or_error(self):
+        asset=(await (await self.upload(make_3mf(Path(self.tmp.name)/'part.3mf'))).json())['asset']
+        body={'printer':'Mini','label':'Again','asset':asset,'plate':1,'print_now':True,'confirmed':True}
+        for state,error,expected in (('FAILED',0,'FAILED'),('IDLE',0x0300800A,'error')):
+            self.state,self.error=state,error
+            r=await self.client.post('/api/jobs',json=body,headers=self.headers)
+            self.assertEqual(r.status,400);self.assertIn(expected,(await r.json())['error'])
+            self.assertEqual(self.store.jobs('Mini'),[])                                 # refused before anything was added
+        self.state,self.error='FAILED',0x0300800A
+        r=await self.client.post('/api/jobs',json={**body,'override_error':'yes'},headers=self.headers)
+        self.assertEqual(r.status,400);self.assertIn('boolean',(await r.json())['error'])
+        with patch.object(self.engine,'spawn',side_effect=lambda coro:coro.close()):
+            r=await self.client.post('/api/jobs',json={**body,'override_error':True},headers=self.headers)
+        self.assertEqual(r.status,200);self.assertEqual(self.store.get((await r.json())['id'])['status'],'staging')
+        self.assertIn('Error override approved',[e['title'] for e in self.store.events()])
+        # The override never allows starting over a print that's still running.
+        self.store.set_status(self.store.jobs('Mini')[0]['id'],'finished');self.state,self.error='RUNNING',0
+        r=await self.client.post('/api/jobs',json={**body,'override_error':True},headers=self.headers)
+        self.assertEqual(r.status,400);self.assertIn('RUNNING',(await r.json())['error'])
 
 
 if __name__=='__main__':
