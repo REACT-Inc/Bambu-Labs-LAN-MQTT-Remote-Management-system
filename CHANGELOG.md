@@ -2,6 +2,18 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.2)
+
+### Added
+- **Check AI now.** A button in each printer's AI panel runs a real check of a printing printer straight away.
+  - **Acts on one frame:** you asked for a decision, so if this fresh picture scores at or above the threshold, it acts immediately (pause or notify, as set) instead of waiting for several failing frames over minutes. The alert says it was checked on request.
+  - **Good frames:** a frame below the threshold counts as a normal check.
+  - **No repeats:** a print already reported isn't paused again.
+  - **Confirmation:** asked first when the action is "pause".
+
+### Fixed
+- **The AI judged only about half the frames.** It checks every 30 seconds but reused camera pictures up to 60 seconds old, so every other check saw the frame it had already judged and skipped it. Now it only reuses a picture newer than its check interval, so every check judges a new frame, and failures are confirmed in half the time.
+
 ## 1.7.1-beta.1
 
 Built on 1.7.0-beta.1. Adds **Test AI now** for checking the AI on demand, and makes training-picture collection much denser and no longer silent when it can't save.

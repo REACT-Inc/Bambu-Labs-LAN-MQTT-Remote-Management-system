@@ -321,6 +321,7 @@ class FailureMonitor:
         self.settings = settings_for(getattr(core, 'CONFIG', {}))
         self.backend = backend or (HailoBackend(self.settings) if self.settings['enabled'] else None)
         self.judges, self.status, self.task, self.pause_poll = {}, {}, None, 1
+        self.checking = asyncio.Lock()   # the background loop and "Check AI now" never judge at the same moment
         self.geometry = GeometryCheck(core, engine, self.settings)
         self.reprints = AutoReprint(core, engine, self.settings['auto_reprint'], python=self.settings['python'], clock=clock)
         self.models = ModelUpdates(core, self, clock=clock)
@@ -359,11 +360,29 @@ class FailureMonitor:
     def _set(self, name, **values):
         self.status[name] = {**self.status.get(name, {}), **values, 'checked': self.clock()}
 
-    async def check(self, name):
-        """One look at one printer."""
+    async def check_now(self, name):
+        """"Check AI now": a real check of a printing printer on request. It counts like any check, and because a
+        person asked for a decision, a frame at or above the threshold acts straight away (pause or notify, as set)
+        instead of waiting for several failing frames over minutes. A print already reported isn't acted on again."""
+        if not self.enabled:
+            raise ValueError('AI failure detection is not enabled in config.json.')
+        if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
+            raise ValueError('This printer has no camera set up (camera_type in config.json).')
+        state, _, _, connected = self.core.state_data(name)
+        if state != 'RUNNING' or not connected:
+            raise ValueError(f"Check AI now works while a print is running (the printer reports {state or 'unknown'}). "
+                             'Use Test AI now to see what the AI makes of the camera any time.')
+        async with self.checking:
+            result = await self.check(name, on_request=True)
+        if not result:
+            raise ValueError(self.status.get(name, {}).get('message') or 'The check could not run.')
+        return result
+
+    async def check(self, name, on_request=False):
+        """One look at one printer. Returns what it found (or None when it couldn't look)."""
         state, _, data, connected = self.core.state_data(name)
         config = self.core.printer_config(name) or {}
-        if not self.watching(name) or config.get('camera_type') not in ('rtsp', 'jpeg_tcp'):
+        if (not self.watching(name) and not on_request) or config.get('camera_type') not in ('rtsp', 'jpeg_tcp'):
             self.judges.pop(name, None);self._set(name, status='idle', message='');return
         job = str(data.get('subtask_name') or data.get('gcode_file') or '')
         judge = self.judges.get(name)
@@ -377,7 +396,15 @@ class FailureMonitor:
             self._set(name, status='idle', message='Watches while the printer is printing.', score=None, failing=0, frames=0, job='');return
         if judge is None or judge.job != job:
             judge = self.judges[name] = Judge(self.settings, self.clock);judge.reset(job)
-        picture = await self.core.snapshot(name, timeout=20)
+        picture = None
+        if on_request and getattr(self.core, 'capture_still', None):   # a fresh picture, not a reused one
+            try:
+                picture = await self.core.capture_still(name, 20)
+            except Exception:
+                picture = None
+        # A reused picture must be newer than the check interval: an older one would be the frame the last check
+        # already judged (skipped as a duplicate), halving how many frames count.
+        picture = picture or await self.core.snapshot(name, timeout=20, max_age=max(5, self.settings['interval'] - 5))
         if not picture:
             self._set(name, status='watching', message='No camera picture this time.');return
         crops = crops_for(self.geometry.corners(name)) if self.settings['crops'] == 'auto' else []
@@ -391,9 +418,10 @@ class FailureMonitor:
             layer = 0
         raw = score
         score, where = self.geometry.adjust(name, score, detections, layer)
-        verdict = judge.add(score, hashlib.sha256(picture).hexdigest())
+        frame_id = hashlib.sha256(picture).hexdigest() + (f'@{self.clock()}' if on_request else '')
+        verdict = judge.add(score, frame_id)
         if verdict == 'duplicate':
-            return
+            return None
         status = {'warming_up': 'watching', 'watching': 'watching', 'suspect': 'suspect', 'failure': 'failure'}[verdict]
         active = self.engine.store.active(name) if getattr(self.engine, 'store', None) else None
         try:   # training pictures from this camera (never lets a disk problem stop the watch)
@@ -406,12 +434,19 @@ class FailureMonitor:
                    + (f', {where}' if where else '') + '.')
         if where:
             labels = f'{labels}, {where}' if labels else where
+        threshold = self.settings['threshold']
+        result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, verdict=verdict, where=where,
+                      detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted)
         if judge.acted:   # already reported (and maybe paused) for this print: keep that status, don't act again
-            self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames));return
+            self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames));return result
+        if on_request and verdict != 'failure' and score >= threshold:
+            verdict = result['verdict'] = 'failure'   # a person asked for a decision: this frame decides
+            status = 'failure'
         self._set(name, status=status, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), message=message, job=job)
         if verdict == 'failure':
-            judge.acted = True
-            await self.act(name, job, judge, labels)
+            judge.acted = result['acted'] = True
+            await self.act(name, job, judge, labels, on_request=on_request, score=score)
+        return result
 
     async def test(self, name):
         """"Test AI now": one check on a fresh camera picture at any time, printing or not. It doesn't count towards
@@ -454,10 +489,15 @@ class FailureMonitor:
                     labels=sorted(self.settings['labels']), detections=detections, crops=crops, where=where,
                     picture=base64.b64encode(picture).decode(), checked=self.clock())
 
-    async def act(self, name, job, judge, labels):
-        minutes = (judge.frames[-1][0] - min(t for t, s in judge.frames if s >= self.settings['threshold'])) / 60
-        detail = (f"{judge.failing()} of the last {len(judge.frames)} camera frames over {minutes:.0f} min look like a failed print"
-                  + (f' ({labels})' if labels else '') + f" • {job or 'current print'}")
+    async def act(self, name, job, judge, labels, on_request=False, score=None):
+        failing_times = [t for t, s in judge.frames if s >= self.settings['threshold']]
+        if on_request and len(failing_times) < self.settings['needed']:
+            detail = (f"Checked on request: this camera frame scored {score:.0%} (threshold {self.settings['threshold']:.0%})"
+                      + (f' ({labels})' if labels else '') + f" • {job or 'current print'}")
+        else:
+            minutes = (judge.frames[-1][0] - min(failing_times)) / 60 if failing_times else 0
+            detail = (f"{judge.failing()} of the last {len(judge.frames)} camera frames over {minutes:.0f} min look like a failed print"
+                      + (f' ({labels})' if labels else '') + f" • {job or 'current print'}")
         paused = False
         if self.settings['action'] == 'pause':
             state = self.core.state_data(name)[0]
@@ -501,7 +541,8 @@ class FailureMonitor:
         while True:
             try:
                 for name in self.core.names():
-                    await self.check(name)
+                    async with self.checking:
+                        await self.check(name)
                 await self.reprints.tick()
                 await self.models.check()   # once a day: a newer model from the ai-model release
             except asyncio.CancelledError:

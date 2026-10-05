@@ -170,3 +170,75 @@ class TestRouteTests(unittest.TestCase):
     def test_route(self):
         import inspect,dashboard
         self.assertIn("'/api/ai/{name}/test'",inspect.getsource(dashboard.Dashboard.__init__))
+
+
+class CheckNowTests(unittest.IsolatedAsyncioTestCase):
+    """"Check AI now": a real check while printing that acts on this frame alone."""
+    def monitor(self,state='RUNNING',score=0.7,action='pause'):
+        from unittest.mock import AsyncMock
+        from failureDetection.detection import FailureMonitor
+        self.tmp=tempfile.TemporaryDirectory();self.states={'James':state}
+        self.core=SimpleNamespace(DATA_DIR=Path(self.tmp.name),settings={},names=lambda:['James'],printer_config=lambda n:{'camera_type':'jpeg_tcp'},
+            state_data=lambda n:(self.states[n],0,{'subtask_name':'job','layer_num':3},True),capture_still=AsyncMock(side_effect=lambda n,t:b'pic%f'%__import__('time').time()),
+            snapshot=AsyncMock(return_value=None),notify=AsyncMock(),save_settings=lambda s:None,RED=1,
+            CONFIG={'failure_detection':{'enabled':True,'model':'m.onnx','threshold':0.4,'action':action}})
+        async def control(name,action,author):self.states[name]='PAUSE'
+        self.engine=SimpleNamespace(control=AsyncMock(side_effect=control))
+        self.score=score;test=self
+        class Backend:
+            async def score(self,jpeg,crops=None):return test.score,[{'label':'spaghetti','score':test.score,'box':[0.3,0.2,0.7,0.3]}]
+        m=FailureMonitor(self.core,self.engine,backend=Backend());m.pause_poll=0
+        return m
+    def tearDown(self):self.tmp.cleanup()
+
+    async def test_failing_frame_pauses_straight_away(self):
+        m=self.monitor()
+        r=await m.check_now('James')   # first frame of the print, even inside the warm-up minutes
+        self.assertTrue(r['acted']);self.engine.control.assert_awaited_once_with('James','pause','AI failure detection')
+        self.assertEqual(m.state('James')['status'],'paused')
+        self.assertIn('Checked on request',self.core.notify.await_args.args[2])
+        self.states['James']='RUNNING'                                   # resumed: a second request doesn't pause again
+        r=await m.check_now('James');self.assertTrue(r['already']);self.engine.control.assert_awaited_once()
+
+    async def test_good_frame_just_counts(self):
+        m=self.monitor(score=0.1)
+        r=await m.check_now('James')
+        self.assertFalse(r['acted']);self.engine.control.assert_not_awaited();self.core.notify.assert_not_awaited()
+        self.assertEqual(m.state('James')['status'],'watching')
+
+    async def test_notify_mode_reports_without_pausing(self):
+        m=self.monitor(action='notify')
+        r=await m.check_now('James')
+        self.assertTrue(r['acted']);self.engine.control.assert_not_awaited();self.core.notify.assert_awaited_once()
+
+    async def test_only_while_printing(self):
+        m=self.monitor(state='IDLE')
+        with self.assertRaisesRegex(ValueError,'while a print is running'):await m.check_now('James')
+
+
+class CheckRouteTests(unittest.TestCase):
+    def test_route(self):
+        import inspect,dashboard
+        self.assertIn("'/api/ai/{name}/check'",inspect.getsource(dashboard.Dashboard.__init__))
+
+
+class FreshFrameTests(unittest.IsolatedAsyncioTestCase):
+    """Each 30 s check must judge a new frame: a picture reused for up to 60 s halved the counted frames."""
+    async def test_every_check_counts(self):
+        from unittest.mock import AsyncMock
+        from failureDetection.detection import FailureMonitor
+        now=[1_000_000.0];taken=[]
+        async def snapshot(name,timeout=25,max_age=60):
+            # like core.snapshot: reuse the last still while it's younger than max_age, else take a new one
+            if taken and now[0]-taken[-1][0]<max_age:return taken[-1][1]
+            taken.append((now[0],b'pic%d'%len(taken)));return taken[-1][1]
+        with tempfile.TemporaryDirectory() as d:
+            core=SimpleNamespace(DATA_DIR=Path(d),settings={},names=lambda:['James'],printer_config=lambda n:{'camera_type':'jpeg_tcp'},
+                state_data=lambda n:('RUNNING',0,{'subtask_name':'job'},True),snapshot=snapshot,notify=AsyncMock(),save_settings=lambda s:None,RED=1,
+                CONFIG={'failure_detection':{'enabled':True,'model':'m.onnx','warm_up':0}})
+            class Backend:
+                async def score(self,jpeg,crops=None):return 0.1,[]
+            m=FailureMonitor(core,SimpleNamespace(),backend=Backend(),clock=lambda:now[0])
+            for _ in range(10):
+                await m.check('James');now[0]+=30
+            self.assertEqual(m.state('James')['frames'],10)   # was 5 with 60 s reuse

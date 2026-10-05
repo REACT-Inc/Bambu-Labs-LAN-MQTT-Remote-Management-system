@@ -503,11 +503,12 @@ def recent_picture(name, max_age=60):
     return None
 
 
-async def snapshot(name, timeout=25):
+async def snapshot(name, timeout=25, max_age=60):
     # Never start a continuous live feed just for one picture (#54): reuse one on hand, else take a single still.
+    # max_age: how old a reused picture may be (the AI asks for one newer than its check interval).
     if EXAMPLE_MODE:
         return None
-    picture = recent_picture(name)
+    picture = recent_picture(name, max_age)
     if picture:
         return picture
     if not state_data(name)[3] or (printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
