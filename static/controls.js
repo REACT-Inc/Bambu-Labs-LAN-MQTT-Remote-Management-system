@@ -278,3 +278,23 @@ $('swapChecked').onclick=()=>{const name=selectedPrinter;confirmAction('Swapmod 
 let swapApprovalJob=null;
 function openSwapApproval(id){const j=state.jobs.find(x=>x.id===id);swapApprovalJob=id;$('swapApproveText').textContent=j.label+' — '+printerLabel(j.printer);$('swapBatchPlates').value=j.options.swap_plates||1;$('swapBatchConfirm').checked=false;$('swapApproveDialog').showModal();}
 $('swapApproveForm').onsubmit=async e=>{e.preventDefault();try{await api('jobs/'+swapApprovalJob+'/swapapprove',{confirmed:$('swapBatchConfirm').checked,plates:Number($('swapBatchPlates').value)});$('swapApproveDialog').close();notice('Swaplist batch approved.');await refresh();}catch(e){notice(e.message);}};
+// Cancel single objects mid-print, like Bambu Studio / Handy. Loaded when the panel opens and every 10 s while printing.
+let objectsFor='',objectsData=null;
+async function loadObjects(force){const p=devPrinter();if(!p||!$('detailDialog').open)return;const active=['RUNNING','PAUSE'].includes(p.state);
+ if(!active){$('objectsSection').hidden=true;objectsFor='';return;}
+ if(!force&&objectsFor===p.name&&objectsData&&Date.now()-objectsData.loaded<10000)return;
+ try{const r=await api('objects/'+encodeURIComponent(p.name),undefined,'GET');objectsFor=p.name;objectsData={...r,loaded:Date.now()};renderObjects();}catch(e){$('objectsSection').hidden=true;}}
+function renderObjects(){const r=objectsData;if(!r||objectsFor!==selectedPrinter)return;
+ $('objectsSection').hidden=!r.job;if(!r.job)return;
+ const ticked=new Set([...document.querySelectorAll('#objectsList input:checked')].map(i=>i.value));
+ $('objectsList').innerHTML=r.objects.map(o=>`<label class="${o.skipped?'skipped':''}"><input type="checkbox" value="${o.id}" ${o.skipped?'disabled checked':''} ${ticked.has(String(o.id))&&!o.skipped?'checked':''}> ${esc(o.name)}${o.skipped?' (cancelled)':''}</label>`).join('')||'';
+ $('objectsHint').textContent=r.reason||`${r.job}: tick objects to stop printing them; the rest of the plate carries on.`;
+ const img=$('objectsPicture');if(r.picture){const src='/api/objects/'+encodeURIComponent(objectsFor)+'/plate.png';if(img.dataset.src!==src){img.dataset.src=src;img.src=src;}img.hidden=false;}else img.hidden=true;
+ updateObjectsButton();}
+function selectedObjects(){return [...document.querySelectorAll('#objectsList input:checked:not(:disabled)')].map(i=>Number(i.value));}
+function updateObjectsButton(){const n=selectedObjects().length;$('objectsSkip').disabled=!n||!!objectsData?.reason;$('objectsSkip').textContent=n?`Cancel ${n} object${n>1?'s':''}…`:'Cancel selected objects…';}
+$('objectsList').addEventListener('change',updateObjectsButton);
+$('objectsSkip').addEventListener('click',()=>{const ids=selectedObjects();if(!ids.length)return;const names=objectsData.objects.filter(o=>ids.includes(o.id)).map(o=>o.name).join(', ');
+ confirmAction('Cancel these objects?',`${names} on ${printerLabel(objectsFor)} will stop printing from the next layer. The rest of the plate carries on. This can't be undone for this print.`,
+  'Stop printing these objects.',async()=>{const r=await api('objects/'+encodeURIComponent(objectsFor),{ids,confirmed:true});notice(r.message);await loadObjects(true);});});
+setInterval(()=>{if($('detailDialog').open)loadObjects(false);},2000);

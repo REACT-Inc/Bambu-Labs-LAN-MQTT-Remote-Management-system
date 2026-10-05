@@ -19,6 +19,7 @@ import filament_sides
 from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
 from failureDetection.detection import FailureMonitor
+from object_skip import ObjectSkip
 from queueing import MAX_UPLOAD, options, validate_archive
 import diagnostics
 from issue_reports import IssueReports
@@ -48,6 +49,7 @@ class Dashboard:
         self.sessions, self.failures = {}, {}
         self.file_browser = Browser(core)
         self.controls = Controls(core,store)
+        self.objects = ObjectSkip(core,store,self.controls)   # cancel single objects mid-print
         self.cameras = Cameras(core)
         core.live_cameras = self.cameras
         self.snapshots = SnapshotRotation(core, self.cameras)
@@ -72,6 +74,8 @@ class Dashboard:
             web.get('/api/snapshot/{name}',self.snapshots.response),
             web.get('/api/live/{name}',self.cameras.stream),
             web.post('/api/plateswap/{name}/{action}',self.plate_swap),
+            web.get('/api/objects/{name}',self.list_objects),web.post('/api/objects/{name}',self.skip_objects),
+            web.get('/api/objects/{name}/plate.png',self.objects_picture),
             web.post('/api/ai/{name}',self.ai_watch),
             web.post('/api/ai/{name}/calibration',self.ai_calibration),
             web.post('/api/ai/{name}/reprint',self.ai_reprint),
@@ -178,6 +182,28 @@ class Dashboard:
         await asyncio.to_thread(self.failure.training.clear)
         self.failure.store_event('','Training pictures cleared','web administrator')
         return web.json_response(self.failure.training.summary())
+    async def list_objects(self, request):
+        name=request.match_info['name']
+        if name not in self.core.names():raise ValueError('Unknown printer.')
+        # The queue database is only used from this thread; reading slice_info.config is small (capped at 4 MB).
+        result=self.objects.objects(name)
+        job=self.objects.job(name)
+        result['picture']=bool(job and sliced_file.plate_thumbnail(job['asset'],job['options'].get('plate',1)))
+        return web.json_response(result)
+
+    async def skip_objects(self, request):
+        name=request.match_info['name']
+        if name not in self.core.names():raise ValueError('Unknown printer.')
+        data=await request.json()
+        message=self.objects.skip(name,data.get('ids'),data.get('confirmed'),'web administrator')
+        return web.json_response({'message':message})
+
+    async def objects_picture(self, request):
+        name=request.match_info['name']
+        job=self.objects.job(name) if name in self.core.names() else None
+        picture=job and await asyncio.to_thread(sliced_file.plate_thumbnail,job['asset'],job['options'].get('plate',1))
+        if not picture:raise web.HTTPNotFound()
+        return web.Response(body=picture,content_type='image/png')
 
     async def files(self, request):
         name=request.match_info['name']
