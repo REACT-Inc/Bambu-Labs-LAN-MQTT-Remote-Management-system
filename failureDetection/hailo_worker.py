@@ -13,6 +13,10 @@ Two output layouts are understood:
 - Hailo on-chip NMS (YOLO-style detection HEFs): per class, rows of [ymin, xmin, ymax, xmax, score] (0-1);
 - a classification head: one score per class.
 Only the classes named in "labels" count as a failure; the score is the highest of those.
+
+A .onnx model (for example best.onnx exported from Ultralytics YOLOv8: `yolo export format=onnx opset=11`) runs on
+the Pi's CPU instead, with OpenCV from Raspberry Pi OS (`sudo apt install python3-opencv`); no AI HAT is needed.
+One small model every 30 s per printer takes well under a second on a Pi 5.
 """
 import base64
 import io
@@ -59,11 +63,73 @@ def parse(outputs, class_names, failure_labels, threshold=0.05):
                 label = class_names[index] if index < len(class_names) else f'class{index}'
                 if float(score) >= threshold:
                     detections.append(dict(label=label, score=round(float(score), 4), box=None))
+    return summarise(detections, failure_labels)
+
+
+def summarise(detections, failure_labels):
     failing = [d['score'] for d in detections if not failure_labels or d['label'] in failure_labels]
     return dict(score=max(failing, default=0.0), detections=sorted(detections, key=lambda d: -d['score'])[:10])
 
 
+def decode_yolov8(output, class_names, width, height, threshold=0.05, iou=0.45):
+    """Ultralytics YOLOv8 ONNX output, (1, 4 + classes, boxes) of centre x, centre y, w, h in input pixels and
+    one score per class, into detections with boxes as 0-1 fractions of the input. Overlaps are removed per class."""
+    import numpy as np
+    rows = np.asarray(output, dtype=np.float32).reshape(np.asarray(output).shape[-2:])
+    if rows.shape[0] > rows.shape[1]:
+        rows = rows.T   # some exports put boxes first
+    boxes, scores = rows[:4].T, rows[4:].T
+    classes, best = scores.argmax(axis=1), scores.max(axis=1)
+    keep = best >= threshold
+    boxes, classes, best = boxes[keep], classes[keep], best[keep]
+    corners = np.stack([boxes[:, 0] - boxes[:, 2] / 2, boxes[:, 1] - boxes[:, 3] / 2,
+                        boxes[:, 0] + boxes[:, 2] / 2, boxes[:, 1] + boxes[:, 3] / 2], axis=1)
+    detections = []
+    for index in np.unique(classes):
+        chosen = np.where(classes == index)[0]
+        chosen = chosen[np.argsort(-best[chosen])]
+        while chosen.size and len(detections) < 100:
+            top, chosen = chosen[0], chosen[1:]
+            box = corners[top]
+            label = class_names[index] if index < len(class_names) else f'class{index}'
+            detections.append(dict(label=label, score=round(float(best[top]), 4),
+                                   box=[round(float(box[0] / width), 4), round(float(box[1] / height), 4),
+                                        round(float(box[2] / width), 4), round(float(box[3] / height), 4)]))
+            if chosen.size:
+                other = corners[chosen]
+                x0, y0 = np.maximum(box[0], other[:, 0]), np.maximum(box[1], other[:, 1])
+                x1, y1 = np.minimum(box[2], other[:, 2]), np.minimum(box[3], other[:, 3])
+                overlap = np.clip(x1 - x0, 0, None) * np.clip(y1 - y0, 0, None)
+                area = lambda b: (b[..., 2] - b[..., 0]) * (b[..., 3] - b[..., 1])
+                chosen = chosen[overlap / (area(box) + area(other) - overlap + 1e-9) < iou]
+    return detections
+
+
+def main_cpu(model, class_names, failure_labels, size):
+    """Run a YOLOv8 .onnx model on the CPU with OpenCV."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+    cv2.setNumThreads(2)   # leave cores free for the dashboard, MQTT and the cameras
+    net = cv2.dnn.readNetFromONNX(model)
+    print(json.dumps({'ready': True, 'input': [size, size], 'backend': 'cpu'}), flush=True)
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            image = Image.open(io.BytesIO(base64.b64decode(request['jpeg'])))
+            frame, _, _, _ = letterbox(image, size, size)
+            # The letterboxed frame is already RGB, as Ultralytics models expect.
+            net.setInput(cv2.dnn.blobFromImage(np.array(frame), 1 / 255.0, (size, size), swapRB=False, crop=False))
+            reply = summarise(decode_yolov8(net.forward(), class_names, size, size), failure_labels)
+        except Exception as exc:   # one bad frame never stops the helper
+            reply = {'error': f'{type(exc).__name__}: {exc}'[:300]}
+        print(json.dumps(reply), flush=True)
+
+
 def main():
+    if sys.argv[1].lower().endswith('.onnx'):
+        return main_cpu(sys.argv[1], json.loads(sys.argv[2]), set(json.loads(sys.argv[3])),
+                        int(sys.argv[4]) if len(sys.argv) > 4 else 640)
     import numpy as np
     from PIL import Image
     from hailo_platform import (HEF, VDevice, ConfigureParams, HailoStreamInterface, InferVStreams,

@@ -575,7 +575,7 @@ def ai_watch_text(ai):
     if not ai.get('watching'):
         return 'Off for this printer'
     label = {'failure': '⚠️ Possible failure', 'paused': '⏸️ Paused by AI', 'suspect': '👀 Suspect frames',
-             'unavailable': '❌ AI HAT unavailable', 'watching': '✅ Watching'}.get(ai.get('status'), 'Waiting for a print')
+             'unavailable': '❌ AI unavailable', 'watching': '✅ Watching'}.get(ai.get('status'), 'Waiting for a print')
     return f"{label}" + (f" • {safe(ai['message'])}" if ai.get('message') else '')
 
 

@@ -44,7 +44,7 @@ sudo python3 -m json.tool /etc/3d-printer-management/config.json >/dev/null && e
 | `listen` | list of IPs | `["127.0.0.1", "<chosen IP>"]` | Addresses the dashboard listens on. Set by the installer. |
 | `port` | number | `8080` | Dashboard port |
 | `allow_host_reboot` | boolean | `false` | Allow `/reboot` and **Server → Reboot Pi…**. Set with `install.sh --enable-reboot`. See [Installation](installation.md#optional-allow-rebooting-the-pi-from-discord-or-the-dashboard). |
-| `failure_detection` | object | off | AI print-failure detection with a Raspberry Pi 5 AI HAT: `{"enabled": true, "model": "/path/model.hef", "action": "notify"}`. See [AI failure detection](../failureDetection/FAILURE_DETECTION.md). |
+| `failure_detection` | object | off | AI print-failure detection: a `.onnx` model on the CPU or a `.hef` model on a Raspberry Pi 5 AI HAT: `{"enabled": true, "model": "/path/model.onnx", "action": "notify"}`. See [AI failure detection](../failureDetection/FAILURE_DETECTION.md). |
 | `issue_reports` | object | GitHub, this repo | Default destination for problem reports: `{"destination": "github", "repository": "owner/name", "token": "..."}`. Dashboard settings override it. See [Troubleshooting](troubleshooting.md#sending-a-problem-report). |
 
 Example:
