@@ -228,7 +228,7 @@ setInterval(()=>{$('cameraPlaceholder').hidden=!!livePrinter;$('stopLive').hidde
 function loadSwapSettings(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap||{};$('swapEnabled').checked=!!cfg.enabled;$('swapModel').value=cfg.model||'A1 mini';$('swapSpares').value=cfg.spares||0;renderSwapStatus();renderAiStatus();}
 // Swapmod is only offered for A-series printers (A1 / A1 mini) (#17).
 function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;$('swapStatus').textContent=cfg?.enabled?`${cfg.model} kit enabled · ${cfg.spares} estimated magazine plates · ${cfg.verified?'Starting setup checked':'Starting setup check needed'}`:'Disabled for this printer — manual queue workflow.';}
-function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;loadTraining(false);
+function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;if(aiTestFor&&aiTestFor!==selectedPrinter){$('aiTestResult').hidden=true;aiTestFor='';}loadTraining(false);
  if(document.activeElement!==$('aiWatch'))$('aiWatch').checked=!!ai.watching;
  $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (it never pauses on its own; set "action": "pause" to allow that)';
  const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI unavailable'}[ai.status]||ai.status;
@@ -270,6 +270,28 @@ async function loadTraining(force){if(!force&&Date.now()-trainingLoaded<30000)re
  try{const t=await api('ai-training',undefined,'GET');$('aiTraining').textContent=t.enabled?`${t.count} pictures collected (${t.mb} MB): a still every ${t.every_minutes} min while printing, plus every frame the AI found suspicious.`+(t.problem?' ⚠️ '+t.problem:' Download them, label the failures in Roboflow and retrain for a model that knows these cameras.'):'Collecting training pictures is turned off.';
   $('aiTrainingDownload').hidden=!t.count;$('aiTrainingClear').hidden=!t.count;}catch(e){$('aiTrainingBlock').hidden=true;}}
 $('aiTrainingClear').addEventListener('click',()=>confirmAction('Delete the collected training pictures?','All pictures collected for training are deleted from the Pi. Download them first if you still need them.','Delete the training pictures.',async()=>{await api('ai-training/clear',{});trainingLoaded=0;await loadTraining(true);notice('Training pictures deleted.');}));
+// Test AI now: a fresh picture, checked right away, with the boxes the model found drawn on it.
+let aiTestResult=null,aiTestUrl='',aiTestFor='';
+function drawAiTest(){const r=aiTestResult,img=$('aiTestImage'),c=$('aiTestCanvas');if(!r||!img.naturalWidth)return;
+ c.width=img.clientWidth;c.height=img.clientHeight;const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
+ g.setLineDash([6,5]);g.strokeStyle='rgba(255,255,255,.35)';g.lineWidth=1;
+ (r.crops||[]).forEach(([x0,y0,x1,y1])=>g.strokeRect(x0*c.width,y0*c.height,(x1-x0)*c.width,(y1-y0)*c.height));   // where it zoomed in
+ g.setLineDash([]);g.font='bold 13px sans-serif';g.textBaseline='bottom';
+ r.detections.filter(d=>d.box).forEach(d=>{const counts=r.labels.includes(d.label),strong=d.score>=r.threshold;
+  const color=counts&&strong?'#ff5c52':counts?'#f3d684':'#8dc6ff';const [x0,y0,x1,y1]=d.box;const x=x0*c.width,y=y0*c.height,w=(x1-x0)*c.width,h=(y1-y0)*c.height;
+  g.strokeStyle=color;g.lineWidth=strong?3:2;g.strokeRect(x,y,w,h);const text=`${d.label} ${Math.round(d.score*100)}%`;const tw=g.measureText(text).width+8;
+  g.fillStyle=color;g.fillRect(x,Math.max(0,y-18),tw,18);g.fillStyle='#111';g.fillText(text,x+4,Math.max(18,y)-3);});}
+$('aiTest').addEventListener('click',async e=>{const b=e.target;b.disabled=true;b.textContent='Checking…';
+ try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/test',{});aiTestResult=r;aiTestFor=selectedPrinter;
+  const bytes=Uint8Array.from(atob(r.picture),ch=>ch.charCodeAt(0));if(aiTestUrl)URL.revokeObjectURL(aiTestUrl);aiTestUrl=URL.createObjectURL(new Blob([bytes],{type:'image/jpeg'}));
+  $('aiTestImage').onload=drawAiTest;$('aiTestImage').src=aiTestUrl;$('aiTestResult').hidden=false;
+  const pct=v=>Math.round(v*100)+'%';
+  $('aiTestText').className=r.failing?'bad':'good';
+  $('aiTestText').textContent=(r.failing?`⚠️ Looks like a failure: score ${pct(r.judged)}, at or above the ${pct(r.threshold)} threshold.`:`✅ No failure: score ${pct(r.judged)}, below the ${pct(r.threshold)} threshold.`)+(r.where?` (${r.where})`:'')+(r.judged!==r.score?` Raw model score ${pct(r.score)}.`:'')+' One frame only: a real alarm needs several failing frames over a few minutes.';
+  $('aiTestList').innerHTML=r.detections.length?r.detections.map(d=>`<li>${esc(d.label)} ${pct(d.score)}${r.labels.includes(d.label)?'':' (not counted as a failure)'}${d.on_part!==undefined?` • ${d.on_part>=0.5?'on the part':'off the part'}`:''}</li>`).join(''):'<li>Nothing found above 5%.</li>';
+  trainingLoaded=0;loadTraining(true);}
+ catch(err){notice(err.message);}finally{b.disabled=false;b.textContent='Test AI now';}});
+window.addEventListener('resize',()=>{if(!$('aiTestResult').hidden)drawAiTest();});
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
 $('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};

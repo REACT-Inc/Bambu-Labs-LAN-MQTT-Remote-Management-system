@@ -60,14 +60,15 @@ class TrainingPictures:
     def pictures(self):
         return sorted(self.folder.glob('*/*/*.jpg'), key=lambda p: p.name) if self.folder and self.folder.is_dir() else []
 
-    def save(self, name, job, picture, score, status):
-        """Keep this frame when it's time for the periodic still, or when the AI found it suspicious."""
+    def save(self, name, job, picture, score, status, force=False):
+        """Keep this frame when it's time for the periodic still, or when the AI found it suspicious (or force:
+        a manual "Test AI now" picture)."""
         if not self.settings['enabled'] or not picture or not self.folder:
             return None
         now = self.clock()
         flagged = status in ('suspect', 'failure', 'paused')
         periodic = now - self.last.get(name, 0) >= self.settings['every_minutes'] * 60
-        if not periodic and not (flagged and now - self.last_flagged.get(name, 0) >= FLAGGED_GAP):
+        if not force and not periodic and not (flagged and now - self.last_flagged.get(name, 0) >= FLAGGED_GAP):
             return None
         try:
             free = shutil.disk_usage(self.folder.parent).free
@@ -78,11 +79,15 @@ class TrainingPictures:
             self.problem = (f"Not saving: only {free / 1024 ** 3:.1f} GB free on the Pi, below the {self.settings['min_free_mb'] / 1024:.1f} GB "
                             'safety limit. Free some space, or lower "min_free_mb" under failure_detection.collect.')
             return None
-        if periodic:   # suspicious extras don't shift the steady once-a-minute still
+        if periodic and not force:   # suspicious extras and tests don't shift the steady once-a-minute still
             self.last[name] = now
         if flagged:
             self.last_flagged[name] = now
         target = self.folder / safe(name) / safe(job or 'no-job') / f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}_score{score:.2f}.jpg"
+        number = 2
+        while target.exists():   # two pictures in the same second (e.g. repeated "Test AI now")
+            target = target.with_name(f'{target.stem.rsplit("~", 1)[0]}~{number}.jpg')
+            number += 1
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary = target.with_suffix('.tmp')
