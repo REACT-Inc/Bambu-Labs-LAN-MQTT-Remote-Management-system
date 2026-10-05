@@ -74,6 +74,7 @@ class Dashboard:
             web.post('/api/plateswap/{name}/{action}',self.plate_swap),
             web.post('/api/ai/{name}',self.ai_watch),
             web.post('/api/ai/{name}/calibration',self.ai_calibration),
+            web.post('/api/ai/{name}/reprint',self.ai_reprint),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
@@ -136,6 +137,27 @@ class Dashboard:
         if corners is not None and (not isinstance(corners,list) or len(corners)!=4):raise ValueError('Click the four bed corners.')
         self.failure.geometry.set_corners(name,corners)
         self.failure.store_event(name,'AI camera calibration '+('cleared' if corners is None else 'saved'),'Bed corners for comparing the camera with the print file.')
+        return web.json_response(self.failure.state(name))
+
+    async def ai_reprint(self, request):
+        """Automatic reprint (#67): now = reprint the AI-paused job elsewhere at once; cancel = stop the countdown;
+        check = which printers could take it (uses the cameras)."""
+        name=request.match_info['name']
+        if name not in self.core.names():raise ValueError('Unknown printer.')
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        action=(await request.json()).get('action')
+        reprints=self.failure.reprints
+        if action=='now':
+            copy=await reprints.reprint(name,'web administrator')
+            return web.json_response({'ok':True,'job':copy['id'],'printer':copy['printer']})
+        if action=='cancel':
+            reprints.cancel(name,'web administrator')
+        elif action=='check':
+            job_id,_=reprints.for_printer(name)
+            job=self.store.get(job_id) if job_id else self.store.active(name)
+            if not job:raise ValueError('There is no queue job on this printer to check a reprint for.')
+            await reprints.availability(job,refresh=True)
+        else:raise ValueError('Unknown action.')
         return web.json_response(self.failure.state(name))
 
     async def files(self, request):

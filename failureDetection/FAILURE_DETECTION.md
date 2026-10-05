@@ -12,6 +12,8 @@ The app picks the place from the model file's extension.
 - [How it decides](#how-it-decides)
 - [Comparing with the print file](#comparing-with-the-print-file)
 - [What happens on a failure](#what-happens-on-a-failure)
+- [Automatic reprint on another printer](#automatic-reprint-on-another-printer)
+- [Automatic model updates](#automatic-model-updates)
 - [Running on the CPU (.onnx)](#running-on-the-cpu-onnx)
 - [Setting up the AI HAT](#setting-up-the-ai-hat)
 - [The model](#the-model)
@@ -159,6 +161,52 @@ With the default `"action": "notify"`, it only reports and never touches the pri
    - **`stringing`** is left out of `labels`: it's cosmetic, and counting it would cause false alarms.
 
 The helper limits OpenCV to 2 threads, so the dashboard, MQTT and cameras stay responsive. A model trained at a size other than 640 px needs `"input_size"` set to match.
+
+## Automatic reprint on another printer
+
+When the AI **pauses** a failing queue print, the job can carry on somewhere else:
+
+1. **The pause notification** says which printers could take it, for example *"Available for a reprint: Mini 2 (bed checked empty)"*, or why none can.
+2. **Countdown:** if nobody resumes or stops the paused print within **12 hours**, the app reprints the job on an available printer:
+   - it stops the paused print, so the printer doesn't sit paused and heated;
+   - records the job as failed;
+   - starts a copy on the chosen printer;
+   - says so in Discord and Activity.
+3. **Reprint now:** open the printer → **More → AI failure watch → Reprint now…** does the same at once. **Cancel automatic reprint** stops the countdown, and **Check available printers** looks again.
+4. **No printer free when it's time:** it keeps waiting, tries again every minute, and tells you once why.
+
+**What makes a printer available:**
+- it's the **model the file was sliced for**;
+- it's online, idle or finished, with **no error** and **no active queue job**;
+- its loaded AMS filament matches the plate (or the job used the external spool);
+- its **bed is empty**, judged by the camera.
+
+**How the bed check works:** every time someone starts a print and confirms *"the plate is clear"*, the app takes a fresh picture of that empty bed. Later it compares a new picture with it, inside the calibrated bed outline when there is one, with lighting differences evened out.
+- It errs towards "parts on the bed": a printer with no empty-bed picture yet, or an unclear result, is never used automatically.
+- Calibrating the camera ([above](#comparing-with-the-print-file)) makes the check more precise.
+
+The countdown is saved in `/var/lib/3d-printer-management/ai-reprints.json`, so it survives restarts. It's only for prints the AI paused (`"action": "pause"`) and for queue jobs; a print started from Bambu Studio has no file on the Pi to reprint. Settings (optional), under `failure_detection`:
+
+```json
+"auto_reprint": {"enabled": true, "after_hours": 12, "stop_original": true, "bed_threshold": 0.005}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Offer and run automatic reprints. |
+| `after_hours` | `12` | How long a paused print waits before it's reprinted elsewhere. |
+| `stop_original` | `true` | Stop the paused print when reprinting. |
+| `bed_threshold` | `0.005` | Share of the bed that may differ from the empty-bed picture and still count as empty. |
+
+## Automatic model updates
+
+Once a day the dashboard service checks the repository's [`ai-model` release](#publishing-a-model-for-every-pi). When it has a newer `print_failure.onnx`, the service:
+
+1. downloads it into `/var/lib/3d-printer-management/models/`;
+2. checks it runs with one test picture;
+3. switches to it straight away, with no restart and no commands.
+
+This works for updates installed from the dashboard too. It only replaces a model that came from that release; one you copied in yourself or pointed config.json at is never touched. The printer panel shows the model in use.
 
 ## Setting up the AI HAT
 

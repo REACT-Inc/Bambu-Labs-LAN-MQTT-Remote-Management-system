@@ -234,6 +234,10 @@ function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrin
  const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI unavailable'}[ai.status]||ai.status;
  const g=ai.geometry||{};$('aiGeometry').textContent=!g.enabled?'Print-file comparison is off.':(g.calibrated?'📐 Camera calibrated to the bed. ':'📐 Not calibrated: calibrate the camera to compare detections with the print file. ')+(g.message||'');
  $('aiCalibrate').textContent=g.calibrated?'Recalibrate camera to bed…':'Calibrate camera to bed…';$('aiCalibrate').hidden=!g.enabled;
+ const rp=ai.reprint||{},showReprint=rp.enabled&&(rp.pending||ai.status==='paused');$('aiReprintBlock').hidden=!showReprint;
+ if(showReprint){const left=rp.pending?Math.max(0,rp.due-Date.now()/1000):null,h=left===null?'':`${Math.floor(left/3600)} h ${Math.floor(left%3600/60)} min`;
+  $('aiReprint').textContent=(rp.pending?`If this paused print isn't resumed or stopped, it reprints on an available printer in ${h}. `:'')+(rp.note?rp.note+' ':'')+(rp.available||'Press Check available printers to see which printers could take it.');
+  $('aiReprintCancel').hidden=!rp.pending;}
  $('aiStatus').textContent=!ai.watching?'Off for this printer.':label+(ai.message?' — '+ai.message:'')+(ai.score!=null&&ai.score!==undefined?` (last score ${Number(ai.score).toFixed(2)})`:'');}
 // Camera-to-bed calibration (#79): four clicked corners map the bed into the picture.
 let calCorners=[];
@@ -254,6 +258,12 @@ $('calUndo').addEventListener('click',()=>{calCorners.pop();drawCalibration();})
 window.addEventListener('resize',()=>{if($('calibrateDialog').open)drawCalibration();});
 $('calibrateForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/calibration',{corners:calCorners});closeDialog($('calibrateDialog'));notice('Camera calibration saved.');await refresh();}catch(err){$('calStep').textContent=err.message;}});
 $('calClear').addEventListener('click',async()=>{try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/calibration',{clear:true});closeDialog($('calibrateDialog'));notice('Camera calibration removed.');await refresh();}catch(err){$('calStep').textContent=err.message;}});
+async function aiReprint(action,button){button.disabled=true;try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/reprint',{action});
+ notice(action==='now'?`Reprinting on ${printerLabel(r.printer)}.`:action==='cancel'?'Automatic reprint cancelled.':'Checked the other printers.');await refresh();}catch(err){notice(err.message);}finally{button.disabled=false;}}
+$('aiReprintCheck').addEventListener('click',e=>aiReprint('check',e.target));
+$('aiReprintCancel').addEventListener('click',e=>aiReprint('cancel',e.target));
+$('aiReprintNow').addEventListener('click',e=>confirmAction('Reprint on another printer now?',`The paused print on ${printerLabel(selectedPrinter)} will be stopped and recorded as failed, and the job started on an available printer of the same model whose camera shows an empty bed and whose loaded filament matches.`,
+ 'Stop this paused print and reprint the job on another printer.',()=>aiReprint('now',e.target)));
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
 $('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};
