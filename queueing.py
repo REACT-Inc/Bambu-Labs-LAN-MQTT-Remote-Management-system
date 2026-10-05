@@ -100,6 +100,24 @@ class Store:
     def active(self, printer):
         return next((j for j in self.jobs(printer) if j['status'] in ACTIVE), None)
 
+    def printer_file_name(self, printer, wanted, job_id):
+        """A safe file name for the printer's storage from the uploaded file's name, e.g. 'Bracket v2.gcode.3mf'.
+
+        Only letters, digits, '_', '-' and '.' are kept; spaces become '_' (the name is also the print's ftp:/// URL).
+        An old pm_<id> name (from earlier versions) falls back to the job name.
+        A name another waiting job on this printer still needs gets the job id added, so starting one job can never
+        swap the file another job will print."""
+        name = str(wanted or '').replace('\\', '/').rsplit('/', 1)[-1]
+        name = re.sub(r'\.3mf$', '', name, flags=re.I)
+        name = re.sub(r'[^A-Za-z0-9_.-]+', '_', name).strip('._-')[:80].strip('._-') or 'print'
+        if not name.lower().endswith('.gcode'):
+            name += '.gcode'
+        taken = {j['remote'] for j in self.jobs(printer) if j['status'] not in TERMINAL}
+        candidate = name + '.3mf'
+        if candidate in taken:
+            candidate = f'{name[:-6]}-{job_id[:6]}.gcode.3mf'
+        return candidate
+
     def add(self, printer, label, asset, remote, opts, author, demo=False):
         if not label.strip() or len(label) > 120:
             raise ValueError('Job name must be 1–120 characters.')
@@ -107,7 +125,10 @@ class Store:
             raise ValueError('Use a relative printer file path ending in .3mf, such as cache/model.gcode.3mf.')
         job_id = uuid.uuid4().hex[:12]
         if asset:
-            remote = f'pm_{job_id}.gcode.3mf'
+            # Uploaded files go to the printer under their own name (remote, else the job name), not pm_<id>.
+            if re.fullmatch(r'pm_[0-9a-f]{12}\.gcode\.3mf', remote or ''):
+                remote = ''
+            remote = self.printer_file_name(printer, remote or label, job_id)
         now = time.time()
         with self.db:
             position = self.db.execute('SELECT COALESCE(MAX(position),0)+1 FROM jobs').fetchone()[0]
@@ -273,6 +294,9 @@ class Engine:
             self.plate_swap.check(job)
             job = self.store.claim(job_id, self.plate_swap.reserve)
             self.store.event(job['printer'], 'Start approved', f'{job_id} • {author}')
+            hook = getattr(self, 'on_start_approved', None)   # AI: picture of the bed just confirmed clear (#67)
+            if hook:
+                self.spawn(hook(job, author))
             if override_error:
                 self.store.event(job['printer'], 'Error override approved', f'{job_id} • {author} • reported error/state bypassed for this attempt')
             self.spawn(self.dispatch(job, override_error))

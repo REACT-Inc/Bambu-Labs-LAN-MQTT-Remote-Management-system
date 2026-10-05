@@ -77,6 +77,9 @@ class Dashboard:
             web.get('/api/objects/{name}',self.list_objects),web.post('/api/objects/{name}',self.skip_objects),
             web.get('/api/objects/{name}/plate.png',self.objects_picture),
             web.post('/api/ai/{name}',self.ai_watch),
+            web.post('/api/ai/{name}/calibration',self.ai_calibration),
+            web.post('/api/ai/{name}/reprint',self.ai_reprint),
+            web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
@@ -131,6 +134,54 @@ class Dashboard:
         self.failure.set_watching(name,bool(data.get('watch')))
         return web.json_response(self.failure.state(name))
 
+    async def ai_calibration(self, request):
+        name=request.match_info['name']
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        data=await request.json()
+        corners=None if data.get('clear') else data.get('corners')
+        if corners is not None and (not isinstance(corners,list) or len(corners)!=4):raise ValueError('Click the four bed corners.')
+        self.failure.geometry.set_corners(name,corners)
+        self.failure.store_event(name,'AI camera calibration '+('cleared' if corners is None else 'saved'),'Bed corners for comparing the camera with the print file.')
+        return web.json_response(self.failure.state(name))
+
+    async def ai_reprint(self, request):
+        """Automatic reprint (#67): now = reprint the AI-paused job elsewhere at once; cancel = stop the countdown;
+        check = which printers could take it (uses the cameras)."""
+        name=request.match_info['name']
+        if name not in self.core.names():raise ValueError('Unknown printer.')
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        action=(await request.json()).get('action')
+        reprints=self.failure.reprints
+        if action=='now':
+            copy=await reprints.reprint(name,'web administrator')
+            return web.json_response({'ok':True,'job':copy['id'],'printer':copy['printer']})
+        if action=='cancel':
+            reprints.cancel(name,'web administrator')
+        elif action=='check':
+            job_id,_=reprints.for_printer(name)
+            job=self.store.get(job_id) if job_id else self.store.active(name)
+            if not job:raise ValueError('There is no queue job on this printer to check a reprint for.')
+            await reprints.availability(job,refresh=True)
+        else:raise ValueError('Unknown action.')
+        return web.json_response(self.failure.state(name))
+
+    async def ai_training(self, request):
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        return web.json_response(await asyncio.to_thread(self.failure.training.summary))
+
+    async def ai_training_zip(self, request):
+        """Training pictures from this Pi's cameras, sorted by how each print ended, for Roboflow."""
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        outcomes={j['id']:j['status'] for j in self.store.jobs()}   # read here: the database stays on this thread
+        target=self.core.DATA_DIR/'training-pictures.zip'
+        await asyncio.to_thread(self.failure.training.export,outcomes,target)
+        return web.FileResponse(target,headers={'Content-Disposition':'attachment; filename="training-pictures.zip"','Content-Type':'application/zip'})
+
+    async def ai_training_clear(self, request):
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        await asyncio.to_thread(self.failure.training.clear)
+        self.failure.store_event('','Training pictures cleared','web administrator')
+        return web.json_response(self.failure.training.summary())
     async def list_objects(self, request):
         name=request.match_info['name']
         if name not in self.core.names():raise ValueError('Unknown printer.')
@@ -234,10 +285,14 @@ class Dashboard:
             if not info['sliced']:
                 raise ValueError("This .3mf isn't sliced: it has no plate G-code. In Bambu Studio, slice it and use "
                                  "File → Export → Export plate sliced file (or Export all sliced file), then upload that.")
+            # Keep the original name next to the upload, so the printer gets 'Bracket.gcode.3mf' rather than pm_<id>.
+            # Some clients percent-encode the name in the form data (Bracket%20v2.gcode.3mf); decode that.
+            original=Path(__import__('urllib.parse').parse.unquote(part.filename).replace('\\','/')).name[:200]
+            path.with_suffix('.name').write_text(original)
             return web.json_response({'asset':token,'filename':Path(part.filename).name,'plates':info['plates'],
                 'model':job_transfer.label(info['model']) if info['model'] else '','model_key':info['model']})
         except BaseException:
-            path.unlink(missing_ok=True);raise
+            path.unlink(missing_ok=True);path.with_suffix('.name').unlink(missing_ok=True);raise
 
     def upload_path(self,asset):
         if not __import__('re').fullmatch('[0-9a-f]{32}',str(asset)): raise ValueError('Invalid upload.')
@@ -281,6 +336,8 @@ class Dashboard:
             sliced,model=job_transfer.sliced_for(path),job_transfer.printer_model(self.core,printer)
             if sliced and model and sliced!=model:
                 raise ValueError(f'This file was sliced for the {job_transfer.label(sliced)}, not the {job_transfer.label(model)}. Re-slice it for {printer}.')
+            try:remote=Path(path).with_suffix('.name').read_text().strip()   # the uploaded file's own name
+            except OSError:remote=''
         return self.store.add(printer,str(data.get('label','')),path,remote,opts,author,self.core.EXAMPLE_MODE)
 
     async def add_job(self,request):
@@ -295,12 +352,16 @@ class Dashboard:
         """Print straight away without waiting in the queue (#7): the job goes to the front and starts now, with the
         usual checks and confirmation. If it can't start, it's cancelled, so nothing is left waiting in the queue."""
         if data.get('confirmed') is not True: raise ValueError('Confirm the plate is clear and the file is sliced for this printer.')
+        override=data.get('override_error',False)
+        if type(override) is not bool: raise ValueError('Error override must be a boolean.')
         printer=data.get('printer')
-        if printer in self.core.names():self.engine.ready(printer)   # fail fast before anything is added
+        # Fail fast before anything is added. Like the queue's Start ignoring error, the override allows a FAILED
+        # state or a reported error code (e.g. after a failed print); it doesn't clear the error on the printer.
+        if printer in self.core.names():self.engine.ready(printer,override)
         job=self.add(data,author)
         try:
             self.store.move_to_front(job['id'])
-            await self.engine.start(job['id'],True,author)
+            await self.engine.start(job['id'],True,author,override)
         except Exception as exc:
             if self.store.get(job['id'])['status']=='queued':
                 self.store.set_status(job['id'],'cancelled',f'Print now could not start: {exc}'[:300])

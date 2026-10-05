@@ -7,14 +7,59 @@ The Pi can watch the printer cameras with an AI model and warn you, or pause the
 
 The app picks the place from the model file's extension.
 
+- [Automatic setup](#automatic-setup)
+- [Publishing a model for every Pi](#publishing-a-model-for-every-pi)
 - [How it decides](#how-it-decides)
+- [Better accuracy for your printers](#better-accuracy-for-your-printers)
+- [Comparing with the print file](#comparing-with-the-print-file)
 - [What happens on a failure](#what-happens-on-a-failure)
+- [Automatic reprint on another printer](#automatic-reprint-on-another-printer)
+- [Automatic model updates](#automatic-model-updates)
 - [Running on the CPU (.onnx)](#running-on-the-cpu-onnx)
 - [Setting up the AI HAT](#setting-up-the-ai-hat)
 - [The model](#the-model)
 - [config.json](#configjson)
 - [Dashboard and Discord](#dashboard-and-discord)
 - [Troubleshooting](#troubleshooting)
+
+## Automatic setup
+
+`install.sh` and `Updater/update.sh` set this up by themselves when a printer has a camera (`camera_type` `rtsp` or `jpeg_tcp`). They run `failureDetection/setup_ai.py`, which repeats everything that was first done by hand on the team Pi:
+
+1. **CPU packages:** installs OpenCV, numpy and Pillow for the system Python (`python3-opencv`, `python3-numpy`, `python3-pil`).
+2. **AI HAT, when one is on PCIe** (Hailo, vendor `0x1e60`):
+   - installs `hailo-all` (or `hailo-h10-all` for a Hailo-10H), `dkms` and the kernel headers;
+   - if `/dev/hailo0` is missing (the driver wasn't built for the running kernel, as happened on Raspberry Pi OS Trixie), reinstalls `hailort-pcie-driver` so it's rebuilt;
+   - if the driver only loads after a reboot, says **REBOOT RECOMMENDED** and uses the CPU until then.
+3. **Model:** downloads it from the repository's [`ai-model` release](#publishing-a-model-for-every-pi) into `/opt/3d-printer-management-models/`, checked against GitHub's SHA-256.
+   - It picks `print_failure_<chip>.hef` for a working AI HAT, otherwise `print_failure.onnx`.
+   - **A model you copied there yourself is never replaced.** To go back to the release model, delete yours and run the setup again.
+4. **Test:** pushes one test picture through the real helper as the service user. A model that doesn't run is never enabled.
+5. **Config:** adds a `failure_detection` section to `config.json`, **only if there isn't one**, with `"action": "notify"`. Your own settings are never changed. The service is then restarted.
+
+It never stops an install: each step reports and carries on.
+
+**Running it by hand,** for example after adding a camera, fitting an AI HAT or rebooting:
+
+```bash
+sudo /usr/bin/python3 /opt/3d-printer-management/failureDetection/setup_ai.py --restart
+```
+
+**Skipping it:** set `PM_AI=0`. **Using another repository's models:** set `PM_AI_REPO=owner/name`. By default it follows **Settings → GitHub releases**, including a private token.
+
+Updates installed from the dashboard don't run it, because they never run scripts as root. The next `update.sh` or install does.
+
+## Publishing a model for every Pi
+
+Every Pi fetches its model from a GitHub release tagged **`ai-model`** in the repository it updates from. The dashboard's updater ignores this tag, because it isn't a version number. Attach:
+
+| File | |
+|---|---|
+| `print_failure.onnx` | YOLOv8 export (`yolo export model=best.pt format=onnx opset=11`). Runs on the CPU. |
+| `print_failure.json` | Optional: `{"classes": [...], "labels": [...], "threshold": 0.4, "input_size": 640}`. Without it, the classes default to `spaghetti, stringing, warping` with `spaghetti, warping` counted and threshold 0.4. |
+| `print_failure_hailo8.hef` / `_hailo8l` / `_hailo10h` | Optional: the same model compiled for an AI HAT chip. |
+
+To publish a better model, replace the asset. Pis that downloaded the old one get the new one on their next update; Pis with a model copied in by hand keep theirs. If the dataset's licence asks for credit (CC BY 4.0 does), give it in the release notes.
 
 ## How it decides
 
@@ -34,6 +79,63 @@ How odd frames are handled:
 - **Suspect frames:** two or more failing frames that don't yet meet the rules show **suspect** on the dashboard. Nothing is sent.
 
 With the defaults, a real failure is reported about 4–5 minutes after it becomes visible. Raise `min_minutes` or `needed` if you get false alarms. Lower them, with care, to react faster.
+
+## Better accuracy for your printers
+
+A model trained on other people's photos can miss failures that are obvious to you on your own printers. That happened on an A1 mini: its camera looks across the bed from low down, the plate was a shiny holographic one, and the toolhead light caused glare. A clear spaghetti mess at the back of the bed scored only 0.13, while the model reacted weakly to the glittery plate instead. Two things fix that.
+
+### 1. Close-ups (automatic)
+
+The model shrinks every picture to 640×640 by its longer side, so a mess at the back of the bed ends up only a few dozen pixels tall. So each check also looks at enlarged close-ups and keeps the strongest result:
+- **Calibrated camera:** the bed outline, widened upwards for tall parts and split in two when the bed is wide.
+- **Uncalibrated camera:** the upper part of the frame, where the bed and print are on side-mounted cameras like the A1 and A1 mini.
+
+That makes the print area about 1.6–2× bigger to the model, without the table and base. Each check takes a few hundred milliseconds longer on the CPU. Turn it off with `"crops": "off"` under `failure_detection`.
+
+### 2. Train on your own pictures (the real fix)
+
+While a printer prints, the app keeps training pictures from its camera:
+- a still every 5 minutes;
+- **every frame the AI found suspicious**;
+- capped at 1,500 pictures (oldest removed first), never filling the disk.
+
+To use them:
+1. **Download:** open any printer → **More → AI failure watch → Download training pictures**. The ZIP is sorted into `failed/`, `finished/` and `other/` by how each print ended.
+2. **Upload:** in Roboflow, open your project → **Upload**, and drag the folders in.
+3. **Label:** draw a box around every spaghetti, warping or stringing area, labelled with that name. **Leave good prints without boxes**: they teach the model what normal looks like on your plates and in your lighting.
+4. **Retrain:** generate a new dataset version and run the Colab training cell again (see [Running on the CPU](#running-on-the-cpu-onnx)).
+5. **Install the new model:** copy the new `best.onnx` over `/opt/3d-printer-management-models/print_failure.onnx`, or publish it in the [`ai-model` release](#publishing-a-model-for-every-pi) so every Pi updates itself.
+
+Even 50–100 labelled pictures from your own cameras usually make a big difference. Spaghetti tests are the quickest way to get failure pictures. Settings (optional): `"collect": {"enabled": true, "every_minutes": 5, "max_pictures": 1500}`.
+
+## Comparing with the print file
+
+The model only sees a picture. It can't know whether a stringy-looking shape is spaghetti or the part's own supports and thin walls. The print file does know: the sliced G-code says exactly where plastic goes, layer by layer. With a **calibrated camera**, the app compares each detection with it:
+
+| Where the detection is | What the app does |
+|---|---|
+| **Off the part**: the file puts no plastic there (with a margin) | Keeps the full score. Material where nothing should be printed is strong evidence of spaghetti or a part knocked loose. The report says *"outside where the print file puts plastic"*. |
+| **On the part**: plastic is expected there by the current layer | Counts it at half its score (`on_part_weight`). It's more likely the part's own geometry, which cuts false alarms on supports, lattices and thin features. A real failure on the part still gets through when the model is confident. |
+
+**How it works:**
+- **Reading the file:** when a print starts from the **queue** or **Print now**, the app reads that plate's G-code once, in a low-priority background process. It builds a 2 mm grid of where each layer puts plastic and how tall the part is; large files take a minute or so on a Pi. The grid is cached in `/var/lib/3d-printer-management/geometry/`.
+- **Matching:** each check uses the printer's reported layer number, so only plastic printed *so far* counts.
+- **Calibration** (once per camera): open the printer → **More → AI failure watch → Calibrate camera to bed…** and click the printable area's four corners on the picture: **front-left** (where X and Y are 0), **front-right**, **back-right**, **back-left**.
+  - **Accuracy:** exact on the bed surface. For taller parts, the area around the part is widened by the part's height, because the camera sees the top of a tall part further from its base.
+  - **Recalibrate** after moving or bumping the camera.
+- **When it's skipped:** prints started from Bambu Studio or the printer's screen (the app doesn't have their file), an uncalibrated camera, or a model without boxes (classification). In those cases scores are used as they are, exactly as before.
+
+Settings (optional), under `failure_detection`:
+
+```json
+"geometry": {"enabled": true, "on_part_weight": 0.5, "margin_mm": 5}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Compare with the print file when possible. |
+| `on_part_weight` | `0.5` | Share (0–1) of the score a detection on the part keeps. `1` treats on-part and off-part alike. |
+| `margin_mm` | `5` | How close to printed plastic still counts as "on the part". The part's height is added to it. |
 
 ## What happens on a failure
 
@@ -88,6 +190,52 @@ With the default `"action": "notify"`, it only reports and never touches the pri
    - **`stringing`** is left out of `labels`: it's cosmetic, and counting it would cause false alarms.
 
 The helper limits OpenCV to 2 threads, so the dashboard, MQTT and cameras stay responsive. A model trained at a size other than 640 px needs `"input_size"` set to match.
+
+## Automatic reprint on another printer
+
+When the AI **pauses** a failing queue print, the job can carry on somewhere else:
+
+1. **The pause notification** says which printers could take it, for example *"Available for a reprint: Mini 2 (bed checked empty)"*, or why none can.
+2. **Countdown:** if nobody resumes or stops the paused print within **12 hours**, the app reprints the job on an available printer:
+   - it stops the paused print, so the printer doesn't sit paused and heated;
+   - records the job as failed;
+   - starts a copy on the chosen printer;
+   - says so in Discord and Activity.
+3. **Reprint now:** open the printer → **More → AI failure watch → Reprint now…** does the same at once. **Cancel automatic reprint** stops the countdown, and **Check available printers** looks again.
+4. **No printer free when it's time:** it keeps waiting, tries again every minute, and tells you once why.
+
+**What makes a printer available:**
+- it's the **model the file was sliced for**;
+- it's online, idle or finished, with **no error** and **no active queue job**;
+- its loaded AMS filament matches the plate (or the job used the external spool);
+- its **bed is empty**, judged by the camera.
+
+**How the bed check works:** every time someone starts a print and confirms *"the plate is clear"*, the app takes a fresh picture of that empty bed. Later it compares a new picture with it, inside the calibrated bed outline when there is one, with lighting differences evened out.
+- It errs towards "parts on the bed": a printer with no empty-bed picture yet, or an unclear result, is never used automatically.
+- Calibrating the camera ([above](#comparing-with-the-print-file)) makes the check more precise.
+
+The countdown is saved in `/var/lib/3d-printer-management/ai-reprints.json`, so it survives restarts. It's only for prints the AI paused (`"action": "pause"`) and for queue jobs; a print started from Bambu Studio has no file on the Pi to reprint. Settings (optional), under `failure_detection`:
+
+```json
+"auto_reprint": {"enabled": true, "after_hours": 12, "stop_original": true, "bed_threshold": 0.005}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Offer and run automatic reprints. |
+| `after_hours` | `12` | How long a paused print waits before it's reprinted elsewhere. |
+| `stop_original` | `true` | Stop the paused print when reprinting. |
+| `bed_threshold` | `0.005` | Share of the bed that may differ from the empty-bed picture and still count as empty. |
+
+## Automatic model updates
+
+Once a day the dashboard service checks the repository's [`ai-model` release](#publishing-a-model-for-every-pi). When it has a newer `print_failure.onnx`, the service:
+
+1. downloads it into `/var/lib/3d-printer-management/models/`;
+2. checks it runs with one test picture;
+3. switches to it straight away, with no restart and no commands.
+
+This works for updates installed from the dashboard too. It only replaces a model that came from that release; one you copied in yourself or pointed config.json at is never touched. The printer panel shows the model in use.
 
 ## Setting up the AI HAT
 
