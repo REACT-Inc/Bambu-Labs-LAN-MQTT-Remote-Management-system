@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.6.2)
+## 1.6.2-beta.1
+
+Built on 1.6.1-beta.1. AI failure detection can now run a trained YOLOv8 `.onnx` model on the Pi's CPU (#70), plus fixes for the AI HAT helper and for dashboard/GitHub updates. **Pis on 1.6.0 or 1.6.1 need one manual `sudo bash Updater/update.sh` to install this release** (see Fixed below).
 
 ### Added
 - **AI failure detection without an AI HAT (#70).** A YOLOv8 `.onnx` model now runs on the Pi's CPU, for example `best.onnx` straight from training.
