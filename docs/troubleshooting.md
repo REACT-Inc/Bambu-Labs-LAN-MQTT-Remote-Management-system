@@ -83,6 +83,7 @@ Other destinations, such as a Discord webhook or email, can be added in `issue_r
 - **Is the service running?** Check the status. If it keeps restarting, read the log: a JSON error in `config.json` is the usual cause.
 - **Is the address right?** Check you're using an address from `listen` in `config.json`, and that your device can reach it. For Tailscale, the device must be on the tailnet and allowed by your policy; for a LAN address, the same network.
 - **Only on the Pi?** `http://localhost:8080` only works on the Pi itself.
+- **Did start-up fail?** Search the log for `Start-up failed` or `Cannot listen on`: they say why the dashboard couldn't open. Another copy may be using the port, or an address in `listen` may not exist on the Pi. An address that isn't up yet (for example a hotspot) is retried every 30 s while the others work.
 
 ### A printer shows OFFLINE
 

@@ -2,6 +2,17 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.4)
+
+### Fixed
+- **The dashboard and Discord could stay down after an update or restart, while the service showed "running"** (1.7.2 and 1.7.3).
+  - **Cause:** when start-up failed (for example, the dashboard's address or port wasn't available yet), the app tried to stop. It then waited forever for the AI HAT model that was still loading. It never exited, so systemd never restarted it, and the error was never logged.
+  - **Fix, AI start:** the AI now starts 5 seconds after the rest of the app.
+  - **Fix, failed start-up:** the error is logged straight away, and the process always exits so systemd starts it again.
+  - **Fix, stopping:** the service can no longer get stuck when it's stopped.
+  - **Fix, watchdog:** the freeze watchdog now also covers start-up.
+- **One unavailable dashboard address no longer stops the app.** If an address in `"listen"` isn't up yet (such as a hotspot or Wi-Fi address while the network starts), the dashboard opens on the others and retries that one every 30 seconds.
+
 ## 1.7.3-beta.1
 
 Built on 1.7.2-beta.1. Shows the AI's detections as boxes on the printer camera view, live and still.

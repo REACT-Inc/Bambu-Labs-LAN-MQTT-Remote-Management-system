@@ -52,6 +52,7 @@ DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], thres
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
                 geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
                 hold=None, focus=True)
+START_DELAY = 5   # seconds after start-up before the AI helper is started
 START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
 GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
 
@@ -899,11 +900,18 @@ class FailureMonitor:
 
     async def start(self, app=None):
         if self.enabled and not getattr(self.core, 'EXAMPLE_MODE', False):
-            if hasattr(self.backend, 'warm'):
-                asyncio.create_task(self.backend.warm())   # load the model now; logs where it runs
             if self.reprints.settings['enabled']:
                 self.engine.on_start_approved = self.reprints.capture_reference
-            self.task = asyncio.create_task(self.run())
+            self.task = asyncio.create_task(self.begin())
+
+    async def begin(self, delay=START_DELAY):
+        """Load the model (logging where it runs), then watch. Waits a few seconds first, so the AI helper is never
+        being started while the rest of the app starts up: if start-up fails at that moment, cancelling a half-started
+        helper process could hang the shutdown (1.7.2 and 1.7.3 then never exited, so systemd never restarted them)."""
+        await asyncio.sleep(delay)
+        if hasattr(self.backend, 'warm'):
+            await self.backend.warm()
+        await self.run()
 
     async def stop(self, app=None):
         if self.task:
