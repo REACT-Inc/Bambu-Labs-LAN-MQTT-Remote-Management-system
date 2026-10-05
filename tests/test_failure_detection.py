@@ -332,6 +332,19 @@ class MonitorTests(unittest.IsolatedAsyncioTestCase):
         m.set_tuning('H2D',{'preset':'normal','focus':False})
         await self.run_checks(m,1);self.assertEqual(len(backend.crops[2]),3)
 
+    async def test_camera_view_gets_the_last_boxes(self):
+        class Boxes(FakeBackend):
+            async def score(self,jpeg,crops=None):
+                return 0.5,[{'label':'spaghetti','score':0.5,'box':[0.6,0.2,0.7,0.3]},{'label':'print','score':0.9,'box':[0.4,0.1,0.8,0.5]},
+                            {'label':'spaghetti','score':0.2,'box':None}]
+        core=FakeCore();m=self.monitor(core,backend=Boxes())
+        await self.run_checks(m,1)
+        state=m.state('H2D')
+        self.assertEqual([b['label'] for b in state['boxes']],['spaghetti','print'])   # only boxed detections
+        self.assertEqual([b['counts'] for b in state['boxes']],[True,False])
+        self.assertEqual((state['boxes_at'],state['threshold'],state['hold']),(self.clock.now,0.6,0.45))
+        self.assertEqual(len(state['zoom']),2)   # where it zooms in next: the print area and the spot
+
     async def test_off_without_config(self):
         m=FailureMonitor(FakeCore(),None)
         self.assertFalse(m.enabled);self.assertEqual(m.state('H2D'),{'enabled':False,'status':'off'})

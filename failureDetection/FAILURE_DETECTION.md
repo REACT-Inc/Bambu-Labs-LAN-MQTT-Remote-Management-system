@@ -140,6 +140,17 @@ To use them:
 
 Even 50–100 labelled pictures from your own cameras usually make a big difference. Spaghetti tests are the quickest way to get failure pictures. Settings (optional): `"collect": {"enabled": true, "every_minutes": 1, "max_pictures": 5000}`. With several printers going, 5,000 pictures is roughly a day or two of printing; download them before they roll over.
 
+## AI boxes on the camera view
+
+A printer's camera view, live or still, shows what the AI found in the frame it checked last, with the same colours as **Test AI now**:
+
+- **Red:** a failure at or above the failure score.
+- **Yellow:** a failure at or above the keep-counting score.
+- **Blue:** a class that isn't a failure (for example `print`).
+- **🔍 AI zoom:** a dashed outline where the AI zooms in on the next checks.
+
+The corner label says how many seconds ago that frame was checked. With the AI HAT this is a few seconds, so the boxes can trail a moving toolhead slightly. Boxes older than 20 s (or three check intervals) aren't shown. Untick **AI boxes** under the picture to hide them; the choice is remembered in this browser.
+
 ## Comparing with the print file
 
 The model only sees a picture. It can't know whether a stringy-looking shape is spaghetti or the part's own supports and thin walls. The print file does know: the sliced G-code says exactly where plastic goes, layer by layer. With a **calibrated camera**, the app compares each detection with it:

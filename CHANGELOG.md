@@ -2,6 +2,17 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.3)
+
+### Added
+- **AI boxes on the camera view.** A printer's camera view, live or still, now shows what the AI found in the frame it checked last, like Test AI now:
+  - **Red:** a failure at or above the failure score.
+  - **Yellow:** a failure at or above the keep-counting score.
+  - **Blue:** a non-failure class such as `print`.
+  - **🔍 AI zoom:** a dashed outline where the AI zooms in next.
+  - **Age:** a corner label says how many seconds ago the frame was checked.
+  - **Toggle:** turn the boxes off with **AI boxes** under the picture (remembered in this browser).
+
 ## 1.7.2-beta.1
 
 Built on 1.7.1-beta.1. Puts the AI HAT to work: every printing printer is checked every 5 seconds, sensitivity can be changed per printer, flickering failures add up, the AI zooms in on suspicious spots, and new models install safely with automatic rollback.
