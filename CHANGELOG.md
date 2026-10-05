@@ -2,6 +2,12 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.1)
+
+### Changed
+- **Training pictures every minute.** While printing, each printer now keeps a camera still every minute (was every 5) plus every suspicious frame, so training sets fill up much faster. The cap rose to 5,000 pictures (about 1 GB), and nothing is saved when less than 2 GB is free.
+- **The AI panel says why training pictures aren't being saved,** for example *"only 1.4 GB free on the Pi"*. Before, it skipped silently.
+
 ## 1.7.0-beta.1
 
 Built on 1.6.2-beta.1. A big AI release:

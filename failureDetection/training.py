@@ -3,8 +3,8 @@
 A model trained on other people's photos struggles with your camera angle, lighting and plates (for example the A1
 mini's low side view of a holographic plate). The fix is training on pictures from your own printers, so while a
 printer prints the monitor keeps:
-- one camera still every `every_minutes` (5), and
-- every frame the AI found suspicious or failing (at most one a minute), which are the most useful to label.
+- one camera still every `every_minutes` (1), and
+- every frame the AI found suspicious or failing (each check, every 30 s), which are the most useful to label.
 
 Pictures are kept per printer and print in /var/lib/3d-printer-management/training/, capped at `max_pictures`
 (oldest removed first) and never filling the disk. "Download training pictures" in the dashboard gives a ZIP sorted
@@ -18,7 +18,8 @@ import time
 import zipfile
 from pathlib import Path
 
-DEFAULTS = dict(enabled=True, every_minutes=5.0, max_pictures=1500, min_free_mb=2048)
+DEFAULTS = dict(enabled=True, every_minutes=1.0, max_pictures=5000, min_free_mb=2048)
+FLAGGED_GAP = 25   # seconds: keeps every suspicious check (the monitor looks every 30 s)
 README = """Training pictures from your printers' cameras
 =============================================
 
@@ -54,7 +55,7 @@ class TrainingPictures:
         self.core, self.settings, self.clock = core, settings_for(settings), clock
         data = getattr(core, 'DATA_DIR', None)
         self.folder = Path(data) / 'training' if data else None   # no data folder (tests): nothing is kept
-        self.last, self.last_flagged = {}, {}
+        self.last, self.last_flagged, self.problem = {}, {}, ''   # problem: why the last picture wasn't kept
 
     def pictures(self):
         return sorted(self.folder.glob('*/*/*.jpg'), key=lambda p: p.name) if self.folder and self.folder.is_dir() else []
@@ -66,21 +67,31 @@ class TrainingPictures:
         now = self.clock()
         flagged = status in ('suspect', 'failure', 'paused')
         periodic = now - self.last.get(name, 0) >= self.settings['every_minutes'] * 60
-        if not periodic and not (flagged and now - self.last_flagged.get(name, 0) >= 60):
+        if not periodic and not (flagged and now - self.last_flagged.get(name, 0) >= FLAGGED_GAP):
             return None
         try:
-            if shutil.disk_usage(self.folder.parent).free < self.settings['min_free_mb'] * 1024 * 1024:
-                return None
-        except OSError:
+            free = shutil.disk_usage(self.folder.parent).free
+        except OSError as exc:
+            self.problem = f'Not saving: cannot check the free space ({exc.strerror or type(exc).__name__}).'
             return None
-        self.last[name] = now
+        if free < self.settings['min_free_mb'] * 1024 * 1024:
+            self.problem = (f"Not saving: only {free / 1024 ** 3:.1f} GB free on the Pi, below the {self.settings['min_free_mb'] / 1024:.1f} GB "
+                            'safety limit. Free some space, or lower "min_free_mb" under failure_detection.collect.')
+            return None
+        if periodic:   # suspicious extras don't shift the steady once-a-minute still
+            self.last[name] = now
         if flagged:
             self.last_flagged[name] = now
         target = self.folder / safe(name) / safe(job or 'no-job') / f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}_score{score:.2f}.jpg"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_suffix('.tmp')
-        temporary.write_bytes(picture)
-        os.replace(temporary, target)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_suffix('.tmp')
+            temporary.write_bytes(picture)
+            os.replace(temporary, target)
+        except OSError as exc:
+            self.problem = f'Not saving: {exc.strerror or type(exc).__name__} writing {target.parent}.'
+            raise
+        self.problem = ''
         self.prune()
         return target
 
@@ -96,7 +107,7 @@ class TrainingPictures:
         pictures = self.pictures()
         size = sum(p.stat().st_size for p in pictures)
         return dict(enabled=self.settings['enabled'], count=len(pictures), mb=round(size / 1024 / 1024, 1),
-                    every_minutes=self.settings['every_minutes'])
+                    every_minutes=self.settings['every_minutes'], problem=self.problem)
 
     def export(self, outcomes, target):
         """Write a ZIP of all pictures to target, sorted by outcome. outcomes: job id -> 'failed'/'finished'/..."""
