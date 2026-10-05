@@ -67,6 +67,7 @@ progress_tracker = ProgressTracker()
 report_listener = None
 event_listener = None
 failure_monitor = None   # set by the dashboard (failureDetection, #70)
+notification_view = None   # (printer, title) -> buttons for a notification, set by clear_errors_discord (#34)
 
 
 def load_settings():
@@ -944,6 +945,9 @@ async def notify(name, title, description, color, camera=False):
             kwargs['file'] = discord.File(io.BytesIO(picture), filename='printer.jpg')
         elif camera:
             field(embed, 'Camera', 'Snapshot unavailable; status update delivered without an image.', False)
+        view = notification_view(name, title) if notification_view else None   # e.g. Clear error (#34)
+        if view:
+            kwargs['view'] = view
         await channel.send(**kwargs)
     except Exception:
         log.exception('Notification failed for %s', name)

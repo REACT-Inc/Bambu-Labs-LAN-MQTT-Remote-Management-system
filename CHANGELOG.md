@@ -2,6 +2,18 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.8.0)
+
+### Added
+- **Clear printer errors and health alerts from the dashboard and Discord (#34).**
+  - **Dashboard:** printer cards get **Clear error…**. The printer panel lists each error and alert with its official description, with **Clear** / **Dismiss** and **Clear all**.
+  - **Discord:** `/clearerror name?` (open to everyone, configurable), and a **Clear error…** button under error notifications.
+  - **Same as Bambu Studio:** print errors are cleared on the printer with the commands Bambu Studio's error dialog sends (`clean_print_error`, then `uiop` to close the dialog).
+  - **Health alerts:** they are hidden in the dashboard until the printer stops reporting them, and are never muted on the printer.
+  - **Honest result:** the reply says **Cleared** only once the printer stops reporting the error; otherwise it says the error is still reported.
+  - **Queue:** a FAILED printer whose error was cleared starts its next queued job normally (the plate-clear confirmation is still required).
+  - **Logged:** every clear is recorded in Activity with who did it.
+
 ## Unreleased (1.7.5)
 
 ### Changed

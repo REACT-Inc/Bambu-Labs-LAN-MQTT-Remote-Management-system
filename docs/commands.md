@@ -73,6 +73,7 @@ Every command in this table shows a confirmation card first. Only the person who
 | `/pause` | `name?` | Pause the current print | |
 | `/resume` | `name?` | Resume a paused print | Check the printer is ready first |
 | `/stop` | `name?` | Cancel the current print | An active queue job is moved to *needs review* |
+| `/clearerror` | `name?` | Show the printer's errors and health alerts, with **Clear** / **Clear all** buttons | Asks for confirmation. Says *Cleared* only once the printer stops reporting the error. Health alerts are hidden in the dashboard, not muted on the printer |
 | `/reprint` | `name?` | Add the last finished queue job back to the queue | Doesn't start it. Use `/queuestart` after clearing the plate |
 | `/lighton` | `name?` | Turn the chamber light on | |
 | `/lightoff` | `name?` | Turn the chamber light off | |

@@ -29,6 +29,8 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
 
 ## Printer details
 
+When a printer reports an error or health alert, its card shows **Clear error…**, and the panel lists each alert with **Clear** / **Dismiss** and **Clear all** (see [Clearing errors](printer-controls.md#clearing-errors-and-health-alerts)).
+
 Clicking a printer card opens its **printer panel**. It slides in from the right on a computer, or up from the bottom on a phone.
 
 | Part | What it shows / does |

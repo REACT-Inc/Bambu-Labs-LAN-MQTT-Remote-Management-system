@@ -235,7 +235,7 @@ function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},pro
  $('detailProgress').value=progress;$('detailPercent').textContent=progress+'%';$('detailRing').style.setProperty('--p',progress);
  $('detailLayers').textContent=`Layer ${d.layer_num??'—'} / ${d.total_layer_num??'—'}`;
  const left=num(d.mc_remaining_time);$('detailRemaining').textContent=left===null?'— remaining':(left>=60?Math.floor(left/60)+' h '+left%60+' min':left+' min')+' remaining';
- $('detailError').hidden=!p.error_text;$('detailError').textContent=p.error_text||'';
+ $('detailError').hidden=!p.error_text;$('detailError').textContent=p.error_text||'';renderAlerts(p);
  $('devPause').hidden=p.state!=='RUNNING'&&p.state!=='PREPARE';$('devResume').hidden=p.state!=='PAUSE';$('devStop').hidden=!active;
  const lt=lightShown(p);$('devLight').setAttribute('aria-pressed',String(lt.on));$('devLight').classList.toggle('pending',lt.busy);
  for(const a of ['pause','resume','stop'])$('dev'+a[0].toUpperCase()+a.slice(1)).classList.toggle('pending',isPending(a+'|'+p.name,p));
@@ -291,6 +291,12 @@ $('aiFocus').addEventListener('change',()=>{aiTuningDirty=true;});
 $('aiTuningForm').addEventListener('submit',async e=>{e.preventDefault();const preset=$('aiPreset').value;
  const data={preset,focus:$('aiFocus').checked,...(preset==='custom'?aiTuningValues():{})};
  try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/tuning',data);aiTuningDirty=false;notice(`AI sensitivity saved for ${printerLabel(selectedPrinter)}.`);await refresh();}catch(err){notice(err.message);}});
+// The printer's current errors and health alerts, each with Clear, plus Clear all (#34).
+function renderAlerts(p){const list=p.alerts||[],box=$('detailAlerts');box.hidden=!list.length;if(!list.length){box.innerHTML='';return;}
+ const html=`<ul>${list.map(a=>`<li><span><strong>${a.kind==='error'?'Error':'Health alert'} ${esc(a.code)}</strong> ${esc(a.message)} <a href="${esc(a.url)}" target="_blank" rel="noopener">Help</a></span><button type="button" class="ghost small-btn" data-clear-alert="${esc(a.id)}">${a.kind==='error'?'Clear':'Dismiss'}</button></li>`).join('')}</ul>`+
+  (list.length>1?'<button type="button" class="ghost small-btn" data-clear-alert="all">Clear all</button>':'');
+ if(box.dataset.html!==html){box.dataset.html=html;box.innerHTML=html;}}
+$('detailAlerts').addEventListener('click',e=>{const b=e.target.closest('[data-clear-alert]');if(!b)return;const id=b.dataset.clearAlert;confirmClearAlerts(selectedPrinter,id==='all'?'all':[id]);});
 // Camera-to-bed calibration (#79): four clicked corners map the bed into the picture.
 let calCorners=[];
 const CAL_NAMES=['front-left','front-right','back-right','back-left'];

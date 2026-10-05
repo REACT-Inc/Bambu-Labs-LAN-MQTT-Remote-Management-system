@@ -35,11 +35,12 @@ class CommandsDocTests(unittest.IsolatedAsyncioTestCase):
         from discord_Intergration.team_discord import install as install_team
         from discord_Intergration.controls_discord import install as install_controls
         from swapMod.plate_swap_discord import install as install_swap
+        from discord_Intergration.clear_errors_discord import install as install_clear_errors
         store=Store(Path(self.tmp.name)/'doc.sqlite');self.store=store
         engine=Engine(self.core,store);dashboard=Dashboard(self.core,store,engine)
         # Same installers as main.py.
         install_queue(self.core,store,engine,dashboard);install_team(self.core,Team(self.core,store,dashboard))
-        install_extras(self.core,store);install_controls(self.core,dashboard.controls);install_swap(self.core,engine)
+        install_extras(self.core,store);install_controls(self.core,dashboard.controls);install_clear_errors(self.core,dashboard.alerts);install_swap(self.core,engine)
         for extra in ('diagnostics','issue_reports'):
             if (ROOT/(extra+'.py')).exists():
                 module=importlib.import_module(extra)

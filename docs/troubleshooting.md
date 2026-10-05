@@ -129,6 +129,10 @@ The dashboard and the Discord bot share one event loop. A watchdog thread checks
 
 Attach it to a problem report or GitHub issue. If this repeats, it's a bug; please report it with that file.
 
+### A printer keeps showing an error
+
+Use **Clear error…** on the printer card, or `/clearerror` in Discord. If the reply says the printer **still reports** the error, its cause is still there (for example a filament runout or a clog): fix it on the printer, then clear again. Health alerts you dismiss come back only if the printer reports them again.
+
 ### A job is stuck in "needs review"
 
 This is deliberate: the app couldn't confirm what the printer did. Look at the printer, then record what actually happened with **Mark finished / failed / cancelled**. See [Print queue](print-queue.md#when-a-job-needs-review).
