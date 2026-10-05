@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.7.3)
+## 1.7.3-beta.1
+
+Built on 1.7.2-beta.1. Shows the AI's detections as boxes on the printer camera view, live and still.
 
 ### Added
 - **AI boxes on the camera view.** A printer's camera view, live or still, now shows what the AI found in the frame it checked last, like Test AI now:
