@@ -2,6 +2,14 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.6.3)
+
+### Fixed
+- **Uploaded files keep their own name on the printer.** Files used to be sent as `pm_<id>.gcode.3mf`. They're now sent under the uploaded file's name, for example `Bracket_v2.gcode.3mf`, so the printer's screen, its file list and Discord `/printer` show something recognisable.
+  - **Safe names:** spaces and symbols become `_`.
+  - **No clashes:** a second waiting job with the same file on the same printer gets its job ID added, so one job can never replace another's file.
+  - **Reprints:** keep the original name.
+
 ## 1.6.2-beta.1
 
 Built on 1.6.1-beta.1. AI failure detection can now run a trained YOLOv8 `.onnx` model on the Pi's CPU (#70), plus fixes for the AI HAT helper and for dashboard/GitHub updates. **Pis on 1.6.0 or 1.6.1 need one manual `sudo bash Updater/update.sh` to install this release** (see Fixed below).
