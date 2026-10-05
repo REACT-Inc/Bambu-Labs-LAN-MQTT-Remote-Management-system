@@ -242,3 +242,73 @@ class FreshFrameTests(unittest.IsolatedAsyncioTestCase):
             for _ in range(10):
                 await m.check('James');now[0]+=30
             self.assertEqual(m.state('James')['frames'],10)   # was 5 with 60 s reuse
+
+
+class ThrottleTests(unittest.TestCase):
+    """Adaptive interval: more often while the Pi is quiet, less while it's busy, never over half the time."""
+    def throttle(self,load,model='m.onnx',**extra):
+        from failureDetection.detection import Throttle,settings_for
+        self.settings=settings_for({'failure_detection':{'enabled':True,'model':model,**extra}})
+        self.loads=list(load) if isinstance(load,(list,tuple)) else [load]
+        return Throttle(self.settings,load=lambda:self.loads[0] if len(self.loads)==1 else self.loads.pop(0))
+
+    def test_quiet_pi_speeds_up_to_the_floor(self):
+        t=self.throttle(0.2)
+        values=[t.next(1.0) for _ in range(20)]
+        self.assertLess(values[0],30);self.assertEqual(values[-1],10)   # CPU model: 10 s floor
+        self.assertEqual(self.settings['interval'],10)
+
+    def test_ai_hat_floor_is_lower(self):
+        t=self.throttle(0.2,model='m.hef')
+        for _ in range(20):t.next(0.5)
+        self.assertEqual(t.current,5)
+
+    def test_busy_pi_backs_off(self):
+        t=self.throttle(1.5)
+        for _ in range(10):t.next(1.0)
+        self.assertEqual(t.current,60);self.assertIn('busy',t.reason)
+        t=self.throttle(0.2)
+        t.next(1.0,lateness=2.0);self.assertEqual(t.current,45)        # a late wake-up counts as busy
+
+    def test_never_more_than_half_the_time(self):
+        t=self.throttle(0.2)
+        for _ in range(20):t.next(8.0)                                # a round of checks takes 8 s
+        self.assertEqual(t.current,16)
+
+    def test_fixed_interval(self):
+        t=self.throttle(1.5,interval=20)
+        self.assertEqual(t.next(1.0),20);self.assertIn('fixed',t.reason)
+
+
+class TimeBasedJudgeTests(unittest.TestCase):
+    """The decision means the same however often the AI looks."""
+    def judge(self,interval):
+        from failureDetection.detection import Judge,settings_for
+        s=settings_for({'failure_detection':{'enabled':True,'model':'m.onnx','warm_up':0,'threshold':0.5}})
+        now=[0.0];j=Judge(s,clock=lambda:now[0]);j.reset('job')
+        def add(score):
+            now[0]+=interval;return j.add(score,str(now[0]))
+        return j,add,s
+
+    def test_old_settings_convert(self):
+        _,_,s=self.judge(30)
+        self.assertEqual((s['window_minutes'],s['needed_share'],s['interval']),(5.0,0.6,30))
+
+    def test_fast_looking_still_needs_four_minutes(self):
+        for interval in (5,10,30,60):
+            j,add,_=self.judge(interval)
+            verdicts=[add(0.9) for _ in range(int(400/interval))]
+            first=verdicts.index('failure')
+            self.assertGreaterEqual((first+1)*interval-interval,240,interval)   # span of failing frames >= 4 min
+            self.assertLessEqual((first+1)*interval,300,interval)              # but not much later
+
+    def test_mostly_good_never_fails_at_any_speed(self):
+        for interval in (5,10,30,60):
+            j,add,_=self.judge(interval)
+            verdicts=[add(0.9 if i%2==0 else 0.1) for i in range(int(900/interval))]   # 50% failing < 60%
+            self.assertNotIn('failure',verdicts,interval)
+
+    def test_window_forgets_old_frames(self):
+        j,add,_=self.judge(10)
+        for _ in range(60):add(0.1)
+        self.assertLessEqual(len(j.frames),31)                               # 5 minutes at 10 s
