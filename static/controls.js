@@ -228,7 +228,7 @@ setInterval(()=>{$('cameraPlaceholder').hidden=!!livePrinter;$('stopLive').hidde
 function loadSwapSettings(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap||{};$('swapEnabled').checked=!!cfg.enabled;$('swapModel').value=cfg.model||'A1 mini';$('swapSpares').value=cfg.spares||0;renderSwapStatus();renderAiStatus();}
 // Swapmod is only offered for A-series printers (A1 / A1 mini) (#17).
 function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;$('swapStatus').textContent=cfg?.enabled?`${cfg.model} kit enabled · ${cfg.spares} estimated magazine plates · ${cfg.verified?'Starting setup checked':'Starting setup check needed'}`:'Disabled for this printer — manual queue workflow.';}
-function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;
+function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;loadTraining(false);
  if(document.activeElement!==$('aiWatch'))$('aiWatch').checked=!!ai.watching;
  $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (it never pauses on its own; set "action": "pause" to allow that)';
  const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI unavailable'}[ai.status]||ai.status;
@@ -264,6 +264,12 @@ $('aiReprintCheck').addEventListener('click',e=>aiReprint('check',e.target));
 $('aiReprintCancel').addEventListener('click',e=>aiReprint('cancel',e.target));
 $('aiReprintNow').addEventListener('click',e=>confirmAction('Reprint on another printer now?',`The paused print on ${printerLabel(selectedPrinter)} will be stopped and recorded as failed, and the job started on an available printer of the same model whose camera shows an empty bed and whose loaded filament matches.`,
  'Stop this paused print and reprint the job on another printer.',()=>aiReprint('now',e.target)));
+// Training pictures (count refreshed when the panel opens and every 30 s).
+let trainingLoaded=0;
+async function loadTraining(force){if(!force&&Date.now()-trainingLoaded<30000)return;trainingLoaded=Date.now();
+ try{const t=await api('ai-training',undefined,'GET');$('aiTraining').textContent=t.enabled?`${t.count} pictures collected (${t.mb} MB): a still every ${t.every_minutes} min while printing, plus every frame the AI found suspicious. Download them, label the failures in Roboflow and retrain for a model that knows these cameras.`:'Collecting training pictures is turned off.';
+  $('aiTrainingDownload').hidden=!t.count;$('aiTrainingClear').hidden=!t.count;}catch(e){$('aiTrainingBlock').hidden=true;}}
+$('aiTrainingClear').addEventListener('click',()=>confirmAction('Delete the collected training pictures?','All pictures collected for training are deleted from the Pi. Download them first if you still need them.','Delete the training pictures.',async()=>{await api('ai-training/clear',{});trainingLoaded=0;await loadTraining(true);notice('Training pictures deleted.');}));
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
 $('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};

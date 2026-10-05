@@ -10,6 +10,7 @@ The app picks the place from the model file's extension.
 - [Automatic setup](#automatic-setup)
 - [Publishing a model for every Pi](#publishing-a-model-for-every-pi)
 - [How it decides](#how-it-decides)
+- [Better accuracy for your printers](#better-accuracy-for-your-printers)
 - [Comparing with the print file](#comparing-with-the-print-file)
 - [What happens on a failure](#what-happens-on-a-failure)
 - [Automatic reprint on another printer](#automatic-reprint-on-another-printer)
@@ -78,6 +79,34 @@ How odd frames are handled:
 - **Suspect frames:** two or more failing frames that don't yet meet the rules show **suspect** on the dashboard. Nothing is sent.
 
 With the defaults, a real failure is reported about 4–5 minutes after it becomes visible. Raise `min_minutes` or `needed` if you get false alarms. Lower them, with care, to react faster.
+
+## Better accuracy for your printers
+
+A model trained on other people's photos can miss failures that are obvious to you on your own printers. That happened on an A1 mini: its camera looks across the bed from low down, the plate was a shiny holographic one, and the toolhead light caused glare. A clear spaghetti mess at the back of the bed scored only 0.13, while the model reacted weakly to the glittery plate instead. Two things fix that.
+
+### 1. Close-ups (automatic)
+
+The model shrinks every picture to 640×640 by its longer side, so a mess at the back of the bed ends up only a few dozen pixels tall. So each check also looks at enlarged close-ups and keeps the strongest result:
+- **Calibrated camera:** the bed outline, widened upwards for tall parts and split in two when the bed is wide.
+- **Uncalibrated camera:** the upper part of the frame, where the bed and print are on side-mounted cameras like the A1 and A1 mini.
+
+That makes the print area about 1.6–2× bigger to the model, without the table and base. Each check takes a few hundred milliseconds longer on the CPU. Turn it off with `"crops": "off"` under `failure_detection`.
+
+### 2. Train on your own pictures (the real fix)
+
+While a printer prints, the app keeps training pictures from its camera:
+- a still every 5 minutes;
+- **every frame the AI found suspicious**;
+- capped at 1,500 pictures (oldest removed first), never filling the disk.
+
+To use them:
+1. **Download:** open any printer → **More → AI failure watch → Download training pictures**. The ZIP is sorted into `failed/`, `finished/` and `other/` by how each print ended.
+2. **Upload:** in Roboflow, open your project → **Upload**, and drag the folders in.
+3. **Label:** draw a box around every spaghetti, warping or stringing area, labelled with that name. **Leave good prints without boxes**: they teach the model what normal looks like on your plates and in your lighting.
+4. **Retrain:** generate a new dataset version and run the Colab training cell again (see [Running on the CPU](#running-on-the-cpu-onnx)).
+5. **Install the new model:** copy the new `best.onnx` over `/opt/3d-printer-management-models/print_failure.onnx`, or publish it in the [`ai-model` release](#publishing-a-model-for-every-pi) so every Pi updates itself.
+
+Even 50–100 labelled pictures from your own cameras usually make a big difference. Spaghetti tests are the quickest way to get failure pictures. Settings (optional): `"collect": {"enabled": true, "every_minutes": 5, "max_pictures": 1500}`.
 
 ## Comparing with the print file
 

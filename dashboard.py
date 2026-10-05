@@ -75,6 +75,7 @@ class Dashboard:
             web.post('/api/ai/{name}',self.ai_watch),
             web.post('/api/ai/{name}/calibration',self.ai_calibration),
             web.post('/api/ai/{name}/reprint',self.ai_reprint),
+            web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
@@ -159,6 +160,24 @@ class Dashboard:
             await reprints.availability(job,refresh=True)
         else:raise ValueError('Unknown action.')
         return web.json_response(self.failure.state(name))
+
+    async def ai_training(self, request):
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        return web.json_response(await asyncio.to_thread(self.failure.training.summary))
+
+    async def ai_training_zip(self, request):
+        """Training pictures from this Pi's cameras, sorted by how each print ended, for Roboflow."""
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        outcomes={j['id']:j['status'] for j in self.store.jobs()}   # read here: the database stays on this thread
+        target=self.core.DATA_DIR/'training-pictures.zip'
+        await asyncio.to_thread(self.failure.training.export,outcomes,target)
+        return web.FileResponse(target,headers={'Content-Disposition':'attachment; filename="training-pictures.zip"','Content-Type':'application/zip'})
+
+    async def ai_training_clear(self, request):
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        await asyncio.to_thread(self.failure.training.clear)
+        self.failure.store_event('','Training pictures cleared','web administrator')
+        return web.json_response(self.failure.training.summary())
 
     async def files(self, request):
         name=request.match_info['name']

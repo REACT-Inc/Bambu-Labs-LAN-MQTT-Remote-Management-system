@@ -2,7 +2,7 @@
 OS's `hailo-all` package installs the Hailo library (hailo_platform), numpy and Pillow. The main service starts it and
 talks to it over stdin/stdout, one JSON object per line:
 
-    request:  {"jpeg": "<base64 JPEG>"}
+    request:  {"jpeg": "<base64 JPEG>", "crops": [[x0, y0, x1, y1], ...]}   (crops optional, 0-1 of the picture)
     reply:    {"score": 0.83, "detections": [{"label": "spaghetti", "score": 0.83, "box": [x0, y0, x1, y1]}]}
               or {"error": "..."}
 
@@ -78,6 +78,57 @@ def to_picture(detections, width, height, scale, pad_x, pad_y, image_width, imag
     return detections
 
 
+def from_crop(detections, crop):
+    """Boxes as fractions of a crop -> fractions of the whole picture."""
+    x0, y0, x1, y1 = crop
+    for detection in detections:
+        box = detection.get('box')
+        if box:
+            detection['box'] = [round(x0 + box[0] * (x1 - x0), 4), round(y0 + box[1] * (y1 - y0), 4),
+                                round(x0 + box[2] * (x1 - x0), 4), round(y0 + box[3] * (y1 - y0), 4)]
+    return detections
+
+
+def merge(detections, iou=0.5):
+    """Detections from the full picture and its close-ups: keep the strongest of overlapping same-label boxes."""
+    kept = []
+    for detection in sorted(detections, key=lambda d: -d['score']):
+        box = detection.get('box')
+        duplicate = False
+        for other in kept:
+            if other['label'] != detection['label'] or not box or not other.get('box'):
+                continue
+            a, b = box, other['box']
+            w, h = min(a[2], b[2]) - max(a[0], b[0]), min(a[3], b[3]) - max(a[1], b[1])
+            overlap = max(0.0, w) * max(0.0, h)
+            union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - overlap
+            if union > 0 and overlap / union >= iou:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(detection)
+    return kept
+
+
+def look(image, crops, run, width, height):
+    """Run the model on the whole picture and on each close-up crop (enlarged to the model's size, so a small
+    tangle at the back of the bed becomes several times bigger), and merge the results onto the whole picture."""
+    detections = []
+    for crop in [None] + [c for c in crops or [] if len(c) == 4]:
+        if crop is None:
+            part, region = image, (0.0, 0.0, 1.0, 1.0)
+        else:
+            x0, y0, x1, y1 = (min(1.0, max(0.0, float(v))) for v in crop)
+            if x1 - x0 < 0.05 or y1 - y0 < 0.05:
+                continue
+            region = (x0, y0, x1, y1)
+            part = image.crop((round(x0 * image.width), round(y0 * image.height), round(x1 * image.width), round(y1 * image.height)))
+        frame, scale, pad_x, pad_y = letterbox(part, width, height)
+        found = to_picture(run(frame), width, height, scale, pad_x, pad_y, part.width, part.height)
+        detections += from_crop(found, region) if crop is not None else found
+    return merge(detections)
+
+
 def summarise(detections, failure_labels):
     failing = [d['score'] for d in detections if not failure_labels or d['label'] in failure_labels]
     return dict(score=max(failing, default=0.0), detections=sorted(detections, key=lambda d: -d['score'])[:10])
@@ -128,11 +179,13 @@ def main_cpu(model, class_names, failure_labels, size):
     for line in sys.stdin:
         try:
             request = json.loads(line)
-            image = Image.open(io.BytesIO(base64.b64decode(request['jpeg'])))
-            frame, scale, pad_x, pad_y = letterbox(image, size, size)
-            # The letterboxed frame is already RGB, as Ultralytics models expect.
-            net.setInput(cv2.dnn.blobFromImage(np.array(frame), 1 / 255.0, (size, size), swapRB=False, crop=False))
-            detections = to_picture(decode_yolov8(net.forward(), class_names, size, size), size, size, scale, pad_x, pad_y, image.width, image.height)
+            image = Image.open(io.BytesIO(base64.b64decode(request['jpeg']))).convert('RGB')
+
+            def run(frame):
+                # The letterboxed frame is already RGB, as Ultralytics models expect.
+                net.setInput(cv2.dnn.blobFromImage(np.array(frame), 1 / 255.0, (size, size), swapRB=False, crop=False))
+                return decode_yolov8(net.forward(), class_names, size, size)
+            detections = look(image, request.get('crops'), run, size, size)
             reply = dict(summarise(detections, failure_labels), image=[image.width, image.height])
         except Exception as exc:   # one bad frame never stops the helper
             reply = {'error': f'{type(exc).__name__}: {exc}'[:300]}
@@ -160,12 +213,12 @@ def main():
             for line in sys.stdin:
                 try:
                     request = json.loads(line)
-                    image = Image.open(io.BytesIO(base64.b64decode(request['jpeg'])))
-                    frame, scale, pad_x, pad_y = letterbox(image, width, height)
-                    result = pipeline.infer({info.name: input_batch(frame)})
-                    reply = parse(result, class_names, failure_labels)
-                    to_picture(reply['detections'], width, height, scale, pad_x, pad_y, image.width, image.height)
-                    reply['image'] = [image.width, image.height]
+                    image = Image.open(io.BytesIO(base64.b64decode(request['jpeg']))).convert('RGB')
+
+                    def run(frame):
+                        return parse(pipeline.infer({info.name: input_batch(frame)}), class_names, set(), 0.05)['detections']
+                    detections = look(image, request.get('crops'), run, width, height)
+                    reply = dict(summarise(detections, failure_labels), image=[image.width, image.height])
                 except Exception as exc:   # one bad frame never stops the helper
                     reply = {'error': f'{type(exc).__name__}: {exc}'[:300]}
                 print(json.dumps(reply), flush=True)
