@@ -2,6 +2,17 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.5)
+
+### Changed
+- **One Start button (#65).**
+  - **Queue:** the separate **Start ignoring error** button is gone. When the printer reports FAILED or an error, **Start next** turns red, says so, and asks whether to start anyway (bypassing the management error check for that one start).
+  - **Print now:** the same applies when queueing a new print; **Print now ignoring error** is gone.
+
+### Fixed
+- **Fewer camera pictures at once.** Since 1.7.2 the AI checks every printer in each round. It now fetches at most two camera pictures at a time instead of every printer's at once, which is easier on the Pi and on Bambu cameras that take one connection at a time. Each round still finishes within a few seconds with seven printers.
+- **Saving AI training pictures no longer slows the app.** Each save used to list every kept picture (up to 5,000 on the SD card) on the app's main thread. Now the saving happens in the background, and the folder is tidied only once every 20 or so pictures. The picture cap is still never exceeded.
+
 ## 1.7.4-beta.1
 
 Built on 1.7.3-beta.1. Fixes the dashboard and Discord staying down after an update or restart while the service showed "running". **Update from 1.7.2 or 1.7.3 as soon as you can.**

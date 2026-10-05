@@ -84,9 +84,13 @@ class TrainingTests(unittest.TestCase):
 
     def test_capped(self):
         pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(self.tmp.name)),{'max_pictures':50,'every_minutes':1},clock=lambda:self.now[0])
+        listed=[0];original=pictures.pictures
+        def counting():listed[0]+=1;return original()
+        pictures.pictures=counting
         for i in range(60):
             self.tick(61);pictures.save('P','j',b'x',0.1,'watching')
-        self.assertEqual(pictures.summary()['count'],50)
+        self.assertTrue(45<=pictures.summary()['count']<=50)   # never over the cap
+        self.assertLessEqual(listed[0],5)                       # the folder isn't listed after every save
 
     def test_export_sorted_by_outcome(self):
         for job in ('good','bad','running'):
@@ -298,8 +302,11 @@ class ParallelCheckTests(unittest.IsolatedAsyncioTestCase):
             def names(self):return ['A','B','C','D']
             def printer_config(self,name):return {'camera_type':'rtsp'}
             def state_data(self,name):return ('RUNNING',0,{'subtask_name':'job'},True)
+            open_now=0;most=0
             async def snapshot(self,name,timeout=25,max_age=60):
-                await asyncio.sleep(0.2);return name.encode()+str(time.monotonic()).encode()
+                Core.open_now+=1;Core.most=max(Core.most,Core.open_now)
+                await asyncio.sleep(0.2);Core.open_now-=1
+                return name.encode()+str(time.monotonic()).encode()
         class Backend:
             def __init__(self):self.seen=[]
             async def score(self,jpeg,crops=None):self.seen.append(jpeg[:1]);return 0.1,[]
@@ -310,7 +317,8 @@ class ParallelCheckTests(unittest.IsolatedAsyncioTestCase):
         m.throttle.next=stop
         with self.assertRaises(asyncio.CancelledError):await m.run()
         self.assertEqual(sorted(backend.seen),[b'A',b'B',b'C',b'D'])
-        self.assertLess(costs[0],0.6)   # four 0.2 s cameras in about 0.2 s, not 0.8 s
+        self.assertLess(costs[0],0.7)   # four 0.2 s cameras two at a time: about 0.4 s, not 0.8 s
+        self.assertEqual(Core.most,2)   # never more than two camera pictures at once
 
 
 class TimeBasedJudgeTests(unittest.TestCase):
