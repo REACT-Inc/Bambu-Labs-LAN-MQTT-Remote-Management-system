@@ -23,6 +23,18 @@ def runtime_path(name):
     return p.parts[0]=='static' and p.suffix.lower() in ('.js','.css','.html','.svg','.png','.jpg','.ico','.woff','.woff2')
 
 
+def allowed_path(name):
+    """What an installer accepts: everything runtime_path() ships, plus .py/.md files in any plain package folder.
+
+    runtime_path() decides what a release *contains*; this decides what an installed (and possibly older) updater
+    *accepts*. Checking against the fixed folder list made 1.6.0 reject 1.6.1, which added failureDetection/.
+    """
+    p=PurePosixPath(name)
+    if runtime_path(name):return True
+    return (1<len(p.parts)<=4 and p.suffix in ('.py','.md') and p.parts[0] not in ('static','tests')
+            and all(re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,63}',part) for part in p.parts[:-1]))
+
+
 def _inspect_package(source,output=None):
     """No execution, extractall, paths from manifest outside the permitted runtime tree."""
     with zipfile.ZipFile(source) as z:
@@ -49,7 +61,7 @@ def _inspect_package(source,output=None):
         if not isinstance(version,str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,80}',version):raise ValueError('Invalid release version.')
         if not isinstance(files,dict) or not REQUIRED<=set(files) or len(files)>500:raise ValueError('Required application files are missing.')
         for name,digest in files.items():
-            if not isinstance(name,str) or not runtime_path(name) or not re.fullmatch('[0-9a-f]{64}',str(digest)):
+            if not isinstance(name,str) or not allowed_path(name) or not re.fullmatch('[0-9a-f]{64}',str(digest)):
                 raise ValueError('Invalid runtime file in manifest.')
             # Every manifest key must match a validated archive entry exactly.
             full='printer-management/'+name

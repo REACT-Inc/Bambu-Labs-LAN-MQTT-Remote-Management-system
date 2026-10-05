@@ -165,3 +165,46 @@ class UpdateHTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('token',result)
         response=await self.client.post('/api/github/install',json={},headers=headers)
         self.assertEqual(response.status,400)
+
+
+class WorkerPermissionTests(unittest.TestCase):
+    """A venv built under the unit's old UMask=0077 was root-only after the chown, so the new release couldn't start."""
+    def test_release_made_readable_and_runnable_for_the_service(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)/'release';(root/'venv/bin').mkdir(parents=True);(root/'venv/lib').mkdir()
+            python=root/'venv/bin/python';python.write_text('#!/bin/sh\n');os.chmod(python,0o700)
+            module=root/'venv/lib/x.py';module.write_text('');os.chmod(module,0o600)
+            (root/'venv/bin/python3').symlink_to('python')
+            for p in (root/'venv/bin',root/'venv/lib',root/'venv',root):os.chmod(p,0o700)
+            worker.readable(root)
+            self.assertEqual(os.stat(python).st_mode&0o777,0o755)
+            self.assertEqual(os.stat(module).st_mode&0o777,0o644)
+            self.assertEqual(os.stat(root/'venv/bin').st_mode&0o777,0o755)
+            self.assertEqual(os.stat(root).st_mode&0o777,0o755)
+
+    def test_failed_step_logs_its_error_without_credentials(self):
+        import contextlib,subprocess,sys
+        err=io.StringIO()
+        script='import sys;print("ERROR: https://user:secret@pypi.example/simple failed",file=sys.stderr);sys.exit(3)'
+        with contextlib.redirect_stderr(err),self.assertRaises(subprocess.CalledProcessError):
+            worker.run([sys.executable,'-c',script])
+        self.assertIn('exit 3',err.getvalue());self.assertIn('https://***@pypi.example',err.getvalue())
+        self.assertNotIn('secret',err.getvalue())
+
+
+class NewFolderTests(unittest.TestCase):
+    """A release that adds a new package folder must still pass an installed updater's check (1.6.0 rejected 1.6.1)."""
+    def add(self,name,data=b'# new\n'):
+        def change(manifest,files):
+            files[name]=data;manifest['files'][name]=hashlib.sha256(data).hexdigest()
+        return package(change=change)
+
+    def test_new_package_folder_accepted(self):
+        self.assertEqual(inspect_package(io.BytesIO(self.add('newFeature/sub_pkg/module.py')))['version'],'test.1')
+        self.assertEqual(inspect_package(io.BytesIO(self.add('newFeature/GUIDE.md',b'# Guide\n')))['version'],'test.1')
+
+    def test_unsafe_or_unexpected_paths_still_refused(self):
+        from Updater.update_package import allowed_path
+        for name in ('newFeature/run.sh','newFeature/.hidden/x.py','tests/test_x.py','static/x.py','9bad/x.py','a-b/x.py','a/b/c/d/e.py','newFeature/data.json'):
+            self.assertFalse(allowed_path(name),name)
+        with self.assertRaisesRegex(ValueError,'Invalid runtime file'):inspect_package(io.BytesIO(self.add('newFeature/run.sh',b'echo\n')))
