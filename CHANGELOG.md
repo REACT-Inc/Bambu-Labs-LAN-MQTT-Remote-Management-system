@@ -5,6 +5,9 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased (1.6.3)
 
 ### Added
+- **AI failure detection looks closer and learns your printers.**
+  - **Close-ups:** each check now also looks at enlarged close-ups of the bed area (the calibrated outline, or the upper part of the frame on side-mounted A1 / A1 mini cameras), so a mess at the back of the bed is about 1.6–2× bigger to the model.
+  - **Training pictures:** the app keeps pictures from your own cameras while printing (a still every 5 minutes and every suspicious frame, capped). **Download training pictures** in the printer's AI panel gives a ZIP sorted by how each print ended, ready to label in Roboflow and retrain, which is the real fix for camera angles, plates and lighting the public dataset doesn't cover.
 - **Automatic reprint on another printer (#67).** When the AI pauses a failing queue print, the notification lists which printers could take the job.
   - **What "available" means:** same model, idle, no errors, matching filament, and **an empty bed checked by the camera** against a picture taken whenever someone confirms "the plate is clear" at a print start.
   - **The countdown:** if nobody resumes or stops the paused print within 12 hours, it's stopped and the job reprints on an available printer.

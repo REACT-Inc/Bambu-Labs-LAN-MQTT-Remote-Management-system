@@ -37,12 +37,13 @@ from pathlib import Path
 from failureDetection import print_geometry
 from failureDetection.auto_reprint import AutoReprint
 from failureDetection.model_updates import ModelUpdates
+from failureDetection.training import TrainingPictures
 
 log = logging.getLogger('failure-detection')
 WORKER = Path(__file__).with_name('hailo_worker.py')
 DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval=30, window=10,
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
-                geometry={}, auto_reprint={})
+                geometry={}, auto_reprint={}, crops='auto', collect={})
 GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
 
 
@@ -56,6 +57,7 @@ def settings_for(config):
     s['min_minutes'] = max(1.0, float(s['min_minutes']))
     s['warm_up'] = max(0.0, float(s['warm_up']))
     s['action'] = 'pause' if s['action'] == 'pause' else 'notify'
+    s['crops'] = 'off' if s['crops'] in ('off', False, None) else 'auto'
     s['input_size'] = min(1280, max(160, int(s['input_size']) // 32 * 32))
     s['classes'] = [str(c) for c in s['classes']] or ['failure']
     s['labels'] = [str(c) for c in s['labels']] or list(s['classes'])
@@ -63,6 +65,32 @@ def settings_for(config):
     s['geometry'] = dict(enabled=bool(g['enabled']), on_part_weight=min(1.0, max(0.0, float(g['on_part_weight']))),
                          margin_mm=min(50.0, max(0.0, float(g['margin_mm']))))
     return s
+
+
+# Close-ups checked as well as the whole picture (fractions of the picture). The model shrinks every picture to its
+# input size by the longer side, so a full-width strip wouldn't enlarge anything: these are nearer to square. Without
+# a calibration they cover the upper part of the frame, where the bed and print sit on side-mounted cameras (A1 / A1
+# mini look across the bed from low down; the bottom of the frame is the printer's base).
+DEFAULT_CROPS = [[0.2, 0.05, 0.8, 0.62], [0.0, 0.0, 0.55, 0.65], [0.45, 0.0, 1.0, 0.65]]
+
+
+def crops_for(corners):
+    """Close-ups for one camera: around the calibrated bed outline (widened upwards for tall parts and split in two
+    when the bed is wide), else the defaults."""
+    if not corners or len(corners) != 4:
+        return [list(c) for c in DEFAULT_CROPS]
+    us, vs = [float(c[0]) for c in corners], [float(c[1]) for c in corners]
+    x0, x1, y0, y1 = min(us), max(us), min(vs), max(vs)
+    height = y1 - y0
+    x0, x1 = max(0.0, x0 - 0.03), min(1.0, x1 + 0.03)
+    y0, y1 = max(0.0, y0 - max(0.15, height * 0.4)), min(1.0, y1 + 0.03)   # parts grow upwards in the picture
+    if x1 - x0 > 0.55:
+        middle = (x0 + x1) / 2
+        overlap = (x1 - x0) * 0.08
+        return [[round(x0, 4), round(y0, 4), round(x1, 4), round(y1, 4)],
+                [round(x0, 4), round(y0, 4), round(middle + overlap, 4), round(y1, 4)],
+                [round(middle - overlap, 4), round(y0, 4), round(x1, 4), round(y1, 4)]]
+    return [[round(x0, 4), round(y0, 4), round(x1, 4), round(y1, 4)]]
 
 
 class GeometryCheck:
@@ -251,7 +279,7 @@ class HailoBackend:
                 self.stderr.append(text[:300])
                 log.debug('AI HAT helper: %s', text)
 
-    async def score(self, jpeg):
+    async def score(self, jpeg, crops=None):
         async with self.lock:
             if self.process is None or self.process.returncode is not None:
                 if time.monotonic() < self.retry_at:
@@ -264,7 +292,7 @@ class HailoBackend:
                     self.error, self.retry_at = str(exc)[:300], time.monotonic() + 300
                     raise RuntimeError(self.error) from exc
             try:
-                self.process.stdin.write((json.dumps({'jpeg': base64.b64encode(jpeg).decode()}) + '\n').encode())
+                self.process.stdin.write((json.dumps({'jpeg': base64.b64encode(jpeg).decode(), 'crops': crops or []}) + '\n').encode())
                 await self.process.stdin.drain()
                 reply = json.loads(await asyncio.wait_for(self.process.stdout.readline(), 30))
             except Exception as exc:
@@ -296,6 +324,7 @@ class FailureMonitor:
         self.geometry = GeometryCheck(core, engine, self.settings)
         self.reprints = AutoReprint(core, engine, self.settings['auto_reprint'], python=self.settings['python'], clock=clock)
         self.models = ModelUpdates(core, self, clock=clock)
+        self.training = TrainingPictures(core, self.settings['collect'], clock=clock)
         if self.settings['enabled']:
             self.models.apply_saved()   # a model an automatic update switched to last time
 
@@ -351,19 +380,26 @@ class FailureMonitor:
         picture = await self.core.snapshot(name, timeout=20)
         if not picture:
             self._set(name, status='watching', message='No camera picture this time.');return
+        crops = crops_for(self.geometry.corners(name)) if self.settings['crops'] == 'auto' else []
         try:
-            score, detections = await self.backend.score(picture)
+            score, detections = await self.backend.score(picture, crops)
         except Exception as exc:
             self._set(name, status='unavailable', message=str(exc)[:300]);return
         try:
             layer = int(data.get('layer_num') or 0)
         except (TypeError, ValueError):
             layer = 0
+        raw = score
         score, where = self.geometry.adjust(name, score, detections, layer)
         verdict = judge.add(score, hashlib.sha256(picture).hexdigest())
         if verdict == 'duplicate':
             return
         status = {'warming_up': 'watching', 'watching': 'watching', 'suspect': 'suspect', 'failure': 'failure'}[verdict]
+        active = self.engine.store.active(name) if getattr(self.engine, 'store', None) else None
+        try:   # training pictures from this camera (never lets a disk problem stop the watch)
+            self.training.save(name, active['id'] if active else job, picture, raw, status)
+        except OSError:
+            log.warning('Could not save a training picture for %s', name)
         labels = ', '.join(sorted({d.get('label', '?') for d in detections if d.get('score', 0) >= self.settings['threshold']})) or ''
         message = ('Warming up: the first minutes of a print are not judged.' if verdict == 'warming_up' else
                    f"{judge.failing()} of the last {len(judge.frames)} frames look like a failure" + (f' ({labels})' if labels else '')
