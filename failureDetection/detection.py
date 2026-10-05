@@ -28,15 +28,23 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import tempfile
 import time
 from collections import deque
 from pathlib import Path
 
+from failureDetection import print_geometry
+from failureDetection.auto_reprint import AutoReprint
+from failureDetection.model_updates import ModelUpdates
+from failureDetection.training import TrainingPictures
+
 log = logging.getLogger('failure-detection')
 WORKER = Path(__file__).with_name('hailo_worker.py')
 DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval=30, window=10,
-                needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640)
+                needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
+                geometry={}, auto_reprint={}, crops='auto', collect={})
+GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
 
 
 def settings_for(config):
@@ -49,10 +57,150 @@ def settings_for(config):
     s['min_minutes'] = max(1.0, float(s['min_minutes']))
     s['warm_up'] = max(0.0, float(s['warm_up']))
     s['action'] = 'pause' if s['action'] == 'pause' else 'notify'
+    s['crops'] = 'off' if s['crops'] in ('off', False, None) else 'auto'
     s['input_size'] = min(1280, max(160, int(s['input_size']) // 32 * 32))
     s['classes'] = [str(c) for c in s['classes']] or ['failure']
     s['labels'] = [str(c) for c in s['labels']] or list(s['classes'])
+    g = {**GEOMETRY_DEFAULTS, **(s['geometry'] if isinstance(s['geometry'], dict) else {})}
+    s['geometry'] = dict(enabled=bool(g['enabled']), on_part_weight=min(1.0, max(0.0, float(g['on_part_weight']))),
+                         margin_mm=min(50.0, max(0.0, float(g['margin_mm']))))
     return s
+
+
+# Close-ups checked as well as the whole picture (fractions of the picture). The model shrinks every picture to its
+# input size by the longer side, so a full-width strip wouldn't enlarge anything: these are nearer to square. Without
+# a calibration they cover the upper part of the frame, where the bed and print sit on side-mounted cameras (A1 / A1
+# mini look across the bed from low down; the bottom of the frame is the printer's base).
+DEFAULT_CROPS = [[0.2, 0.05, 0.8, 0.62], [0.0, 0.0, 0.55, 0.65], [0.45, 0.0, 1.0, 0.65]]
+
+
+def crops_for(corners):
+    """Close-ups for one camera: around the calibrated bed outline (widened upwards for tall parts and split in two
+    when the bed is wide), else the defaults."""
+    if not corners or len(corners) != 4:
+        return [list(c) for c in DEFAULT_CROPS]
+    us, vs = [float(c[0]) for c in corners], [float(c[1]) for c in corners]
+    x0, x1, y0, y1 = min(us), max(us), min(vs), max(vs)
+    height = y1 - y0
+    x0, x1 = max(0.0, x0 - 0.03), min(1.0, x1 + 0.03)
+    y0, y1 = max(0.0, y0 - max(0.15, height * 0.4)), min(1.0, y1 + 0.03)   # parts grow upwards in the picture
+    if x1 - x0 > 0.55:
+        middle = (x0 + x1) / 2
+        overlap = (x1 - x0) * 0.08
+        return [[round(x0, 4), round(y0, 4), round(x1, 4), round(y1, 4)],
+                [round(x0, 4), round(y0, 4), round(middle + overlap, 4), round(y1, 4)],
+                [round(middle - overlap, 4), round(y0, 4), round(x1, 4), round(y1, 4)]]
+    return [[round(x0, 4), round(y0, 4), round(x1, 4), round(y1, 4)]]
+
+
+class GeometryCheck:
+    """Compares AI detections with the print file (#79): where the sliced G-code puts plastic, seen through each
+    camera's bed calibration. Only for jobs whose .3mf is on the Pi (the queue and Print now) and calibrated cameras;
+    otherwise scores pass through unchanged."""
+
+    def __init__(self, core, engine, settings):
+        self.core, self.engine, self.settings = core, engine, settings['geometry']
+        self.labels, self.threshold = set(settings['labels']), settings['threshold']
+        self.folder = Path(getattr(core, 'DATA_DIR', tempfile.gettempdir())) / 'geometry'
+        self.loaded, self.tasks = {}, {}   # name -> (key, Geometry or None, message); name -> parsing task
+
+    def corners(self, name):
+        saved = (self.core.settings.get('ai_calibration') or {}).get(name) or {}
+        return saved.get('corners')
+
+    def set_corners(self, name, corners):
+        if name not in self.core.names():
+            raise ValueError('Unknown printer.')
+        calibration = dict(self.core.settings.get('ai_calibration') or {})
+        if corners is None:
+            calibration.pop(name, None)
+        else:
+            corners = [[round(float(u), 4), round(float(v), 4)] for u, v in corners]
+            print_geometry.Calibration(corners, (0, 0, 1, 1))   # validates: four corners, in order, not crossed
+            calibration[name] = {'corners': corners}
+        self.core.save_settings({**self.core.settings, 'ai_calibration': calibration})
+
+    def source(self, name):
+        """(key, .3mf path, plate) for the printer's active queue job when its file is on the Pi."""
+        store = getattr(self.engine, 'store', None)
+        job = store.active(name) if store else None
+        if not job or not job.get('asset') or not Path(job['asset']).is_file():
+            return None
+        options = job.get('options') or {}
+        try:
+            options = json.loads(options) if isinstance(options, str) else options
+            plate = int(options.get('plate', 1))
+        except (ValueError, TypeError, AttributeError):
+            plate = 1
+        return f"{job['id']}-{plate}", job['asset'], plate
+
+    async def _parse(self, name, key, path, plate):
+        self.folder.mkdir(parents=True, exist_ok=True)
+        out = self.folder / f'{key}.json'
+        try:
+            if not out.is_file():
+                command = [sys.executable, str(Path(print_geometry.__file__)), str(path), str(plate), str(out)]
+                if os.path.exists('/usr/bin/nice'):
+                    command = ['/usr/bin/nice', '-n', '15'] + command   # never compete with MQTT and the dashboard
+                process = await asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await asyncio.wait_for(process.wait(), 900)
+            data = json.loads(out.read_text())
+            if 'error' in data:
+                raise ValueError(data['error'])
+            geometry = print_geometry.Geometry.from_json(data)
+            self.loaded[name] = (key, geometry, f'Print file read: {geometry.layers} layers.')
+        except Exception as exc:
+            self.loaded[name] = (key, None, f'Print file not used: {str(exc)[:200] or type(exc).__name__}')
+        finally:
+            self.tasks.pop(name, None)
+            for old in sorted(self.folder.glob('*.json'), key=lambda p: p.stat().st_mtime)[:-20]:   # keep the last 20
+                old.unlink(missing_ok=True)
+
+    def current(self, name):
+        """The Geometry for the active job (starting the background read when needed), or None."""
+        if not self.settings['enabled']:
+            return None
+        found = self.source(name)
+        if not found:
+            self.loaded.pop(name, None)
+            return None
+        key, path, plate = found
+        loaded = self.loaded.get(name)
+        if loaded and loaded[0] == key:
+            return loaded[1]
+        if name not in self.tasks:
+            self.loaded[name] = (key, None, 'Reading the print file…')
+            self.tasks[name] = asyncio.create_task(self._parse(name, key, path, plate))
+        return None
+
+    def adjust(self, name, score, detections, layer):
+        """(score to judge, note). Failure detections outside the part keep their score; on the part they count for
+        on_part_weight of it, since that's more likely the part's own geometry."""
+        geometry, corners = self.current(name), self.corners(name)
+        boxed = [d for d in detections if d.get('box') and (not self.labels or d.get('label') in self.labels)]
+        if geometry is None or not corners or not boxed or not layer:
+            return score, ''
+        try:
+            calibration = print_geometry.Calibration(corners, (geometry.origin[0], geometry.origin[1],
+                                                              geometry.origin[0] + geometry.width, geometry.origin[1] + geometry.depth))
+        except ValueError:
+            return score, ''
+        best, outside = 0.0, False
+        for detection in boxed:
+            on_part = print_geometry.inside_fraction(detection['box'], geometry, calibration, layer, self.settings['margin_mm'])
+            detection['on_part'] = round(on_part, 2)
+            weighted = detection['score'] * (self.settings['on_part_weight'] if on_part >= 0.5 else 1.0)
+            best = max(best, weighted)
+            outside = outside or (on_part < 0.5 and detection['score'] >= self.threshold)
+        note = ('outside where the print file puts plastic' if outside else
+                'on the part itself (counted less)' if any(d['score'] >= self.threshold for d in boxed) else '')
+        return round(best, 4), note
+
+    def state(self, name):
+        loaded = self.loaded.get(name)
+        return dict(enabled=self.settings['enabled'], calibrated=bool(self.corners(name)), corners=self.corners(name),
+                    file=bool(loaded and loaded[1]), message=loaded[2] if loaded else
+                    'Used for prints started from the queue or Print now.')
 
 
 class Judge:
@@ -131,7 +279,7 @@ class HailoBackend:
                 self.stderr.append(text[:300])
                 log.debug('AI HAT helper: %s', text)
 
-    async def score(self, jpeg):
+    async def score(self, jpeg, crops=None):
         async with self.lock:
             if self.process is None or self.process.returncode is not None:
                 if time.monotonic() < self.retry_at:
@@ -144,7 +292,7 @@ class HailoBackend:
                     self.error, self.retry_at = str(exc)[:300], time.monotonic() + 300
                     raise RuntimeError(self.error) from exc
             try:
-                self.process.stdin.write((json.dumps({'jpeg': base64.b64encode(jpeg).decode()}) + '\n').encode())
+                self.process.stdin.write((json.dumps({'jpeg': base64.b64encode(jpeg).decode(), 'crops': crops or []}) + '\n').encode())
                 await self.process.stdin.drain()
                 reply = json.loads(await asyncio.wait_for(self.process.stdout.readline(), 30))
             except Exception as exc:
@@ -173,6 +321,12 @@ class FailureMonitor:
         self.settings = settings_for(getattr(core, 'CONFIG', {}))
         self.backend = backend or (HailoBackend(self.settings) if self.settings['enabled'] else None)
         self.judges, self.status, self.task, self.pause_poll = {}, {}, None, 1
+        self.geometry = GeometryCheck(core, engine, self.settings)
+        self.reprints = AutoReprint(core, engine, self.settings['auto_reprint'], python=self.settings['python'], clock=clock)
+        self.models = ModelUpdates(core, self, clock=clock)
+        self.training = TrainingPictures(core, self.settings['collect'], clock=clock)
+        if self.settings['enabled']:
+            self.models.apply_saved()   # a model an automatic update switched to last time
 
     @property
     def enabled(self):
@@ -199,7 +353,8 @@ class FailureMonitor:
         if not self.enabled:
             return dict(enabled=False, status='off')
         base = dict(enabled=True, watching=self.watching(name), action=self.settings['action'], status='idle', message='')
-        return {**base, **self.status.get(name, {})}
+        return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name), 'reprint': self.reprints.state(name),
+                'model': Path(self.settings['model']).name, 'model_update': self.models.message}
 
     def _set(self, name, **values):
         self.status[name] = {**self.status.get(name, {}), **values, 'checked': self.clock()}
@@ -225,17 +380,32 @@ class FailureMonitor:
         picture = await self.core.snapshot(name, timeout=20)
         if not picture:
             self._set(name, status='watching', message='No camera picture this time.');return
+        crops = crops_for(self.geometry.corners(name)) if self.settings['crops'] == 'auto' else []
         try:
-            score, detections = await self.backend.score(picture)
+            score, detections = await self.backend.score(picture, crops)
         except Exception as exc:
             self._set(name, status='unavailable', message=str(exc)[:300]);return
+        try:
+            layer = int(data.get('layer_num') or 0)
+        except (TypeError, ValueError):
+            layer = 0
+        raw = score
+        score, where = self.geometry.adjust(name, score, detections, layer)
         verdict = judge.add(score, hashlib.sha256(picture).hexdigest())
         if verdict == 'duplicate':
             return
         status = {'warming_up': 'watching', 'watching': 'watching', 'suspect': 'suspect', 'failure': 'failure'}[verdict]
+        active = self.engine.store.active(name) if getattr(self.engine, 'store', None) else None
+        try:   # training pictures from this camera (never lets a disk problem stop the watch)
+            self.training.save(name, active['id'] if active else job, picture, raw, status)
+        except OSError:
+            log.warning('Could not save a training picture for %s', name)
         labels = ', '.join(sorted({d.get('label', '?') for d in detections if d.get('score', 0) >= self.settings['threshold']})) or ''
         message = ('Warming up: the first minutes of a print are not judged.' if verdict == 'warming_up' else
-                   f"{judge.failing()} of the last {len(judge.frames)} frames look like a failure" + (f' ({labels})' if labels else '') + '.')
+                   f"{judge.failing()} of the last {len(judge.frames)} frames look like a failure" + (f' ({labels})' if labels else '')
+                   + (f', {where}' if where else '') + '.')
+        if where:
+            labels = f'{labels}, {where}' if labels else where
         if judge.acted:   # already reported (and maybe paused) for this print: keep that status, don't act again
             self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames));return
         self._set(name, status=status, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), message=message, job=job)
@@ -263,6 +433,17 @@ class FailureMonitor:
         self._set(name, status='paused' if paused else 'failure', message=detail)
         title = '🤖 AI paused a failing print' if paused else '🤖 AI: print may be failing'
         hint = '\nCheck the printer. Resume from the dashboard or /resume if it is fine.' if paused else '\nCheck the printer and stop or pause it if needed.'
+        job = self.engine.store.active(name) if getattr(self.engine, 'store', None) else None
+        if paused and job and self.reprints.settings['enabled']:
+            # Automatic reprint (#67): unless someone resumes or stops it, the job reprints elsewhere after the countdown.
+            self.reprints.flag(name, job)
+            try:
+                available = self.reprints.summary(await self.reprints.availability(job))
+            except Exception as exc:
+                available = f'Could not check the other printers ({type(exc).__name__}).'
+            hours = self.reprints.settings['after_hours']
+            hint += (f"\n{available}\nIf it isn't resumed or stopped within {hours:g} h, it will be reprinted on an available printer."
+                     " To do it now, use Reprint now in the dashboard.")
         await self.core.notify(name, title, detail + hint, getattr(self.core, 'RED', 0xE74C3C), True)
 
     async def confirm_pause(self, name, wait=30):
@@ -280,6 +461,8 @@ class FailureMonitor:
             try:
                 for name in self.core.names():
                     await self.check(name)
+                await self.reprints.tick()
+                await self.models.check()   # once a day: a newer model from the ai-model release
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -288,6 +471,8 @@ class FailureMonitor:
 
     async def start(self, app=None):
         if self.enabled and not getattr(self.core, 'EXAMPLE_MODE', False):
+            if self.reprints.settings['enabled']:
+                self.engine.on_start_approved = self.reprints.capture_reference
             self.task = asyncio.create_task(self.run())
 
     async def stop(self, app=None):

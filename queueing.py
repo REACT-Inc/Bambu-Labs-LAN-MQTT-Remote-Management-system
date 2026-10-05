@@ -294,6 +294,9 @@ class Engine:
             self.plate_swap.check(job)
             job = self.store.claim(job_id, self.plate_swap.reserve)
             self.store.event(job['printer'], 'Start approved', f'{job_id} • {author}')
+            hook = getattr(self, 'on_start_approved', None)   # AI: picture of the bed just confirmed clear (#67)
+            if hook:
+                self.spawn(hook(job, author))
             if override_error:
                 self.store.event(job['printer'], 'Error override approved', f'{job_id} • {author} • reported error/state bypassed for this attempt')
             self.spawn(self.dispatch(job, override_error))
