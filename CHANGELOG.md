@@ -32,6 +32,20 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Testing:** **Send test** checks each target, and the last result is shown.
   - **Privacy:** tokens never leave the Pi.
 
+### Changed
+- **No confirmation screens in the dashboard.** Every action runs straight away, and the server still checks it is safe (temperature limits, an idle printer for moves). Discord keeps its confirmations.
+- **Printer states people understand.**
+  - **Ready:** after a print, Bambu printers keep reporting FINISH, or FAILED after a failed or cancelled print, while they sit idle and ready. Cards and the printer panel now say **Ready**, with "last print finished" / "last print failed or was cancelled", plus **Printing**, **Paused**, **Error** (only with a real error code) and **Offline**. Discord `/printer` and `/status` match.
+  - **Queue:** a FAILED printer without an error starts the next job normally.
+- **Choose which classes count as a failure** (for all printers), for example **stringing**: tick them in a printer's AI panel. New installs count stringing too.
+- **"Pause the print when a failure is found"** is now a checkbox in the AI panel (all printers), instead of `"action"` in config.json.
+- **Important alerts ping people in Discord:** AI failure alerts and printer errors mention **@here** by default. Choose @everyone, a role or nobody under Settings → Discord settings.
+
+### Fixed
+- **Movement commands didn't work after a failed or cancelled print.** Moves required IDLE or FINISH and refused the FAILED state that printers keep reporting. A queue job left in "needs review" also blocked moves forever, and the buttons needed an "unlock" checkbox. All three are fixed; the printer must still be idle with no error.
+- **Cancel object did nothing for prints started from Bambu Studio, Handy or the printer.** The section only appeared for prints started from this app. Now the print file is copied from the printer's storage once per print, and its objects can be cancelled. Prints sent from the cloud keep their file internally, which the app says.
+- **AI boxes on the live camera** now also show while the printer isn't printing: the AI looks at the live view while it's open (display only, never judged or paused on).
+
 ## Unreleased (1.7.5)
 
 ### Changed

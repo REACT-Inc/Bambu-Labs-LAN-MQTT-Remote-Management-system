@@ -87,7 +87,7 @@ class Dashboard:
             web.post('/api/ai/{name}/reprint',self.ai_reprint),
             web.post('/api/ai/{name}/test',self.ai_test),
             web.post('/api/ai/{name}/check',self.ai_check),
-            web.post('/api/ai/{name}/tuning',self.ai_tuning),
+            web.post('/api/ai/{name}/tuning',self.ai_tuning),web.post('/api/ai-labels',self.ai_labels),
             web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
@@ -199,6 +199,14 @@ class Dashboard:
         self.failure.set_tuning(name,data)
         return web.json_response(self.failure.state(name))
 
+    async def ai_labels(self, request):
+        """Which classes count as a failure, for all printers (e.g. stringing too)."""
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        data=await request.json()
+        if 'labels' in data:self.failure.set_labels(data.get('labels'))
+        if 'action' in data:self.failure.set_action(data.get('action'))
+        return web.json_response({'ok':True})
+
     async def ai_training(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
         return web.json_response(await asyncio.to_thread(self.failure.training.summary))
@@ -219,6 +227,7 @@ class Dashboard:
     async def list_objects(self, request):
         name=request.match_info['name']
         if name not in self.core.names():raise ValueError('Unknown printer.')
+        await self.objects.fetch(name)   # a print started elsewhere: copy its file from the printer once
         # The queue database is only used from this thread; reading slice_info.config is small (capped at 4 MB).
         result=self.objects.objects(name)
         job=self.objects.job(name)
@@ -293,7 +302,7 @@ class Dashboard:
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
@@ -474,6 +483,10 @@ class Dashboard:
             value=data.get(key)
             updated[key]=int(value) if value else None
             if updated[key] is not None and updated[key]<=0: raise ValueError('IDs must be positive.')
+        ping=str(data.get('alert_ping',updated.get('alert_ping','here')) or 'none').strip().lstrip('@')
+        if ping not in ('none','here','everyone') and not (ping.isdigit() and 0<int(ping)<2**63):
+            raise ValueError('Ping: choose none, @here, @everyone or a role ID.')
+        updated['alert_ping']=ping
         ids=[int(v.strip()) for v in str(data.get('admin_user_ids','')).replace('\n',',').split(',') if v.strip()]
         if any(v<=0 for v in ids): raise ValueError('IDs must be positive.')
         updated['admin_user_ids']=ids

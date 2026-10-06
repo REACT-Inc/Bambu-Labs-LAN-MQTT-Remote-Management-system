@@ -605,8 +605,41 @@ class FailureMonitor:
         self.store_event(name, 'AI failure watch ' + ('on' if on else 'off'), 'Changed in the dashboard.')
 
     def tuning(self, name):
-        """This printer's settings with its dashboard sensitivity applied."""
-        return tuned(self.settings, (self.core.settings.get('ai_tuning') or {}).get(name))
+        """This printer's settings with its dashboard sensitivity applied, and the failure classes chosen in the
+        dashboard (settings.json "ai_labels", for all printers) instead of config.json's "labels"."""
+        result = tuned(self.settings, (self.core.settings.get('ai_tuning') or {}).get(name))
+        chosen = [c for c in (self.core.settings.get('ai_labels') or []) if c in self.failure_classes()]
+        if chosen:
+            result['labels'] = chosen
+        return result
+
+    @property
+    def action(self):
+        """'pause' or 'notify': the dashboard's choice (settings.json "ai_action", all printers), else config.json's."""
+        chosen = self.core.settings.get('ai_action')
+        return chosen if chosen in ('pause', 'notify') else self.settings['action']
+
+    def set_action(self, action):
+        if action not in ('pause', 'notify'):
+            raise ValueError('Choose pause or notify.')
+        self.core.save_settings({**self.core.settings, 'ai_action': action})
+        self.store_event('AI', 'AI action changed', 'A detected failure now ' + ('pauses the print and alerts.' if action == 'pause' else 'only alerts (never pauses).'))
+
+    def failure_classes(self):
+        """Classes that can count as a failure (not a "print" / "bed" area class)."""
+        return [c for c in self.settings['classes'] if c.lower() not in AREA_CLASSES]
+
+    def set_labels(self, labels):
+        if not isinstance(labels, list) or not labels or not all(isinstance(c, str) and c in self.failure_classes() for c in labels):
+            raise ValueError('Choose at least one of: ' + ', '.join(self.failure_classes()) + '.')
+        self.core.save_settings({**self.core.settings, 'ai_labels': [c for c in self.failure_classes() if c in labels]})
+        self.store_event('AI', 'AI failure classes changed', 'Counts as a failure: ' + ', '.join(labels) + '.')
+
+    @staticmethod
+    def judged(score, detections, tuning):
+        """The frame's score for the classes that count as a failure (the helper may have been started with others)."""
+        boxed = [d.get('score', 0) for d in detections if d.get('label') in tuning['labels']]
+        return max(boxed, default=0.0) if detections else score
 
     def set_tuning(self, name, data):
         """Dashboard sensitivity: {'preset': 'sensitive'}, or custom values (threshold, hold, min_minutes,
@@ -646,6 +679,7 @@ class FailureMonitor:
         t = self.tuning(name)
         values = lambda v: {k: v[k] for k in ('threshold', 'hold', 'min_minutes', 'needed_share')}
         return dict(preset=t['preset'], preset_name=PRESET_NAMES[t['preset']], focus=t['focus'], window_minutes=t['window_minutes'],
+                    classes=self.failure_classes(), labels=t['labels'],
                     **values(t), presets={k: values(tuned(self.settings, {'preset': k})) for k in PRESETS},
                     nms_floor=0.25 if str(self.settings['model']).lower().endswith('.hef') else 0)
 
@@ -657,7 +691,7 @@ class FailureMonitor:
     def state(self, name):
         if not self.enabled:
             return dict(enabled=False, status='off')
-        base = dict(enabled=True, watching=self.watching(name), action=self.settings['action'], status='idle', message='')
+        base = dict(enabled=True, watching=self.watching(name), action=self.action, status='idle', message='')
         return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name), 'reprint': self.reprints.state(name),
                 'model': Path(self.settings['model']).name, 'model_update': self.models.message,
                 'interval': round(self.throttle.current, 1), 'interval_reason': self.throttle.reason,
@@ -700,7 +734,10 @@ class FailureMonitor:
             return
         if state != 'RUNNING' or not connected:
             self.judges.pop(name, None)
-            self._set(name, status='idle', message='Watches while the printer is printing.', score=None, failing=0, frames=0, job='');return
+            self._set(name, status='idle', message='Watches while the printer is printing.', score=None, failing=0, frames=0, job='')
+            if connected:
+                await self.preview(name)
+            return
         tuning = self.tuning(name)
         if judge is None or judge.job != job:
             judge = self.judges[name] = Judge(tuning, self.clock);judge.reset(job)
@@ -724,6 +761,7 @@ class FailureMonitor:
             score, detections = await self.backend.score(picture, crops)
         except Exception as exc:
             self._set(name, status='unavailable', message=str(exc)[:300]);return
+        score = self.judged(score, detections, tuning)
         self.focus.update(name, detections, tuning['labels'])
         try:
             layer = int(data.get('layer_num') or 0)
@@ -787,6 +825,7 @@ class FailureMonitor:
             score, detections = await self.backend.score(picture, crops)
         except Exception as exc:
             raise ValueError(f'The AI could not check the picture: {str(exc)[:300]}') from exc
+        score = self.judged(score, detections, tuning)
         self.focus.update(name, detections, tuning['labels'])
         state, _, data, _ = self.core.state_data(name)
         where = ''
@@ -805,8 +844,21 @@ class FailureMonitor:
         self._set(name, **self.overlay(name, detections, tuning))   # the camera view shows these boxes too
         self.store_event(name, 'AI test', f'Score {score:.2f} (threshold {threshold:g})' + (f' • {where}' if where else ''))
         return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, failing=score_on_file >= threshold,
-                    labels=sorted(self.settings['labels']), detections=detections, crops=crops, where=where,
+                    labels=sorted(tuning['labels']), detections=detections, crops=crops, where=where,
                     picture=base64.b64encode(picture).decode(), checked=self.clock())
+
+    async def preview(self, name):
+        """While someone has the live view open on a printer that isn't printing, show the AI's boxes on it anyway:
+        one look at the newest live frame per round. Display only: nothing is judged, saved or acted on."""
+        feed = getattr(getattr(self.core, 'live_cameras', None), 'feeds', {}).get(name)
+        if not feed or not getattr(feed, 'frame', None) or time.time() - getattr(feed, 'updated', 0) > 5:
+            return
+        tuning = self.tuning(name)
+        try:
+            _, detections = await self.backend.score(feed.frame, self.crops(name, tuning))
+        except Exception:
+            return
+        self._set(name, **self.overlay(name, detections, tuning))
 
     def overlay(self, name, detections, tuning):
         """What the dashboard draws over the camera picture: the boxes the model found in the last checked frame
@@ -835,7 +887,7 @@ class FailureMonitor:
             detail = (f"{judge.failing()} of the last {len(judge.frames)} camera frames over {minutes:.0f} min look like a failed print"
                       + (f' ({labels})' if labels else '') + f" • {job or 'current print'}")
         paused = False
-        if self.settings['action'] == 'pause':
+        if self.action == 'pause':
             state = self.core.state_data(name)[0]
             if state != 'RUNNING':
                 detail += f' • Not paused: the printer reports {state or "unknown"}'

@@ -74,6 +74,32 @@ class CoreFixes(unittest.IsolatedAsyncioTestCase):
         self.assertIn('**Remaining:** 5 h 12 min',text);self.assertIn('**Nozzle:** 220°C',text);self.assertNotIn('219.96875',text)
 
 
+class ReadableStates(unittest.TestCase):
+    """FAILED and FINISH are what Bambu printers keep reporting while idle and ready after a print."""
+    def test_states_people_understand(self):
+        with tempfile.TemporaryDirectory() as d:
+            core=load_core(d)
+            self.assertEqual([core.display_state(s) for s in ('IDLE','FINISH','FAILED','RUNNING','PAUSE','PREPARE')],
+                             ['Ready','Ready','Ready','Printing','Paused','Preparing'])
+            self.assertEqual(core.display_state('FAILED',0x0300800A),'Error');self.assertEqual(core.display_state('IDLE',0,False),'Offline')
+            self.assertEqual(core.last_print_note('FAILED'),'last print failed or was cancelled');self.assertEqual(core.last_print_note('FAILED',5),'')
+            asyncio.run(core.bot.close())
+
+
+class AlertPings(unittest.TestCase):
+    def test_important_alerts_ping(self):
+        with tempfile.TemporaryDirectory() as d:
+            core=load_core(d)
+            self.assertEqual(core.ping_for('🤖 AI paused a failing print')[0],'@here')            # default
+            self.assertEqual(core.ping_for('🛑 Printer error')[0],'@here')
+            self.assertIsNone(core.ping_for('✅ Print complete')[0])                          # routine updates stay quiet
+            core.settings['alert_ping']='123456789012345678'
+            text,mentions=core.ping_for('🤖 AI: print may be failing')
+            self.assertEqual(text,'<@&123456789012345678>');self.assertEqual([r.id for r in mentions.roles],[123456789012345678])
+            core.settings['alert_ping']='none';self.assertIsNone(core.ping_for('🛑 Printer error')[0])
+            asyncio.run(core.bot.close())
+
+
 class OneStartButton(unittest.TestCase):
     """#65: the queue's Start next and the dialog's Print now are one button each, which asks to start anyway while
     the printer reports an error."""

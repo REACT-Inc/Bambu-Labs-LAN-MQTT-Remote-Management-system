@@ -87,6 +87,25 @@ from printer_errors import describe as describe_error, errors as decode_errors
 import filament_sides
 from diagnostics import log_error
 
+# What the printer's raw state means for people. Bambu printers keep reporting FINISH or FAILED (FAILED also after a
+# cancelled print) until the next print starts, while they sit idle and ready, so those read as Ready.
+STATE_NAMES = {'RUNNING': 'Printing', 'PAUSE': 'Paused', 'PREPARE': 'Preparing', 'SLICING': 'Preparing', 'IDLE': 'Ready',
+               'FINISH': 'Ready', 'FAILED': 'Ready', 'UNKNOWN': 'Waiting for a report', 'INIT': 'Starting up'}
+LAST_PRINT = {'FINISH': 'last print finished', 'FAILED': 'last print failed or was cancelled'}
+
+
+def display_state(state, error=0, connected=True):
+    if not connected:
+        return 'Offline'
+    if error:
+        return 'Error'
+    return STATE_NAMES.get(str(state), str(state or 'Unknown').title())
+
+
+def last_print_note(state, error=0):
+    return '' if error else LAST_PRINT.get(str(state), '')
+
+
 def printer_error_text(name, error, data=None):
     printer = printer_config(name) or {}
     model = printer.get("error_model") or str(printer.get("serial", ""))[:3]
@@ -589,7 +608,8 @@ def printer_reply(embed, picture):
 
 def printer_embed(name):
     state, error, data, connected = state_data(name)
-    embed = card('🖨️ ' + display_name(name), f"{'🟢 Connected' if connected else '🔴 Offline / reconnecting'} • **{safe(state)}**",
+    note = last_print_note(state, error)
+    embed = card('🖨️ ' + display_name(name), f"{'🟢 Connected' if connected else '🔴 Offline / reconnecting'} • **{display_state(state, error, connected)}**" + (f' ({note})' if note else ''),
                  RED if error or not connected else STATE_COLORS.get(state, GRAY))
     field(embed, 'File', safe(data.get('subtask_name', 'No file reported')), False)
     field(embed, 'Progress', progress(data.get('mc_percent')), False)
@@ -824,7 +844,7 @@ async def status_command(interaction: discord.Interaction):
     lines = [f'**Uptime:** {uptime // 3600}h {(uptime % 3600) // 60}m', f'**Connected:** {online}/{len(available)}', '']
     for name in available:
         state, error, data, connected = state_data(name)
-        line = f"{'🟢' if connected else '🔴'} **{safe(name)}** — {safe(state)}"
+        line = f"{'🟢' if connected else '🔴'} **{safe(name)}** — {display_state(state, error, connected)}"
         if state == 'RUNNING':
             line += f" • {data.get('mc_percent', '?')}%"
         if error:
@@ -951,9 +971,26 @@ async def notify(name, title, description, color, camera=False):
         view = notification_view(name, title) if notification_view else None   # e.g. Clear error (#34)
         if view:
             kwargs['view'] = view
-        await channel.send(**kwargs)
+        content, mentions = ping_for(title)   # important alerts ping people (@here by default)
+        await channel.send(content=content, allowed_mentions=mentions, **kwargs)
     except Exception:
         log.exception('Notification failed for %s', name)
+
+
+PING_TITLES = ('🤖', '🛑 Printer error')   # AI failure alerts and printer errors ping people
+
+
+def ping_for(title):
+    """(message text, allowed mentions) for an important alert, from settings "alert_ping": "here" (default),
+    "everyone", a role ID, or "none"."""
+    if not str(title).startswith(PING_TITLES):
+        return None, discord.AllowedMentions.none()
+    choice = str(settings.get('alert_ping', 'here') or 'none')
+    if choice in ('here', 'everyone'):
+        return f'@{choice}', discord.AllowedMentions(everyone=True, users=False, roles=False)
+    if choice.isdigit():
+        return f'<@&{choice}>', discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(int(choice))])
+    return None, discord.AllowedMentions.none()
 
 
 def queue_notification(*args):
