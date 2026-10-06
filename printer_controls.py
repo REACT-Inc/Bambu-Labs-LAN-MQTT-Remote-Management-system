@@ -229,6 +229,7 @@ class Controls:
                 result=client.publish(f"device/{self.core.printer_config(name)['serial']}/request",json.dumps(payload),qos=1)
                 if result.rc!=0:raise ValueError(f'MQTT submission failed after {submitted}/{len(commands)} commands. Inspect actual fan/settings state before retrying.')
                 submitted+=1
+            if hasattr(self.core,'request_report'):self.core.request_report(name)   # show the result sooner (#60)
         if kind in ('move','home'):self.moved[name]=time.monotonic()
         self.store.event(name,'Demo control' if self.core.EXAMPLE_MODE else 'Control submitted',f'{label} • {author}')
         return label+(' • Demo only.' if self.core.EXAMPLE_MODE else ' • Submitted; verify the result on the printer.')

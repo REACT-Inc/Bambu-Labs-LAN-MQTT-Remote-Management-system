@@ -71,7 +71,7 @@ function num(v){const n=Number(v);return v===null||v===undefined||v===''||!Numbe
 function fmtTemp(v){const n=num(v);return n===null?'—':Math.round(n)+'°';}
 // Newer firmware (bit 38 of the hex "fun" flags) only jogs in fixed 1 / 10 mm steps.
 function axisCtrl(d){try{return ((BigInt('0x'+(d.fun||'0'))>>38n)&1n)===1n;}catch{return false;}}
-async function control(kind,body,label){const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/'+kind,body);notice(r.message||label||'Submitted.');return r;}
+async function control(kind,body,label){const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/'+kind,body);notice(r.message||label||'Submitted.');pollSoon();return r;}
 // Everyday controls apply straight away; the server still checks limits. Only Pause and Stop ask first.
 async function sendControl(kind,value){try{return await control(kind,{value,confirmed:true});}catch(e){notice(e.message);throw e;}finally{refresh();}}
 
@@ -155,13 +155,13 @@ $('jogArm').onchange=()=>{clearTimeout(jogArmTimer);if($('jogArm').checked){jogA
 async function jog(axis,dir,button){button?.classList.add('pending');try{await jogMove(axis,dir);}finally{button?.classList.remove('pending');}}
 async function jogMove(axis,dir){const p=devPrinter(),steps=jogSteps(p),step=axis==='Z'?(steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1]):jogStep,value=dir*step;
  jogBusy=true;renderJog(p);$('jogStatus').textContent=`Moving ${axis} ${value>0?'+':''}${value} mm…`;
- try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/move',{value,axis,confirmed:true,homed:true});$('jogStatus').textContent=r.message;
+ try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/move',{value,axis,confirmed:true,homed:true});pollSoon();$('jogStatus').textContent=r.message;
   // The server allows one move every 3 seconds; wait it out instead of showing an error.
   jogReadyAt=Date.now()+3100;const tick=()=>{const left=Math.ceil((jogReadyAt-Date.now())/1000);if(left>0){$('jogCenter').textContent=left+' s';setTimeout(tick,250);}else renderJog(devPrinter());};tick();}
  catch(e){$('jogStatus').textContent=e.message;}finally{jogBusy=false;renderJog(devPrinter());}}
 document.querySelectorAll('#jogPad [data-axis],#jogZ [data-axis]').forEach(b=>b.onclick=()=>jog(b.dataset.axis,Number(b.dataset.dir),b));
 $('jogHome').onclick=async()=>{const b=$('jogHome');b.classList.add('pending');jogBusy=true;jogNote={text:'Homing X, Y and Z…',until:Date.now()+30000};renderJog(devPrinter());
- try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/home',{confirmed:true});jogNote={text:r.message+' Wait for homing to finish before moving.',until:Date.now()+15000};
+ try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/home',{confirmed:true});pollSoon();jogNote={text:r.message+' Wait for homing to finish before moving.',until:Date.now()+15000};
   jogReadyAt=Date.now()+3100;setTimeout(()=>renderJog(devPrinter()),3200);}
  catch(e){jogNote={text:e.message,until:Date.now()+15000};}finally{jogBusy=false;b.classList.remove('pending');renderJog(devPrinter());}};
 
@@ -246,7 +246,7 @@ document.querySelector('#detailDialog .now-actions').addEventListener('click',as
  if(action==='light'){await toggleLight(name);return;}
  if(action==='resume'){try{await printAction(name,'resume');}catch(err){notice(err.message);}return;}
  const target=action;
- b.disabled=true;try{await api('printers/'+encodeURIComponent(name)+'/'+target,{});notice('Command submitted. Waiting for printer telemetry.');await refresh();}catch(err){notice(err.message);}finally{b.disabled=false;}});
+ b.disabled=true;try{await api('printers/'+encodeURIComponent(name)+'/'+target,{});notice('Command submitted. Waiting for printer telemetry.');await refresh();pollSoon();}catch(err){notice(err.message);}finally{b.disabled=false;}});
 $('devFiles').onclick=()=>downloadFileListing(selectedPrinter,$('devFiles'));
 $('detailDialog').addEventListener('close',()=>{$('jogArm').checked=false;clearTimeout(jogArmTimer);editingTile=null;$('tempTiles').dataset.printer='';});
 // The play button shows whenever live view isn't running, however it stopped.

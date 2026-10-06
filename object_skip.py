@@ -106,5 +106,7 @@ class ObjectSkip:
             result = client.publish(f"device/{self.core.printer_config(name)['serial']}/request", json.dumps(payload), qos=1)
             if result.rc != 0:
                 raise ValueError('Could not send the command to the printer.')
+            if hasattr(self.core, 'request_report'):
+                self.core.request_report(name)   # show the skipped objects sooner (#60)
         self.store.event(name, 'Demo control' if self.core.EXAMPLE_MODE else 'Objects cancelled', f'{label} • {author}')
         return label + (' • Demo only.' if self.core.EXAMPLE_MODE else ' • Sent; the printer skips them from the next layer.')

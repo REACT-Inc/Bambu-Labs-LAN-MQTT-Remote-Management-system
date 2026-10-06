@@ -701,6 +701,36 @@ def publish_action(name, action, filename=None):
     result = client.publish(f"device/{printer_config(name)['serial']}/request", json.dumps({'print': data}), qos=1)
     if result.rc != mqtt.MQTT_ERR_SUCCESS:
         raise RuntimeError('MQTT could not queue the command. Check the printer connection.')
+    request_report(name)
+
+
+REPORT_GAP = 10       # seconds: at most one full-report request per printer (frequent ones make P1/A1 stutter)
+REPORT_DELAY = 1.5    # seconds after a command, so the report already shows its effect
+report_requested = {}
+report_lock = threading.Lock()
+
+
+def request_report(name, delay=REPORT_DELAY):
+    """Ask the printer for a full status report shortly after a command (#60). Bambu printers send everything only
+    when asked ("pushall"); otherwise an idle A1/P1 can take a long time to report the change, and the dashboard keeps
+    showing "waiting for the printer". Rate-limited per printer. Returns True when a request was scheduled."""
+    if EXAMPLE_MODE or name not in names():
+        return False
+    with report_lock:
+        now = time.monotonic()
+        if now - report_requested.get(name, -REPORT_GAP) < REPORT_GAP:
+            return False
+        report_requested[name] = now
+
+    def send():
+        client = clients.get(name)
+        if client and client.is_connected():
+            client.publish(f"device/{printer_config(name)['serial']}/request",
+                           json.dumps({'pushing': {'sequence_id': str(time.time_ns() % 1000000000), 'command': 'pushall'}}))
+    timer = threading.Timer(delay, send)
+    timer.daemon = True
+    timer.start()
+    return True
 
 
 def publish_light(name, on):
@@ -718,6 +748,7 @@ def publish_light(name, on):
     result = client.publish(f"device/{printer_config(name)['serial']}/request", json.dumps(payload), qos=1)
     if result.rc != mqtt.MQTT_ERR_SUCCESS:
         raise RuntimeError('MQTT could not queue the light command.')
+    request_report(name)
 
 
 async def send_action(interaction, name, action, filename=None):

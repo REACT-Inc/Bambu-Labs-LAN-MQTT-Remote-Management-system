@@ -32,6 +32,11 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Testing:** **Send test** checks each target, and the last result is shown.
   - **Privacy:** tokens never leave the Pi.
 
+### Fixed
+- **Commands show their result much sooner (#60).** The printer usually acted right away, but the dashboard could keep showing "waiting for the printer" for many seconds.
+  - **Full report after a command:** the app now asks the printer for a full report shortly after each command (light, pause/resume/stop, temperatures, fans, speed, moves, filament, cancelling objects, clearing errors). Before, an idle A1 or P1 could take a long time to report the change. The request is limited to once every 10 seconds per printer, because frequent full reports can make some printers stutter.
+  - **Faster checks after a click:** the dashboard looks again 0.6, 1.5, 3, 5, 8, 12 and 16 seconds after every control, instead of only after the light and print buttons.
+
 ## Unreleased (1.7.5)
 
 ### Changed
