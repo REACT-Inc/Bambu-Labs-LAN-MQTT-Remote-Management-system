@@ -8,6 +8,16 @@ talks to it over stdin/stdout, one JSON object per line:
 
 The first line it prints is {"ready": true, "input": [width, height]} once the model is loaded on the AI HAT.
 
+Bed check (bed_model.py): an optional second .hef, a general-purpose image model (CLIP from the Hailo Model Zoo),
+loaded next to the failure model on the same AI HAT. It turns a picture into a "fingerprint" (embedding) that the
+service compares with the printer's own empty-bed and parts-on-the-bed pictures:
+
+    request:  {"embed": "<base64 JPEG>", "crops": [[x0, y0, x1, y1]]}   (one vector for the picture, one per crop)
+    reply:    {"vectors": [[...], ...]}   unit length, or {"error": "..."}
+
+The failure model stays active; the bed model is switched in only for a bed check, which happens a few times per print.
+If the bed model can't be loaded, "ready" says why ("bed_error") and failure detection works as before.
+
 Model: a .hef compiled for the HAT's chip (Hailo-8L on the 13 TOPS AI Kit / AI HAT+, Hailo-8 on the 26 TOPS HAT+).
 Two output layouts are understood:
 - Hailo on-chip NMS (YOLO-style detection HEFs): per class, rows of [ymin, xmin, ymax, xmax, score] (0-1);
@@ -179,6 +189,8 @@ def main_cpu(model, class_names, failure_labels, size):
     for line in sys.stdin:
         try:
             request = json.loads(line)
+            if 'embed' in request:
+                raise RuntimeError('The bed check AI needs the AI HAT.')
             image = Image.open(io.BytesIO(base64.b64decode(request['jpeg']))).convert('RGB')
 
             def run(frame):
@@ -192,6 +204,63 @@ def main_cpu(model, class_names, failure_labels, size):
         print(json.dumps(reply), flush=True)
 
 
+def unit(vector):
+    """Flatten a model output to a plain list of unit length (cosine similarity is then a dot product)."""
+    import numpy as np
+    flat = np.asarray(vector, dtype=np.float32).reshape(-1)
+    norm = float(np.linalg.norm(flat))
+    return [round(float(v), 5) for v in (flat / norm if norm > 0 else flat)]
+
+
+def regions(image, crops):
+    """The whole picture, then each crop (0-1 fractions), as pictures."""
+    parts = [image]
+    for crop in crops or []:
+        if len(crop) == 4:
+            x0, y0, x1, y1 = (min(1.0, max(0.0, float(v))) for v in crop)
+            if x1 - x0 >= 0.05 and y1 - y0 >= 0.05:
+                parts.append(image.crop((round(x0 * image.width), round(y0 * image.height),
+                                         round(x1 * image.width), round(y1 * image.height))))
+    return parts
+
+
+def about(device):
+    """HailoRT version and chip (hailo8 / hailo8l), so the service can download the bed model built for them."""
+    found = {}
+    try:
+        import hailo_platform
+        found['hailort'] = str(getattr(hailo_platform, '__version__', '') or '')
+    except Exception:
+        pass
+    try:
+        arch = str(device.get_physical_devices()[0].control.identify().device_architecture).upper()
+        found['chip'] = 'hailo8l' if 'HAILO8L' in arch else 'hailo10h' if 'HAILO10H' in arch else 'hailo8' if 'HAILO8' in arch else ''
+    except Exception:
+        pass
+    return found
+
+
+class Switch:
+    """Two network groups on one AI HAT without the scheduler: only one is active at a time. The failure model stays
+    active; use(bed) switches the bed model in for one request and back afterwards."""
+
+    def __init__(self):
+        self.active, self.context = None, None
+
+    def use(self, group):
+        if self.active is group:
+            return
+        self.release()
+        self.context = group.activate(group.create_params())
+        self.context.__enter__()
+        self.active = group
+
+    def release(self):
+        if self.context is not None:
+            context, self.context, self.active = self.context, None, None
+            context.__exit__(None, None, None)
+
+
 def main():
     if sys.argv[1].lower().endswith('.onnx'):
         return main_cpu(sys.argv[1], json.loads(sys.argv[2]), set(json.loads(sys.argv[3])),
@@ -200,28 +269,59 @@ def main():
     from PIL import Image
     from hailo_platform import (HEF, VDevice, ConfigureParams, HailoStreamInterface, InferVStreams,
                                 InputVStreamParams, OutputVStreamParams, FormatType)
+    import contextlib
     model, class_names, failure_labels = sys.argv[1], json.loads(sys.argv[2]), set(json.loads(sys.argv[3]))
-    hef = HEF(model)
-    with VDevice() as device:
+    bed_model = sys.argv[5] if len(sys.argv) > 5 else ''
+
+    def load(device, path):
+        hef = HEF(path)
         group = device.configure(hef, ConfigureParams.create_from_hef(hef, interface=HailoStreamInterface.PCIe))[0]
         info = hef.get_input_vstream_infos()[0]
+        return group, info, InputVStreamParams.make(group, format_type=FormatType.UINT8), \
+            OutputVStreamParams.make(group, format_type=FormatType.FLOAT32)
+
+    with VDevice() as device, contextlib.ExitStack() as stack:
+        group, info, inputs, outputs = load(device, model)
         height, width = info.shape[0], info.shape[1]
-        inputs = InputVStreamParams.make(group, format_type=FormatType.UINT8)
-        outputs = OutputVStreamParams.make(group, format_type=FormatType.FLOAT32)
-        with InferVStreams(group, inputs, outputs) as pipeline, group.activate(group.create_params()):
-            print(json.dumps({'ready': True, 'input': [width, height], 'backend': 'hailo'}), flush=True)
-            for line in sys.stdin:
-                try:
-                    request = json.loads(line)
+        pipeline = stack.enter_context(InferVStreams(group, inputs, outputs))
+        bed, bed_error = None, ''
+        if bed_model:
+            try:   # the bed model is optional: failure detection must work without it
+                bed_group, bed_info, bed_inputs, bed_outputs = load(device, bed_model)
+                bed = (bed_group, bed_info, stack.enter_context(InferVStreams(bed_group, bed_inputs, bed_outputs)))
+            except Exception as exc:
+                bed_error = f'{type(exc).__name__}: {exc}'[:300]
+        switch = Switch()
+        stack.callback(switch.release)
+        switch.use(group)
+        print(json.dumps({'ready': True, 'input': [width, height], 'backend': 'hailo',
+                          'bed': bool(bed), 'bed_error': bed_error, **about(device)}), flush=True)
+        for line in sys.stdin:
+            try:
+                request = json.loads(line)
+                if 'embed' in request:
+                    if not bed:
+                        raise RuntimeError(bed_error or 'No bed check model loaded.')
+                    bed_group, bed_info, bed_pipeline = bed
+                    image = Image.open(io.BytesIO(base64.b64decode(request['embed']))).convert('RGB')
+                    size_h, size_w = bed_info.shape[0], bed_info.shape[1]
+                    switch.use(bed_group)
+                    try:
+                        vectors = [unit(next(iter(bed_pipeline.infer({bed_info.name: input_batch(letterbox(part, size_w, size_h)[0])}).values())))
+                                   for part in regions(image, request.get('crops'))]
+                    finally:
+                        switch.use(group)
+                    reply = {'vectors': vectors}
+                else:
                     image = Image.open(io.BytesIO(base64.b64decode(request['jpeg']))).convert('RGB')
 
                     def run(frame):
                         return parse(pipeline.infer({info.name: input_batch(frame)}), class_names, set(), 0.05)['detections']
                     detections = look(image, request.get('crops'), run, width, height)
                     reply = dict(summarise(detections, failure_labels), image=[image.width, image.height])
-                except Exception as exc:   # one bad frame never stops the helper
-                    reply = {'error': f'{type(exc).__name__}: {exc}'[:300]}
-                print(json.dumps(reply), flush=True)
+            except Exception as exc:   # one bad frame never stops the helper
+                reply = {'error': f'{type(exc).__name__}: {exc}'[:300]}
+            print(json.dumps(reply), flush=True)
 
 
 if __name__ == '__main__':

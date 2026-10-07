@@ -78,6 +78,19 @@ class SwapTests(unittest.IsolatedAsyncioTestCase):
         await self.swap.after(self.engine,'Mini',swap,'FINISH')
         self.assertEqual(self.engine.started,[]);self.assertIn('Plate swapped',self.core.notify.await_args.args[1])
 
+    async def test_bed_check_ai_holds_the_next_job_when_it_sees_parts(self):
+        self.ready();self.job('Hook');swap=self.swap.swap_job('Mini','t')
+        verdicts=[]
+        async def gate(name):verdicts.append(name);return {'state':'parts','detail':'looks like a bed with parts on it'}
+        self.engine.bed_check=gate
+        await self.swap.after(self.engine,'Mini',swap,'FINISH')
+        self.assertEqual((verdicts,self.engine.started),(['Mini'],[]))   # held: nothing started on a bed with parts
+        self.assertIn('does not look clear',self.core.notify.await_args.args[1])
+        async def unsure(name):return {'state':'unknown','detail':'still learning'}
+        self.engine.bed_check=unsure   # unsure (or not set up): the queue carries on as before
+        swap=self.swap.swap_job('Mini','t');await self.swap.after(self.engine,'Mini',swap,'FINISH')
+        self.assertEqual(self.engine.started,[('Hook','Swapmod')])
+
     def test_old_settings_table_is_kept_working(self):
         db=self.store.db
         db.execute("INSERT OR REPLACE INTO plate_swap(printer,enabled) VALUES('Mini',1)");db.commit()

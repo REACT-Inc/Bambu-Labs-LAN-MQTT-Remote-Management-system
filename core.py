@@ -69,6 +69,7 @@ event_listener = None
 failure_monitor = None   # set by the dashboard (failureDetection, #70)
 notification_view = None   # (printer, title) -> buttons for a notification, set by clear_errors_discord (#34)
 alert_targets = None   # other alert destinations (alert_targets.py, #9), set by the dashboard
+status_center = None   # the dashboard's top-left status icon and its notifications (status_center.py)
 
 
 def load_settings():
@@ -984,6 +985,8 @@ async def notify(name, title, description, color, camera=False):
         event_listener(name, title, description)
     if alert_targets:   # Home Assistant, ntfy, webhooks (#9): also without the Discord bot
         alert_targets.dispatch(name, title, description, color)
+    if status_center:   # the dashboard's notifications, also without Discord
+        status_center.note(name, title, description, color)
     channel_id = settings.get('notification_channel_id')
     if not channel_id or not bot.is_ready():
         return

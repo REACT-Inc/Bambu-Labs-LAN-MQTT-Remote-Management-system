@@ -267,6 +267,7 @@ function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrin
  const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI unavailable'}[ai.status]||ai.status;
  const g=ai.geometry||{};$('aiGeometry').textContent=!g.enabled?'Print-file comparison is off.':(g.calibrated?'📐 Camera calibrated to the bed. ':'📐 Not calibrated: calibrate the camera to compare detections with the print file. ')+(g.message||'');
  $('aiCalibrate').textContent=g.calibrated?'Recalibrate camera to bed…':'Calibrate camera to bed…';$('aiCalibrate').hidden=!g.enabled;
+ renderBed(ai.bed||{});
  const rp=ai.reprint||{},showReprint=rp.enabled&&(rp.pending||ai.status==='paused');$('aiReprintBlock').hidden=!showReprint;
  if(showReprint){const left=rp.pending?Math.max(0,rp.due-Date.now()/1000):null,h=left===null?'':`${Math.floor(left/3600)} h ${Math.floor(left%3600/60)} min`;
   $('aiReprint').textContent=(rp.pending?`If this paused print isn't resumed or stopped, it reprints on an available printer in ${h}. `:'')+(rp.note?rp.note+' ':'')+(rp.available||'Press Check available printers to see which printers could take it.');
@@ -330,6 +331,19 @@ $('calUndo').addEventListener('click',()=>{calCorners.pop();drawCalibration();})
 window.addEventListener('resize',()=>{if($('calibrateDialog').open)drawCalibration();});
 $('calibrateForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/calibration',{corners:calCorners});closeDialog($('calibrateDialog'));notice('Camera calibration saved.');await refresh();}catch(err){$('calStep').textContent=err.message;}});
 $('calClear').addEventListener('click',async()=>{try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/calibration',{clear:true});closeDialog($('calibrateDialog'));notice('Camera calibration removed.');await refresh();}catch(err){$('calStep').textContent=err.message;}});
+// Bed check (failureDetection/bed_model.py): the bed check AI, or the picture comparison while it's still learning.
+function renderBed(bed){const c=bed.counts||{empty:0,parts:0},n=bed.needed||3;
+ $('aiBed').textContent=(bed.ready?(c.empty>=n&&c.parts>=n?`The bed check AI knows this bed (${c.empty} empty and ${c.parts} with parts seen).`
+  :`The bed check AI is learning this bed: ${c.empty} of ${n} empty and ${c.parts} of ${n} with parts seen. It learns when you start a print and when one finishes.`)
+  :(bed.message||'The bed check AI is not set up (it needs the AI HAT).')+' Until then the picture comparison checks the bed.');}
+$('aiBedCheck').addEventListener('click',async e=>{const b=e.target;b.disabled=true;$('aiBedResult').textContent='Looking at the bed…';
+ try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/bed',{action:'check'});
+  const word={clear:'✅ Looks clear',parts:'⚠️ Does not look clear',unknown:'❔ Not sure'}[r.state]||r.state;
+  $('aiBedResult').textContent=`${word}: ${r.detail}.`+(r.can_answer?' Is that right? Your answer teaches the AI.':'');
+  $('aiBedAnswer').hidden=!r.can_answer;}catch(err){$('aiBedResult').textContent=err.message;}finally{b.disabled=false;}});
+for(const [id,clear] of [['aiBedYes',true],['aiBedNo',false]])$(id).addEventListener('click',async()=>{
+ try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/bed',{action:'answer',clear});$('aiBedAnswer').hidden=true;
+  $('aiBedResult').textContent=clear?'Thanks: remembered as an empty bed.':'Thanks: remembered as a bed with parts on it.';await refresh();}catch(err){$('aiBedResult').textContent=err.message;}});
 async function aiReprint(action,button){button.disabled=true;try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/reprint',{action});
  notice(action==='now'?`Reprinting on ${printerLabel(r.printer)}.`:action==='cancel'?'Automatic reprint cancelled.':'Checked the other printers.');await refresh();}catch(err){notice(err.message);}finally{button.disabled=false;}}
 $('aiReprintCheck').addEventListener('click',e=>aiReprint('check',e.target));

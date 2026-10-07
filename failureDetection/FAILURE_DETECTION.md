@@ -260,7 +260,7 @@ When the AI **pauses** a failing queue print, the job can carry on somewhere els
 - its loaded AMS filament matches the plate (or the job used the external spool);
 - its **bed is empty**, judged by the camera.
 
-**How the bed check works:** every time someone starts a print and confirms *"the plate is clear"*, the app takes a fresh picture of that empty bed. Later it compares a new picture with it, inside the calibrated bed outline when there is one, with lighting differences evened out.
+**How the bed check works:** the [bed check AI](#bed-check-ai-is-the-bed-empty) decides when it knows that printer's bed. Otherwise a picture comparison decides: every time a queue job starts, the app takes a picture of that empty bed (not for a Swapmod swap print, which starts with the finished part still on the bed). Later it compares a new picture with it, inside the calibrated bed outline when there is one, with lighting differences evened out.
 - It errs towards "parts on the bed": a printer with no empty-bed picture yet, or an unclear result, is never used automatically.
 - Calibrating the camera ([above](#comparing-with-the-print-file)) makes the check more precise.
 
@@ -276,6 +276,29 @@ The countdown is saved in `/var/lib/3d-printer-management/ai-reprints.json`, so 
 | `after_hours` | `12` | How long a paused print waits before it's reprinted elsewhere. |
 | `stop_original` | `true` | Stop the paused print when reprinting. |
 | `bed_threshold` | `0.005` | Share of the bed that may differ from the empty-bed picture and still count as empty. |
+
+## Bed check AI: is the bed empty?
+
+A second AI model on the AI HAT, next to the failure model, that tells whether a printer's build plate is empty.
+
+**Setup is automatic.** The first time the service runs with an AI HAT, it downloads Hailo's own precompiled **CLIP** image model (`clip_resnet_50x4`) from the [Hailo Model Zoo](https://github.com/hailo-ai/hailo_model_zoo), built for this Pi's chip (Hailo-8 or Hailo-8L) and its HailoRT version. It's 65–125 MB and downloads in the background. The **status icon** at the top left of the dashboard shows the progress, then **Bed check AI ready**, or why it couldn't be set up (it tries again every hour). When HailoRT is updated (`apt upgrade`), the matching model is downloaded again; this is checked once a day.
+- **Why the Pi doesn't build the .hef itself:** Hailo's model compiler only runs on x86 PCs, not on a Raspberry Pi. The Model Zoo files are already compiled by Hailo, so nothing needs compiling.
+- **Only with the AI HAT.** On the CPU (`.onnx`), the picture comparison checks beds as before.
+- **Safe to add:** both models are loaded together, but only the failure model is active except for a moment during a bed check. If the bed model can't be loaded, failure detection carries on without it and the status icon says why.
+
+**It learns each printer's bed by itself.** CLIP turns a picture into a "fingerprint" of what's in it. Each printer keeps fingerprints of its own bed (the newest 30 of each kind, in `/var/lib/3d-printer-management/beds/`):
+- **Empty:** a picture when a queue job starts (the plate was just cleared).
+- **Parts on the bed:** a picture a few seconds after a queue print finishes.
+- **Your answers:** **Is the bed clear?** in the printer panel (**More → AI failure watch → Bed check**) checks it now. Answering **It's clear** or **Not clear** teaches it that picture.
+
+After 3 of each, a new picture is compared with the closest ones of each kind. If it's clearly closer to one kind, that's the answer. If it's too close to call, it says *not sure*, and the picture comparison decides. With a calibrated camera, only the bed area is compared.
+
+**Where it's used:**
+- **Swapmod:** after the swap print, if the AI is sure there are still parts on the plate, the next print isn't started. You're told, and you can start it from the queue after checking. When it's unsure or still learning, the queue carries on as before.
+- **Automatic reprint:** a printer is only "available" if its bed is empty, and the AI is asked first.
+- **Never on its own:** a "parts" or "not sure" answer never starts a print.
+
+Turn it off under `failure_detection`: `"bed_ai": {"enabled": false}`.
 
 ## Automatic model updates
 
@@ -431,6 +454,7 @@ Add a `failure_detection` section (see [Configuration](../docs/configuration.md#
 | `action` | `"notify"` | `"notify"` only reports; `"pause"` also pauses the print. |
 | `python` | `/usr/bin/python3` | The Python that has OpenCV (`.onnx`) or `hailo_platform` (`.hef`) installed. |
 | `input_size` | `640` | `.onnx` only: the image size the model was trained at. |
+| `bed_ai` | `{"enabled": true}` | The [bed check AI](#bed-check-ai-is-the-bed-empty) (AI HAT only). |
 
 Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 

@@ -232,3 +232,20 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 .pc-clear{margin:-4px 0 8px}.alert-list ul{list-style:none;margin:6px 0;padding:0}.alert-list li{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line,rgba(255,255,255,.08));font-size:13px}.alert-list li span{flex:1}.alert-list a{margin-left:4px}
 .alert-target{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 10px}.alert-target-row{display:flex;flex-wrap:wrap;gap:10px;align-items:end}.alert-target-row label{flex:1;min-width:140px}.alert-target-row .checkbox{flex:0 0 auto;min-width:0}
 .ai-labels{border:0;padding:0;margin:8px 0}.ai-labels legend{font-size:13px;margin-bottom:4px}.ai-labels .checkbox{display:inline-flex;margin-right:14px}
+
+/* The status icon (top left) and its panel */
+.status-button{position:relative;padding:0;border:0;cursor:pointer}.status-button:hover{background:#d0ffa0}
+.status-dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--green);flex-shrink:0}
+.status-button .status-dot{position:absolute;right:-3px;bottom:-3px;width:13px;height:13px;border:2px solid #131916}
+.status-dot.ok{background:var(--green)}.status-dot.info{background:var(--blue)}.status-dot.warn{background:var(--yellow)}.status-dot.error{background:var(--red)}
+.status-dot.busy{background:var(--blue);animation:status-pulse 1.2s ease-in-out infinite}
+@keyframes status-pulse{50%{opacity:.35}}
+.status-count{position:absolute;top:-7px;right:-9px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--red);color:#2a0f0d;font-size:11px;font-weight:750;line-height:18px;letter-spacing:0;border:2px solid #131916}
+.status-panel{position:fixed;top:84px;left:22px;z-index:50;width:min(380px,calc(100vw - 32px));max-height:calc(100vh - 110px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 24px 80px #0009}
+.status-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:4px 0 8px}.status-head button{font-size:11px;padding:5px 9px}
+.status-list{list-style:none;margin:0 0 14px;padding:0}
+.status-item{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line)}.status-item .status-dot{margin-top:5px}
+.status-item div{min-width:0;flex:1}.status-item strong{display:block;font-size:13px}.status-item small{display:block;font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+.status-item.unread strong::after{content:' •';color:var(--blue)}.status-item .progress{margin:6px 0 2px}
+@media(max-width:720px){.status-panel{top:62px;left:16px}}
+@media(prefers-reduced-motion:reduce){.status-dot.busy{animation:none}}

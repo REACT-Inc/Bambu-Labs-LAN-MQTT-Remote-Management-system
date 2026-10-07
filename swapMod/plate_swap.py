@@ -135,6 +135,17 @@ class PlateSwap:
                         await notify(name, '♻️ Plate swapped', 'Fresh plate ready. Nothing else is waiting in the queue.', self.core.GREEN)
                     return
                 await asyncio.sleep(self.settle)
+                # The bed check AI (failureDetection/bed_model.py), when it's set up: hold the queue if it's sure the
+                # swap left parts on the plate. When it's unsure or not set up, the queue carries on as before.
+                gate = getattr(engine, 'bed_check', None)
+                bed = await gate(name) if gate else {'state': 'unknown'}
+                if bed.get('state') == 'parts':
+                    if notify:
+                        await notify(name, '♻️ Plate swapped, but the bed does not look clear',
+                                     f"{following['label']} was not started: the bed check AI {bed.get('detail', 'sees parts on the bed')}. "
+                                     'Check the printer, then start it from the queue (and tell the AI in the printer panel '
+                                     'whether the bed was clear).', self.core.YELLOW)
+                    return
                 await engine.start(following['id'], True, 'Swapmod')
                 if notify:
                     await notify(name, '♻️ Plate swapped, next print started', following['label'], self.core.GREEN)
