@@ -2,6 +2,13 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.6)
+
+### Changed
+- **AI boxes on every live-view frame.** While you watch a printer live, the AI looks at each new camera frame, printing or not, and the frame arrives with its own boxes, so they follow the toolhead instead of updating every few seconds. Live view also shows every new frame now (up to 5 per second on RTSP cameras) instead of about one per second.
+  - **On the CPU** (no AI HAT) it looks at most every 3 seconds, so the Pi isn't overloaded.
+  - **Display only:** failures are still judged by the regular checks, and it runs only while someone is watching.
+
 ## 1.7.5-beta.1
 
 Built on 1.7.4-beta.1. Clear printer errors, the pm-doctor watchdog, alerts to Home Assistant / ntfy / webhooks, the reworked Swapmod, no confirmation screens, readable printer states and many fixes.

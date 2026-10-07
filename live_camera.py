@@ -4,6 +4,7 @@ import contextlib
 import logging
 import shutil
 import ssl
+import json
 import struct
 import time
 from aiohttp import web
@@ -19,11 +20,22 @@ def camera_error(printer,error):
 
 
 
+LIVE_AI_WAIT=2.5   # how long a live frame request waits for the AI to finish that frame before sending it without
+
+
 class Feed:
     def __init__(self,printer):
         self.printer=printer;self.users=0;self.frame=None;self.version=0
         self.updated=0;self.status='Connecting';self.error='';self.condition=asyncio.Condition()
+        # Live AI boxes: the newest frame the AI looked at, with what it found. sync: the AI keeps up with the camera
+        # (AI HAT), so frames are sent together with their own boxes; on the CPU the boxes follow when they're ready.
+        self.scored=None;self.ai_sync=False;self.ai_task=None
         self.task=asyncio.create_task(self.run())
+
+    async def stop(self):
+        tasks=[t for t in (self.task,self.ai_task) if t]
+        for task in tasks:task.cancel()
+        await asyncio.gather(*tasks,return_exceptions=True)
 
     async def put(self,frame):
         if not (frame.startswith(b'\xff\xd8') and frame.endswith(b'\xff\xd9')):return
@@ -102,7 +114,28 @@ class Feed:
 
 
 class Cameras:
-    def __init__(self,core):self.core=core;self.feeds={};self.closing=False;self.idle={}
+    def __init__(self,core):
+        self.core=core;self.feeds={};self.closing=False;self.idle={}
+        self.scorer=None   # async (name, jpeg) -> AI overlay for that frame, or None; set by the dashboard
+
+    async def score_frames(self,name,feed):
+        """While someone watches a printer live, the AI looks at every new frame it can keep up with (the newest one
+        each time, never a backlog) so the boxes follow the picture. Display only: nothing is judged or acted on."""
+        version=0
+        while True:
+            try:version,frame=await feed.next(version,25)
+            except asyncio.TimeoutError:continue
+            # Shielded: stopping the live view mid-frame must not cut the AI helper off halfway through a reply.
+            try:overlay=await asyncio.shield(self.scorer(name,frame))
+            except asyncio.CancelledError:raise
+            except Exception:overlay=None
+            if not overlay:
+                feed.ai_sync=False;feed.scored=None
+                await asyncio.sleep(5);continue
+            async with feed.condition:
+                feed.scored=(version,overlay,time.time(),frame);feed.ai_sync=bool(overlay.get('sync'))
+                feed.condition.notify_all()
+            if overlay.get('gap'):await asyncio.sleep(overlay['gap'])   # the CPU: not every frame
 
     def acquire(self,name):
         if name not in self.core.names():raise ValueError('Unknown printer.')
@@ -123,13 +156,11 @@ class Cameras:
             async def expire():
                 await asyncio.sleep(linger)
                 if feed.users==0 and self.feeds.get(name) is feed:
-                    self.feeds.pop(name,None);feed.task.cancel()
-                    await asyncio.gather(feed.task,return_exceptions=True)
+                    self.feeds.pop(name,None);await feed.stop()
                 self.idle.pop(name,None)
             self.idle[name]=asyncio.create_task(expire());return
         if feed.users==0 and self.feeds.get(name) is feed:
-            self.feeds.pop(name,None);feed.task.cancel()
-            await asyncio.gather(feed.task,return_exceptions=True)
+            self.feeds.pop(name,None);await feed.stop()
 
     async def snapshot(self,name):
         try:feed=self.acquire(name)
@@ -151,8 +182,7 @@ class Cameras:
         for task in idle:task.cancel()
         await asyncio.gather(*idle,return_exceptions=True)
         feeds=list(self.feeds.values());self.feeds.clear()
-        for f in feeds:f.task.cancel()
-        await asyncio.gather(*(f.task for f in feeds),return_exceptions=True)
+        await asyncio.gather(*(f.stop() for f in feeds),return_exceptions=True)
 
     async def frame_response(self,request):
         name=request.match_info['name'];feed=self.acquire(name)
@@ -162,12 +192,32 @@ class Cameras:
             except ValueError:pass
             # A new feed resets its counter; only use versions belonging to this feed.
             if request.query.get('feed')!=str(id(feed)):version=0
-            try:version,frame=await feed.next(version,10)
-            except asyncio.TimeoutError:
-                raise web.HTTPServiceUnavailable(text=feed.error or 'No camera frames received. Check camera settings, access code and LAN connectivity.')
-            return web.Response(body=frame,content_type='image/jpeg',headers={
-                'Cache-Control':'no-store','X-Camera-Version':str(version),'X-Camera-Feed':str(id(feed))})
+            if self.scorer and not feed.ai_task:
+                # Assume the AI keeps up until its first look says otherwise, so even the first frame has its boxes.
+                feed.ai_sync=True;feed.ai_task=asyncio.create_task(self.score_frames(name,feed))
+            frame=None
+            if feed.ai_sync:   # the AI keeps up: send the next frame it has looked at, with its own boxes
+                frame=await self.scored_frame(feed,version)
+                if frame:version=frame[0];frame=frame[1]
+            if frame is None:
+                try:version,frame=await feed.next(version,10)
+                except asyncio.TimeoutError:
+                    raise web.HTTPServiceUnavailable(text=feed.error or 'No camera frames received. Check camera settings, access code and LAN connectivity.')
+            headers={'Cache-Control':'no-store','X-Camera-Version':str(version),'X-Camera-Feed':str(id(feed))}
+            scored=feed.scored
+            if scored and time.time()-scored[2]<10:
+                headers['X-AI']=json.dumps(dict(scored[1],frame=scored[0],same=scored[0]==version),separators=(',',':'))
+            return web.Response(body=frame,content_type='image/jpeg',headers=headers)
         finally:await self.release(name,feed,linger=15)
+
+    async def scored_frame(self,feed,version):
+        """(version, jpeg) of the next frame the AI has finished, or None if it doesn't come in time. The frame is
+        the one the AI looked at, so its boxes match it exactly."""
+        async with feed.condition:
+            try:
+                await asyncio.wait_for(feed.condition.wait_for(lambda:feed.scored and feed.scored[0]>version),LIVE_AI_WAIT)
+            except asyncio.TimeoutError:return None
+            return feed.scored[0],feed.scored[3]
 
     async def stream(self,request):
         name=request.match_info['name'];feed=self.acquire(name)

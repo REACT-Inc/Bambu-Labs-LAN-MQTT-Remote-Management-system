@@ -1,6 +1,6 @@
 'use strict';
-let livePrinter=null,liveRequest=null,liveTimer=null,liveUrl=null,liveGeneration=0;
-function stopLive(){liveGeneration++;livePrinter=null;clearTimeout(liveTimer);if(liveRequest)liveRequest.abort();liveRequest=null;if(liveUrl)URL.revokeObjectURL(liveUrl);liveUrl=null;$('liveImage').removeAttribute('src');$('liveImage').hidden=true;$('liveStatus').textContent='Live view stopped.';$('startLive').disabled=false;}
+let livePrinter=null,liveRequest=null,liveTimer=null,liveUrl=null,liveGeneration=0,liveAi=null;   // liveAi: the AI's boxes for the live frame shown
+function stopLive(){liveGeneration++;livePrinter=null;liveAi=null;clearTimeout(liveTimer);if(liveRequest)liveRequest.abort();liveRequest=null;if(liveUrl)URL.revokeObjectURL(liveUrl);liveUrl=null;$('liveImage').removeAttribute('src');$('liveImage').hidden=true;$('liveStatus').textContent='Live view stopped.';$('startLive').disabled=false;}
 async function fetchLiveFrame(generation,version=0,feed=''){
  if(generation!==liveGeneration||!livePrinter)return;
  const controller=new AbortController();liveRequest=controller;
@@ -9,12 +9,13 @@ async function fetchLiveFrame(generation,version=0,feed=''){
   const response=await fetch('/api/liveframe/'+encodeURIComponent(livePrinter)+'?after='+version+'&feed='+encodeURIComponent(feed),{signal:controller.signal,cache:'no-store'});
   if(!response.ok){let reason='Camera request failed ('+response.status+').';try{reason=(await response.json()).error||reason;}catch{}if(response.status===401){stopLive();showLogin();return;}throw new Error(reason);}
   const blob=await response.blob();if(generation!==liveGeneration)return;
+  try{const ai=response.headers.get('X-AI');liveAi=ai?{...JSON.parse(ai),received:Date.now()}:null;}catch{liveAi=null;}
   const next=URL.createObjectURL(blob),old=liveUrl;liveUrl=next;$('liveImage').src=next;$('liveImage').hidden=false;if(old)URL.revokeObjectURL(old);
   $('liveStatus').textContent='Live frames · '+new Date().toLocaleTimeString();
   version=Number(response.headers.get('X-Camera-Version'))||0;feed=response.headers.get('X-Camera-Feed')||'';
  }catch(e){if(generation!==liveGeneration)return;$('liveImage').hidden=true;$('liveStatus').textContent=(e.name==='AbortError'?'Camera request timed out.':e.message)+' Retrying…';}
  finally{clearTimeout(timeout);if(liveRequest===controller)liveRequest=null;}
- if(generation===liveGeneration)liveTimer=setTimeout(()=>fetchLiveFrame(generation,version,feed),750);
+ if(generation===liveGeneration)liveTimer=setTimeout(()=>fetchLiveFrame(generation,version,feed),100);   // the server waits for the next frame
 }
 function startLiveView(){stopLive();livePrinter=selectedPrinter;$('liveStatus').textContent='Connecting to printer camera…';$('startLive').disabled=true;fetchLiveFrame(liveGeneration);}
 // The panel shows the latest still snapshot straight away; ▶ starts live view only when asked (#40).
@@ -25,7 +26,7 @@ function renderStill(p){const still=$('stillImage'),snap=p?.snapshot||{};
 function showCamera(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
  const snap=p?.snapshot||{};
  $('cameraHint').textContent=!p?.has_camera?(state?.demo?'No camera in demo mode.':(p?.limits?.camera_type?`No camera configured. For this ${p.limits.model} add "camera_type": "${p.limits.camera_type}" to its entry in config.json.`:'No camera configured for this printer (camera_type in config.json).'))
-  :snap.error&&!snap.time?snap.error:'Live view: about one frame per second. Nothing is recorded.';
+  :snap.error&&!snap.time?snap.error:'Live view: every new camera frame, with the AI\'s boxes on each one. Nothing is recorded.';
  if(!livePrinter)$('liveStatus').textContent=!p?.has_camera?'No camera.':snap.time?'Snapshot from '+new Date(snap.time*1000).toLocaleTimeString()+' · ▶ for live view':(snap.error||'Waiting for the first snapshot…');
  renderStill(p);}
 // AI boxes over the camera view, like Test AI now: what the model found in the frame it checked last.
@@ -33,10 +34,12 @@ let aiOverlayOn=true;try{aiOverlayOn=localStorage.getItem('aiOverlay')!=='off';}
 $('aiOverlayOn').checked=aiOverlayOn;
 $('aiOverlayOn').addEventListener('change',e=>{aiOverlayOn=e.target.checked;try{localStorage.setItem('aiOverlay',aiOverlayOn?'on':'off');}catch{}drawAiOverlay();});
 function shownImage(){const live=$('liveImage'),still=$('stillImage');return !live.hidden&&live.naturalWidth?live:!still.hidden&&still.naturalWidth?still:null;}
-function drawAiOverlay(){const c=$('aiOverlay'),g=c.getContext('2d'),ai=devPrinter()?.ai,img=shownImage();
+function drawAiOverlay(){const c=$('aiOverlay'),g=c.getContext('2d'),status=devPrinter()?.ai,img=shownImage();
  c.width=c.clientWidth;c.height=c.clientHeight;g.clearRect(0,0,c.width,c.height);
- const fresh=ai?.boxes_at&&Date.now()/1000-ai.boxes_at<Math.max(20,3*(ai.interval||5));
- $('aiOverlayToggle').hidden=!(ai?.enabled&&ai.watching&&img);
+ // Live view: the boxes the AI found in this very frame (or, on the CPU, its latest look); a still: the last check.
+ const live=img&&img.id==='liveImage'&&liveAi&&Date.now()-liveAi.received<10000?liveAi:null,ai=live?{...status,...live}:status;
+ const fresh=live||ai?.boxes_at&&Date.now()/1000-ai.boxes_at<Math.max(20,3*(ai.interval||5));
+ $('aiOverlayToggle').hidden=!(status?.enabled&&status.watching&&img);
  if(!aiOverlayOn||!img||!fresh)return;
  // The picture is letterboxed inside the frame (object-fit: contain): map 0-1 picture fractions onto it.
  const scale=Math.min(c.width/img.naturalWidth,c.height/img.naturalHeight),w=img.naturalWidth*scale,h=img.naturalHeight*scale,ox=(c.width-w)/2,oy=(c.height-h)/2;
@@ -50,7 +53,7 @@ function drawAiOverlay(){const c=$('aiOverlay'),g=c.getContext('2d'),ai=devPrint
   const text=`${d.label} ${Math.round(d.score*100)}%`,tw=g.measureText(text).width+8,ty=Math.max(oy+18,y);
   g.fillStyle=color;g.fillRect(x,ty-18,tw,18);g.fillStyle='#111';g.fillText(text,x+4,ty-3);});
  const age=Math.round(Date.now()/1000-ai.boxes_at);g.font='11px sans-serif';g.textBaseline='bottom';
- const note=`AI ${age}s ago${ai.boxes?.length?'':' · nothing found'}`;const nw=g.measureText(note).width+10;
+ const note=`AI ${live?(live.same?'live':'live · last look'):`${age}s ago`}${ai.boxes?.length?'':' · nothing found'}`;const nw=g.measureText(note).width+10;
  g.fillStyle='rgba(0,0,0,.55)';g.fillRect(ox+w-nw-6,oy+h-22,nw,18);g.fillStyle='#fff';g.fillText(note,ox+w-nw-1,oy+h-8);}
 ['liveImage','stillImage'].forEach(id=>$(id).addEventListener('load',drawAiOverlay));
 window.addEventListener('resize',()=>{if($('detailDialog').open)drawAiOverlay();});
