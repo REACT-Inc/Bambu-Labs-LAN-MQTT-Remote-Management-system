@@ -43,6 +43,7 @@ from pathlib import Path
 
 from failureDetection import print_geometry
 from failureDetection.auto_reprint import AutoReprint
+from failureDetection.bed_model import BedAI, LEARN_DELAY
 from failureDetection.model_updates import ModelUpdates
 from failureDetection.training import TrainingPictures
 
@@ -51,7 +52,7 @@ WORKER = Path(__file__).with_name('hailo_worker.py')
 DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval='auto', window=10,
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
                 geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
-                hold=None, focus=True)
+                hold=None, focus=True, bed_ai={}, bed_model='')
 CAMERAS = 2   # camera pictures fetched at the same time
 START_DELAY = 5   # seconds after start-up before the AI helper is started
 START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
@@ -453,6 +454,8 @@ class HailoBackend:
         self.settings, self.process, self.lock, self.error, self.retry_at = settings, None, asyncio.Lock(), '', 0
         self.stderr, self.drain = deque(maxlen=20), None
         self.active, self.backend_name, self.note = '', '', ''   # model in use, where it runs, why (fallback)
+        self.bed_ready, self.bed_error = False, ''   # the bed check model (bed_model.py), loaded in the same helper
+        self.device = {}   # what the helper reported: {'hailort': '4.20.0', 'chip': 'hailo8'}
 
     def fallback(self):
         """The CPU model to use when the AI HAT model won't start: failure_detection.fallback_model, else a .onnx
@@ -467,7 +470,16 @@ class HailoBackend:
         s = self.settings
         primary = s['model']
         try:
-            ready = await self._spawn(primary)
+            try:
+                ready = await self._spawn(primary)
+            except Exception as exc:
+                if not (s.get('bed_model') and primary.lower().endswith('.hef')):
+                    raise
+                # Never let the bed check model take failure detection down with it: start without it.
+                await self.close()
+                log.warning('AI helper did not start with the bed check model (%s); starting without it', exc)
+                ready = await self._spawn(primary, bed=False)
+                self.bed_error = f'The bed check model stopped the AI helper from starting: {str(exc)[:200]}'
             self.note = ''
         except Exception as exc:
             backup = self.fallback()
@@ -482,14 +494,16 @@ class HailoBackend:
         self.backend_name = 'AI HAT (Hailo-8)' if ready.get('backend') == 'hailo' else 'CPU'
         log.info('AI model ready: %s on %s%s', Path(self.active).name, self.backend_name, ' (fallback)' if self.note else '')
 
-    async def _spawn(self, model):
+    async def _spawn(self, model, bed=True):
         s = self.settings
         if not Path(model).is_file():
             raise RuntimeError(f"Model file not found: {model or '(set failure_detection.model)'}")
         # HailoRT writes hailort.log into its working folder; the app folder is read-only for the service.
         logs = Path(tempfile.gettempdir())
+        bed = (s.get('bed_model') or '') if bed and model.lower().endswith('.hef') else ''   # the bed model needs the AI HAT
         self.process = await asyncio.create_subprocess_exec(
             s['python'], str(WORKER), model, json.dumps(s['classes']), json.dumps(s['labels']), str(s['input_size']),
+            *([bed] if bed else []),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=1024 * 1024,
             cwd=str(logs), env={**os.environ, 'HAILORT_LOGGER_PATH': str(logs)})
         self.stderr = deque(maxlen=20)
@@ -500,7 +514,10 @@ class HailoBackend:
                 await asyncio.wait_for(asyncio.shield(self.drain), 5)
             error = self.stderr[-1] if self.stderr else line.decode(errors='replace')[:200] or 'it exited'
             raise RuntimeError('AI helper did not start: ' + error + self.hint(error))
-        return dict(json.loads(line), model=model)
+        ready = json.loads(line)
+        self.bed_ready, self.bed_error = bool(ready.get('bed')), ready.get('bed_error', '') if bed else ''
+        self.device = {k: ready[k] for k in ('hailort', 'chip') if ready.get(k)}
+        return dict(ready, model=model)
 
     async def warm(self):
         """Start the helper now (at service start) instead of on the first check, so the log says straight away
@@ -556,6 +573,29 @@ class HailoBackend:
                 raise RuntimeError(reply['error'])
             return float(reply.get('score') or 0), reply.get('detections') or []
 
+    async def embed(self, jpeg, crops=None):
+        """Bed check fingerprints (bed_model.py): unit vectors for the picture and each crop."""
+        async with self.lock:
+            if not self.bed_ready or self.process is None or self.process.returncode is not None:
+                raise RuntimeError(self.bed_error or 'The bed check model is not loaded.')
+            try:
+                self.process.stdin.write((json.dumps({'embed': base64.b64encode(jpeg).decode(), 'crops': crops or []}) + '\n').encode())
+                await self.process.stdin.drain()
+                reply = json.loads(await asyncio.wait_for(self.process.stdout.readline(), 30))
+            except Exception as exc:
+                await self.close()
+                raise RuntimeError(f'AI helper stopped ({type(exc).__name__})') from exc
+            if 'error' in reply:
+                raise RuntimeError(reply['error'])
+            return reply['vectors']
+
+    async def restart(self):
+        """Load the models again (a bed check model was just downloaded): the next check starts the helper."""
+        async with self.lock:
+            await self.close()
+            self.retry_at = 0
+        await self.warm()
+
     async def close(self):
         if self.process and self.process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
@@ -585,6 +625,7 @@ class FailureMonitor:
         self.models = ModelUpdates(core, self, clock=clock)
         self.training = TrainingPictures(core, self.settings['collect'], clock=clock)
         self.focus = Focus(clock)
+        self.bed = self.reprints.bed_ai = BedAI(core, self, clock=clock)   # is the bed empty? (bed_model.py)
         if self.settings['enabled']:
             self.models.apply_saved()   # a model an automatic update switched to last time
 
@@ -695,7 +736,7 @@ class FailureMonitor:
         return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name), 'reprint': self.reprints.state(name),
                 'model': Path(self.settings['model']).name, 'model_update': self.models.message,
                 'interval': round(self.throttle.current, 1), 'interval_reason': self.throttle.reason,
-                'tuning': self.tuning_state(name), 'focus': self.focus.describe(name),
+                'tuning': self.tuning_state(name), 'focus': self.focus.describe(name), 'bed': self.bed.state(name),
                 **(self.backend.describe() if hasattr(self.backend, 'describe') else {})}
 
     def _set(self, name, **values):
@@ -948,6 +989,7 @@ class FailureMonitor:
                         log.error('Failure detection error for %s', name, exc_info=result)
                 await self.reprints.tick()
                 await self.models.check()   # once a day: a newer model from the ai-model release
+                await self.bed.tick()   # the bed check AI: downloaded and kept matching HailoRT, in the background
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -959,9 +1001,30 @@ class FailureMonitor:
 
     async def start(self, app=None):
         if self.enabled and not getattr(self.core, 'EXAMPLE_MODE', False):
-            if self.reprints.settings['enabled']:
-                self.engine.on_start_approved = self.reprints.capture_reference
+            self.engine.on_start_approved = self.start_approved
+            self.engine.on_job_end = self.job_ended
+            self.engine.bed_check = self.bed_gate
             self.task = asyncio.create_task(self.begin())
+
+    async def start_approved(self, job, author=''):
+        """A queue job is starting: the plate was just cleared, so its picture is an empty bed (the auto-reprint
+        reference, and an "empty" example for the bed check AI). Not for a Swapmod swap print (the finished part is
+        still on the bed) or an AI reprint (nobody looked)."""
+        if (job.get('options') or {}).get('swap') or author == 'AI auto reprint':
+            return
+        if self.reprints.settings['enabled']:
+            await self.reprints.capture_reference(job, author)
+        await self.bed.learn(job['printer'], 'empty', 'print started')
+
+    async def job_ended(self, name, job, state):
+        """A queue job finished: its part is on the bed, which teaches the bed check AI what "not clear" looks like."""
+        if state == 'FINISH' and not (job.get('options') or {}).get('swap'):
+            await self.bed.learn(name, 'parts', 'print finished', delay=LEARN_DELAY,
+                                 still=lambda: self.core.state_data(name)[0] == 'FINISH')
+
+    async def bed_gate(self, name):
+        """Before Swapmod starts the next job: what the bed check AI makes of the bed ('unknown' when it can't tell)."""
+        return await self.bed.check(name)
 
     async def begin(self, delay=START_DELAY):
         """Load the model (logging where it runs), then watch. Waits a few seconds first, so the AI helper is never

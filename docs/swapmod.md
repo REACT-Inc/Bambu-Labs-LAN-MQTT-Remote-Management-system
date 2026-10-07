@@ -17,7 +17,7 @@ That's all. The app doesn't count plates or approve batches.
 
 1. You start a job from the queue as usual.
 2. When the print **finishes**, the app starts the swap print. It's a normal queue job, uploaded and started the same way as any other.
-3. When the swap print finishes, the **next waiting job** for that printer starts on its own. If nothing is waiting, you're told the fresh plate is ready.
+3. When the swap print finishes, the **next waiting job** for that printer starts on its own. If nothing is waiting, you're told the fresh plate is ready. With the AI HAT, the [bed check AI](../failureDetection/FAILURE_DETECTION.md#bed-check-ai-is-the-bed-empty) looks first: if it's sure parts are still on the plate, the next job waits and you're told.
 4. After a **failed** print it doesn't swap on its own, because the cause (a clog, a run-out) would just repeat. You're told, and **Swap plate now** runs the swap whenever you want.
 5. If the swap print itself fails, the queue stops and you're told.
 

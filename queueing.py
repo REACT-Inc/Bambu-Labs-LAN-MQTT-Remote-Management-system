@@ -359,6 +359,9 @@ class Engine:
             self.store.set_status(job['id'], 'paused', 'Printer paused; queue is held.')
         elif state in ('FINISH','FAILED') and job['seen_running']:
             self.store.set_status(job['id'], 'finished' if state=='FINISH' else 'failed')
+            hook = getattr(self, 'on_job_end', None)   # AI: a finished print's part teaches the bed check (bed_model.py)
+            if hook:
+                self.spawn(hook(printer, job, state))
             swapping = self.plate_swap.state(printer)['ready']
             if not job['options'].get('swap'):
                 message = '. Swapping the plate…' if swapping and state=='FINISH' else '' if swapping else '. Clear the plate before starting the next job.'

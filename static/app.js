@@ -48,7 +48,28 @@ function pendingClass(action,p){return isPending(action+'|'+p.name,p)?' pending'
 function confirmPause(name){confirmAction('Pause this print?',printerLabel(name)+' — the print pauses until you resume it.','I want to pause this print.',()=>printAction(name,'pause'));}
 function confirmStop(name){confirmAction('Stop this print?',printerLabel(name)+' — this cancels the current job.','I want to cancel this print.',()=>printAction(name,'stop',{confirmed:true}));}
 function actionButton(action,label,extra='',cls=''){return `<button class="${cls}" data-action="${action}" ${extra}>${label}</button>`;}
-function render(){if($('jobDialog').open)renderPrintNowOverride();
+// ---- The status icon (top left): updates, AI model setup, problems and the notifications sent (status_center.py) ----
+let statusSeen=0;try{statusSeen=Number(localStorage.getItem('statusSeen'))||0;}catch{}
+const STATUS_WORDS={ok:'All good',busy:'Working on something',warn:'Needs a look',error:'Something went wrong'};
+function ago(at){const s=Math.max(0,Math.round(Date.now()/1000-at));return s<60?'just now':s<3600?Math.round(s/60)+' min ago':s<86400?Math.round(s/3600)+' h ago':new Date(at*1000).toLocaleDateString();}
+function renderStatus(){const s=state?.status;if(!s)return;
+ const unread=s.notifications.filter(n=>n.id>statusSeen).length,worst=unread&&s.level==='ok'?'info':s.level;
+ $('statusDot').className='status-dot '+worst;
+ $('statusCount').hidden=!unread;$('statusCount').textContent=unread>9?'9+':String(unread);
+ $('statusButton').title=`${STATUS_WORDS[s.level]||'Status'}${unread?` · ${unread} new notification${unread>1?'s':''}`:''}`;
+ $('statusButton').setAttribute('aria-label',$('statusButton').title);
+ if($('statusPanel').hidden)return;
+ $('statusSummary').textContent=STATUS_WORDS[s.level]||'';
+ $('statusItems').innerHTML=s.items.map(i=>`<li class="status-item ${esc(i.level)}"><span class="status-dot ${esc(i.level)}"></span><div><strong>${esc(i.title)}</strong>${i.detail?`<small>${esc(i.detail)}</small>`:''}${i.progress!=null?`<div class="progress"><progress max="1" value="${Number(i.progress)}"></progress></div><small>${Math.round(i.progress*100)}%</small>`:''}</div></li>`).join('')||'<li class="muted">Nothing to report.</li>';
+ $('statusNotes').innerHTML=s.notifications.map(n=>`<li class="status-item ${esc(n.level)}${n.id>statusSeen?' unread':''}"><span class="status-dot ${esc(n.level)}"></span><div><strong>${esc(n.title)}</strong><small>${esc(printerLabel(n.printer)||'')}${n.printer?' · ':''}${ago(n.at)}</small>${n.detail?`<small>${esc(n.detail)}</small>`:''}</div></li>`).join('')||'<li class="muted">No notifications yet. Print results, printer errors and AI alerts appear here.</li>';}
+function markStatusRead(){statusSeen=state?.status?.latest||statusSeen;try{localStorage.setItem('statusSeen',String(statusSeen));}catch{}}
+function toggleStatus(open=$('statusPanel').hidden){$('statusPanel').hidden=!open;$('statusButton').setAttribute('aria-expanded',String(open));
+ if(open)renderStatus();else{markStatusRead();renderStatus();}}
+$('statusButton').addEventListener('click',e=>{e.stopPropagation();toggleStatus();});
+$('statusRead').addEventListener('click',()=>{markStatusRead();renderStatus();});
+document.addEventListener('click',e=>{if(!$('statusPanel').hidden&&!$('statusPanel').contains(e.target))toggleStatus(false);});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('statusPanel').hidden){toggleStatus(false);$('statusButton').focus();}});
+function render(){if($('jobDialog').open)renderPrintNowOverride();renderStatus();
  const p=state.printers,j=state.jobs;
  $('printerSubtitle').textContent=state.demo?'Demo data. No real printers are controlled.':'Live telemetry. Shared control with Discord.';
  $('mode').textContent=state.demo?'DEMO MODE':'LIVE';$('mode').classList.toggle('demo',state.demo);

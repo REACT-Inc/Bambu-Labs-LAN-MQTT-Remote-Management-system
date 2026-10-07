@@ -13,6 +13,21 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
 - [Server](#server)
 - [Settings & help](#settings--help)
 
+## Status icon
+
+The **3D** icon at the top left is the dashboard's status and notification icon.
+
+- **Its dot** shows the worst current state:
+  - **green:** all good;
+  - **blue, pulsing:** something is working, such as an update installing or an AI model downloading;
+  - **yellow:** something needs a look, such as a printer error, Discord offline, or an AI model that couldn't be set up;
+  - **red:** something failed, such as the last update.
+- **The red number** counts notifications you haven't seen yet.
+- **Click it** to open the panel:
+  - **Status:** the version, an available or installing update, AI model setup with its progress, the AI helper, printers reporting errors and Discord, worst first.
+  - **Notifications:** the last 50 alerts the app sent, the same ones Discord gets (print started, finished or failed, printer errors, AI alerts…), so they're visible without Discord too. Print progress keeps only the latest one per printer.
+- **Closing the panel,** or **Mark all read**, marks them as seen in this browser.
+
 ## Overview
 
 - **Summary tiles:** printers online, printing now, jobs waiting, and items needing attention (offline printers, printer errors, jobs needing review).

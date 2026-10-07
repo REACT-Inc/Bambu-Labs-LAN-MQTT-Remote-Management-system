@@ -2,6 +2,19 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.6)
+
+### Added
+- **Bed check AI: is the bed empty?** A second AI model on the AI HAT, next to the failure model. See [Bed check AI](failureDetection/FAILURE_DETECTION.md#bed-check-ai-is-the-bed-empty).
+  - **Automatic setup:** the Pi downloads Hailo's precompiled CLIP model from the Hailo Model Zoo, built for its chip (Hailo-8 / Hailo-8L) and HailoRT version, in the background on first start. It downloads again after a HailoRT update. The Pi can't build a .hef itself: Hailo's compiler only runs on x86 PCs.
+  - **Learns each printer's bed by itself:** pictures of the empty bed when a queue job starts, of the bed with parts when a print finishes, and your **It's clear** / **Not clear** answers in the printer panel's new **Bed check**.
+  - **Used by Swapmod:** the next print isn't started when the AI is sure the swap left parts on the plate. **Automatic reprint** asks it first. When it's unsure, the picture comparison decides as before.
+  - **Safe:** failure detection keeps working if the bed model can't load.
+- **Status icon at the top left.** The **3D** icon shows what the Pi is doing and what needs a look (an update installing or available, an AI model downloading with its progress, printer errors, Discord offline). It also lists the last 50 notifications, with an unread count. See [Status icon](docs/dashboard.md#status-icon).
+
+### Fixed
+- **The empty-bed picture for automatic reprints could show the finished part.** Since confirmations were removed in 1.7.5 it was taken at every start, including Swapmod's swap print, which starts with the finished part still on the bed. Swap prints are now skipped.
+
 ## 1.7.5-beta.1
 
 Built on 1.7.4-beta.1. Clear printer errors, the pm-doctor watchdog, alerts to Home Assistant / ntfy / webhooks, the reworked Swapmod, no confirmation screens, readable printer states and many fixes.

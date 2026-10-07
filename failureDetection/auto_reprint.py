@@ -46,6 +46,7 @@ class AutoReprint:
         data = Path(getattr(core, 'DATA_DIR', tempfile.gettempdir()))
         self.beds, self.path = data / 'beds', data / 'ai-reprints.json'
         self.bed_cache, self.lock, self.last = {}, asyncio.Lock(), {}   # last: printer -> (time, availability summary)
+        self.bed_ai = None   # the bed check AI (bed_model.py); asked first when it's ready
         try:
             self.pending = json.loads(self.path.read_text())   # job id -> {printer, since, label, note}
         except (OSError, ValueError):
@@ -58,8 +59,8 @@ class AutoReprint:
 
     async def capture_reference(self, job, author=''):
         """Called when a print start is approved with "the plate is clear": take a fresh picture of the empty bed."""
-        if author == AUTHOR or getattr(self.core, 'EXAMPLE_MODE', False):
-            return
+        if author == AUTHOR or (job.get('options') or {}).get('swap') or getattr(self.core, 'EXAMPLE_MODE', False):
+            return   # a Swapmod swap print starts with the finished part still on the bed
         name = job['printer']
         if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
             return
@@ -88,8 +89,14 @@ class AutoReprint:
     async def _check_bed(self, name):
         if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
             return dict(state='unknown', detail='no camera')
+        note = ''
+        if self.bed_ai and self.bed_ai.ready:   # the bed check AI first; when it's unsure, the picture comparison
+            result = await self.bed_ai.check(name)
+            if result['state'] != 'unknown':
+                return dict(state=result['state'], detail='AI: ' + result['detail'], by='ai')
+            note = f" (AI {result['detail']})"
         if not self.reference(name).is_file():
-            return dict(state='unknown', detail='no empty-bed picture yet (taken at the next confirmed print start)')
+            return dict(state='unknown', detail='no empty-bed picture yet (taken at the next print start)' + note)
         try:
             picture = await self.core.capture_still(name, 20)
         except Exception as exc:
@@ -114,7 +121,7 @@ class AutoReprint:
             return dict(state='unknown', detail=result['error'][:200] + hint)
         percent = result['changed'] * 100
         return dict(state='clear' if result['clear'] else 'parts',
-                    detail=f'{percent:.1f}% of the bed differs from the empty-bed picture')
+                    detail=f'{percent:.1f}% of the bed differs from the empty-bed picture' + note, by='picture')
 
     # ---- which printers can take the job ----
 
