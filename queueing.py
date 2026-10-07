@@ -359,9 +359,12 @@ class Engine:
             self.store.set_status(job['id'], 'paused', 'Printer paused; queue is held.')
         elif state in ('FINISH','FAILED') and job['seen_running']:
             self.store.set_status(job['id'], 'finished' if state=='FINISH' else 'failed')
-            self.plate_swap.invalidate(printer)
-            message = '. Swaplist batch ended. Check the magazine and starting setup with /plateswap check before starting another batch.' if self.plate_swap.state(printer)['enabled'] else '. Clear the plate before starting the next job.'
-            await self.core.notify(printer, '📋 Queue updated', job['label']+' • '+state.lower()+message, self.core.GREEN if state=='FINISH' else self.core.RED)
+            swapping = self.plate_swap.state(printer)['ready']
+            if not job['options'].get('swap'):
+                message = '. Swapping the plate…' if swapping and state=='FINISH' else '' if swapping else '. Clear the plate before starting the next job.'
+                await self.core.notify(printer, '📋 Queue updated', job['label']+' • '+state.lower()+message, self.core.GREEN if state=='FINISH' else self.core.RED)
+            if swapping:   # Swapmod: swap the plate after a finished print, then start the next job (swapMod/plate_swap.py)
+                self.spawn(self.plate_swap.after(self, printer, job, state))
         elif state == 'IDLE' and job['seen_running']:
             self.store.set_status(job['id'], 'needs_review', 'Print became idle without a confirmed outcome.')
 

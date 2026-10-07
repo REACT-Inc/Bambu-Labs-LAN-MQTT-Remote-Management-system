@@ -46,6 +46,13 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 - **Cancel object did nothing for prints started from Bambu Studio, Handy or the printer.** The section only appeared for prints started from this app. Now the print file is copied from the printer's storage once per print, and its objects can be cancelled. Prints sent from the cloud keep their file internally, which the app says.
 - **AI boxes on the live camera** now also show while the printer isn't printing: the AI looks at the live view while it's open (display only, never judged or paused on).
 
+### Changed
+- **Swapmod reworked: it runs your swap print and keeps the queue going.**
+  - **Settings:** per printer there's only **on/off** and the **swap print file** (the sliced `.3mf` that swaps the plate). Plate counts, Swaplist batch approvals and starting-setup checks are gone.
+  - **Finished print:** the swap print starts as a normal queue job, then the next waiting job starts on its own.
+  - **Failed print:** it doesn't swap automatically, so the cause doesn't repeat. **Swap plate now** in the printer panel, or `/plateswap now`, runs the swap any time.
+  - **Discord:** the commands are `/plateswap set` and `/plateswap now`.
+
 ## Unreleased (1.7.5)
 
 ### Changed

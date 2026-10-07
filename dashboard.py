@@ -417,9 +417,7 @@ class Dashboard:
 
     async def job_action(self,request):
         data=await request.json();job_id=request.match_info['id'];action=request.match_info['action']
-        if action=='swapapprove':
-            self.engine.plate_swap.approve_job(job_id,data.get('confirmed'),'web administrator',data.get('plates'))
-        elif action=='start':
+        if action=='start':
             await self.engine.start(job_id,data.get('confirmed'),'web administrator',data.get('override_error',False))
         elif action=='resolve':
             self.engine.resolve(job_id,data.get('outcome'),data.get('confirmed'),'web administrator')
@@ -462,13 +460,22 @@ class Dashboard:
     async def plate_swap(self,request):
         name=request.match_info['name'];action=request.match_info['action'];data=await request.json()
         if name not in self.core.names():raise ValueError('Unknown printer.')
-        if action=='configure':
-            self.engine.plate_swap.configure(name,data.get('enabled'),data.get('model',''),data.get('spares'),data.get('confirmed'),'web administrator')
-        elif action=='check':
-            self.engine.ready(name)
-            self.engine.plate_swap.verify(name,data.get('confirmed'),'web administrator')
-        else:raise ValueError('Unknown plate-swap action.')
-        return web.json_response({'ok':True})
+        swap=self.engine.plate_swap
+        if action=='configure':   # Swapmod on/off
+            return web.json_response(swap.configure(name,data.get('enabled'),'web administrator'))
+        if action=='file':        # the swap print file: an upload from /api/upload
+            asset=str(data.get('asset',''))
+            if not __import__('re').fullmatch('[0-9a-f]{32}',asset): raise ValueError('Upload the swap print file first.')
+            path=self.uploads/(asset+'.3mf')
+            if not path.is_file(): raise ValueError('Upload not found.')
+            plate=int(data.get('plate') or 1);validate_archive(str(path),plate)
+            try:label=path.with_suffix('.name').read_text().strip()
+            except OSError:label='plate-swap.gcode.3mf'
+            return web.json_response(swap.set_file(name,path,label,plate,'web administrator'))
+        if action=='now':         # Swap plate now
+            job=await swap.swap_now(self.engine,name,'web administrator')
+            return web.json_response({'ok':True,'job':job['id'],**swap.state(name)})
+        raise ValueError('Unknown Swapmod action.')
 
     async def camera(self,request):
         name=request.match_info['name']

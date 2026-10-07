@@ -251,9 +251,12 @@ $('detailDialog').addEventListener('close',()=>{editingTile=null;$('tempTiles').
 // The play button shows whenever live view isn't running, however it stopped.
 setInterval(()=>{$('cameraPlaceholder').hidden=!!livePrinter;$('stopLive').hidden=!livePrinter;},300);
 
-function loadSwapSettings(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap||{};$('swapEnabled').checked=!!cfg.enabled;$('swapModel').value=cfg.model||'A1 mini';$('swapSpares').value=cfg.spares||0;renderSwapStatus();renderAiStatus();}
-// Swapmod is only offered for A-series printers (A1 / A1 mini) (#17).
-function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;$('swapStatus').textContent=cfg?.enabled?`${cfg.model} kit enabled · ${cfg.spares} estimated magazine plates · ${cfg.verified?'Starting setup checked':'Starting setup check needed'}`:'Disabled for this printer — manual queue workflow.';}
+function loadSwapSettings(){renderSwapStatus();renderAiStatus();}
+// Swapmod (A1 / A1 mini): on/off and the swap print file; it swaps after each finished print and starts the next job.
+function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;if(!cfg?.available)return;
+ if(document.activeElement!==$('swapEnabled'))$('swapEnabled').checked=!!cfg.enabled;
+ $('swapStatus').textContent=!cfg.file?'Choose the swap print file to use Swapmod.':cfg.enabled?`On: after each finished print it runs “${cfg.file}” (plate ${cfg.plate}), then starts the next queued job.`:`Off. Swap print: “${cfg.file}” (plate ${cfg.plate}).`;
+ $('swapNow').disabled=!cfg.file;}
 function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;if(aiTestFor&&aiTestFor!==selectedPrinter){$('aiTestResult').hidden=true;aiTestFor='';}loadTraining(false);
  if(document.activeElement!==$('aiWatch'))$('aiWatch').checked=!!ai.watching;
  $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (alert only: tick "Pause the print when a failure is found" below to pause too)';
@@ -371,12 +374,16 @@ $('aiCheck').addEventListener('click',e=>{const ai=state?.printers.find(p=>p.nam
  else aiCheckNow(e.target);});
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
-$('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};
-$('swapChecked').onclick=()=>{const name=selectedPrinter;confirmAction('Swapmod starting setup checked?',printerLabel(name)+' — this records your inspection; no swap movement is sent.','I checked the starting setup against Swaplist instructions, loaded the required magazine plates and cleared the ejection path.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/check',{confirmed:true});notice('Setup checked. Start the approved Swaplist batch when ready.');});};
-
-let swapApprovalJob=null;
-function openSwapApproval(id){const j=state.jobs.find(x=>x.id===id);swapApprovalJob=id;$('swapApproveText').textContent=j.label+' — '+printerLabel(j.printer);$('swapBatchPlates').value=j.options.swap_plates||1;$('swapBatchConfirm').checked=false;$('swapApproveDialog').showModal();}
-$('swapApproveForm').onsubmit=async e=>{e.preventDefault();try{await api('jobs/'+swapApprovalJob+'/swapapprove',{confirmed:$('swapBatchConfirm').checked,plates:Number($('swapBatchPlates').value)});$('swapApproveDialog').close();notice('Swaplist batch approved.');await refresh();}catch(e){notice(e.message);}};
+async function swapAction(action,body){const r=await api('plateswap/'+encodeURIComponent(selectedPrinter)+'/'+action,body||{});await refresh();return r;}
+$('swapEnabled').addEventListener('change',async e=>{const on=e.target.checked;try{await swapAction('configure',{enabled:on});notice(`Swapmod ${on?'on':'off'} for ${printerLabel(selectedPrinter)}.`);}catch(err){e.target.checked=!on;notice(err.message);}});
+let swapUpload=null;
+async function saveSwapFile(){try{const r=await swapAction('file',{asset:swapUpload.asset,plate:Number($('swapPlate').value||1)});notice(`Swap print file saved: ${r.file} (plate ${r.plate}).`);}catch(err){notice(err.message);}}
+$('swapFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;notice('Checking the swap print file…');
+ try{const form=new FormData();form.append('file',f);swapUpload=await api('upload',form);const plates=(swapUpload.plates||[]).filter(p=>p.sliced);
+  $('swapPlate').innerHTML=plates.map(p=>`<option value="${p.index}">${esc(p.name||'Plate '+p.index)}</option>`).join('');$('swapPlateRow').hidden=plates.length<2;
+  await saveSwapFile();}catch(err){notice(err.message);}finally{e.target.value='';}});
+$('swapPlate').addEventListener('change',()=>{if(swapUpload)saveSwapFile();});
+$('swapNow').addEventListener('click',async e=>{e.target.disabled=true;try{await swapAction('now');notice(`Swapping the plate on ${printerLabel(selectedPrinter)}.`);}catch(err){notice(err.message);}finally{e.target.disabled=false;}});
 // Cancel single objects mid-print, like Bambu Studio / Handy. Loaded when the panel opens and every 10 s while printing.
 let objectsFor='',objectsData=null;
 async function loadObjects(force){const p=devPrinter();if(!p||!$('detailDialog').open)return;const active=['RUNNING','PAUSE'].includes(p.state);

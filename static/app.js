@@ -73,7 +73,7 @@ function render(){if($('jobDialog').open)renderPrintNowOverride();
 function renderJobs(){
  if(!state)return;const filter=$('queueFilter').value,jobs=state.jobs.filter(j=>!filter||j.printer===filter);
  const row=j=>{const q=`data-job="${esc(j.id)}"`;let buttons='';
-  if(j.status==='queued'){if(state.printers.find(p=>p.name===j.printer)?.plate_swap?.enabled)buttons+=actionButton('swapapprove','Approve Swaplist batch…',q);const first=state.jobs.find(x=>x.printer===j.printer&&x.status==='queued');if(first?.id===j.id)buttons+=printerError(j.printer)?actionButton('start','Start next (printer reports an error)…',q,'danger'):actionButton('start','Start next',q,'primary');buttons+=actionButton('up','↑',q)+actionButton('down','↓',q)+actionButton('remove','Remove',q);}
+  if(j.status==='queued'){const first=state.jobs.find(x=>x.printer===j.printer&&x.status==='queued');if(first?.id===j.id)buttons+=printerError(j.printer)?actionButton('start','Start next (printer reports an error)…',q,'danger'):actionButton('start','Start next',q,'primary');buttons+=actionButton('up','↑',q)+actionButton('down','↓',q)+actionButton('remove','Remove',q);}
   if(j.status==='needs_review')buttons+=['finished','failed','cancelled'].map(o=>actionButton('resolve','Mark '+o,`${q} data-outcome="${o}"`)).join('');
   if(terminal.has(j.status))buttons+=actionButton('reprint','Queue again',q);
   if(terminal.has(j.status)&&state.printers.length>1)buttons+=actionButton('sendto','Print on another printer…',q);
@@ -204,7 +204,6 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  if(action==='resume'){await printAction(printer,'resume');return;}
  if(action==='stop'){confirmStop(printer);return;}
  if(action==='clearerrors'){confirmClearAlerts(printer,'all');return;}
- if(action==='swapapprove'){openSwapApproval(job);return;}
  if(action==='sendto'){openSendTo(job);return;}
  if(action==='start'){const j=state.jobs.find(x=>x.id===job),bad=printerError(j.printer);
   if(bad){confirmAction('Start next, ignoring the reported error?',`${j.label} on ${printerLabel(j.printer)}. The printer reports ${errorText(bad)}. This bypasses the management error check for this start and allows a FAILED state. It does not clear the printer error or override firmware protections.`,'I inspected the printer, cleared the plate, and verified the material and sliced file. Start despite the reported error.',()=>api('jobs/'+job+'/start',{confirmed:true,override_error:true}));return;}confirmAction('Start next print?',`${j.label} on ${printerLabel(j.printer)}. Plate ${j.options.plate}. ${j.options.use_ams?'AMS mapping: '+j.options.ams_mapping.join(', '):'External spool'}.`,'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',()=>api('jobs/'+job+'/start',{confirmed:true}));return;}
