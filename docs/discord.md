@@ -97,9 +97,8 @@ Limits and safety rules: [Printer controls](printer-controls.md).
 
 | Command | Who | What it does |
 |---|---|---|
-| `/plateswap configure name enabled model? spares?` | A | Turn the kit on/off for a printer and set the magazine plate count |
-| `/plateswap approve job_id plates` | A | Approve a Swaplist batch and the total plates it needs |
-| `/plateswap check name` | A | Record that the starting setup was checked |
+| `/plateswap set name enabled` | A | Turn Swapmod on or off for a printer |
+| `/plateswap now name` | A | Swap the plate now by running the swap print |
 
 Details: [Swapmod](swapmod.md).
 

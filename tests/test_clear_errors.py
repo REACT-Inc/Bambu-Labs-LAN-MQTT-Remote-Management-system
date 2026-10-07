@@ -64,8 +64,8 @@ class AlertTests(unittest.IsolatedAsyncioTestCase):
                          {'command':'uiop','name':'print_error','action':'close','source':1,'type':'dialog','err':'0C008001'})
         self.assertEqual(result['cleared'],['error:0C008001']);self.assertEqual(result['still'],[])
         self.assertIn('Cleared',result['message'])
-        title,detail=self.store.event.call_args.args[1:]
-        self.assertEqual(title,'Printer error cleared');self.assertIn('0C008001',detail);self.assertIn('Ana',detail)
+        events={c.args[1]:c.args[2] for c in self.store.event.call_args_list}
+        self.assertIn('0C008001',events['Printer error cleared']);self.assertIn('Ana',events['Printer error cleared'])
 
     async def test_an_error_whose_cause_remains_is_reported_honestly(self):
         alerts=self.make(clears=False)
@@ -73,6 +73,14 @@ class AlertTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['still'],['error:0C008001']);self.assertNotIn('Cleared',result['message'])
         self.assertIn('still reports 0C008001',result['message']);self.assertGreaterEqual(self.clock.now,5)   # waited for reports
         self.assertEqual(self.store.event.call_args.args[1],'Printer still reports error')
+
+    async def test_failed_without_an_error_is_simply_ready(self):
+        from queueing import Engine
+        alerts=self.make(error=0)                               # FAILED after a cancelled print: idle and ready
+        self.assertEqual(alerts.current('H2D'),[])              # nothing to clear
+        engine=Engine.__new__(Engine);engine.core=SimpleNamespace(update_pending=lambda:False,state_data=self.core.state_data,
+                                                                    EXAMPLE_MODE=True,last_seen={});engine.alerts=alerts
+        engine.ready('H2D')
 
     async def test_confirmation_is_required(self):
         alerts=self.make()
@@ -106,7 +114,7 @@ class AlertTests(unittest.IsolatedAsyncioTestCase):
         alerts=self.make()
         engine=Engine.__new__(Engine);engine.core=SimpleNamespace(update_pending=lambda:False,state_data=self.core.state_data,
                                                                     EXAMPLE_MODE=True,last_seen={});engine.alerts=alerts
-        with self.assertRaisesRegex(ValueError,'reports FAILED'):engine.ready('H2D')
+        with self.assertRaisesRegex(ValueError,'reports error'):engine.ready('H2D')   # FAILED with an error code
         await alerts.clear('H2D','all',True)
         engine.ready('H2D')   # no "Start ignoring error" needed any more
 

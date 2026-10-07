@@ -141,7 +141,7 @@ function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringi
   box.innerHTML=steps.xy.map(s=>`<button type="button" data-step="${s}">${s} mm</button>`).join('');}
  box.querySelectorAll('button').forEach(b=>b.classList.toggle('active',Number(b.dataset.step)===jogStep));
  const zStep=steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1];if(Date.now()>=jogReadyAt)$('jogCenter').textContent=jogStep+' mm';$('jogZStep').textContent='Z '+zStep+' mm';
- const idle=['IDLE','FINISH'].includes(p.state)&&p.connected&&!p.error,armed=$('jogArm').checked;
+ const idle=['IDLE','FINISH','FAILED'].includes(p.state)&&p.connected&&!p.error,armed=true;   // no "unlock" box any more
  const cooling=Date.now()<jogReadyAt,notHomed=unhomed(p.data||{});
  document.querySelectorAll('#jogPad button,#jogZ button').forEach(b=>b.disabled=!armed||!idle||jogBusy||cooling||notHomed.includes(b.dataset.axis));
  // Homing doesn't need the "already homed" checkbox, only an idle printer.
@@ -149,9 +149,8 @@ function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringi
  if(Date.now()<jogNote.until)$('jogStatus').textContent=jogNote.text;
  else if(!idle)$('jogStatus').textContent='Movement is only available while the printer is idle, connected and error-free.';
  else if(notHomed.length)$('jogStatus').textContent=`The printer reports ${notHomed.join(', ')} not homed, so it would ignore those moves. Press Home first.`;
- else if(!armed)$('jogStatus').textContent='Tick the box above to unlock the movement buttons. Directions follow printer coordinates.';}
+ else $('jogStatus').textContent='Directions follow printer coordinates.';}
 $('jogSteps').addEventListener('click',e=>{const b=e.target.closest('[data-step]');if(!b)return;jogStep=Number(b.dataset.step);renderJog(devPrinter());});
-$('jogArm').onchange=()=>{clearTimeout(jogArmTimer);if($('jogArm').checked){jogArmTimer=setTimeout(()=>{$('jogArm').checked=false;renderJog(devPrinter());},5*60*1000);$('jogStatus').textContent='Unlocked for 5 minutes or until this panel closes.';}renderJog(devPrinter());};
 async function jog(axis,dir,button){button?.classList.add('pending');try{await jogMove(axis,dir);}finally{button?.classList.remove('pending');}}
 async function jogMove(axis,dir){const p=devPrinter(),steps=jogSteps(p),step=axis==='Z'?(steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1]):jogStep,value=dir*step;
  jogBusy=true;renderJog(p);$('jogStatus').textContent=`Moving ${axis} ${value>0?'+':''}${value} mm…`;
@@ -228,7 +227,7 @@ $('nozzleForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,diame
 function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},progress=Math.max(0,Math.min(100,num(d.mc_percent)||0)),active=['RUNNING','PAUSE','PREPARE'].includes(p.state);
  $('detailTitle').textContent=p.display_name||p.name;$('detailModel').textContent=((p.limits||{}).chamber?'H2D · ':'')+(p.connected?'ONLINE':'OFFLINE');
  $('detailSeen').textContent=p.last_seen?'Last report '+new Date(p.last_seen*1000).toLocaleTimeString():'No report yet';
- const st=$('detailState');st.textContent=p.connected?p.state:'OFFLINE';st.className='state '+statusClass(p.state,p.connected);
+ const st=$('detailState');st.textContent=printerStateText(p);st.title='Printer reports '+(p.state||'nothing yet');st.className='state '+printerClass(p);
  $('detailFile').textContent=active?(d.subtask_name||'Unknown file'):(p.connected?'Ready for the next job':'Printer offline');
  $('detailFileLabel').textContent=active?(p.state==='PAUSE'?'PAUSED':'NOW PRINTING'):(p.state==='FINISH'?'FINISHED':'STATUS');
  document.querySelector('#detailDialog .now-card').classList.toggle('idle',!active);
@@ -248,16 +247,20 @@ document.querySelector('#detailDialog .now-actions').addEventListener('click',as
  const target=action;
  b.disabled=true;try{await api('printers/'+encodeURIComponent(name)+'/'+target,{});notice('Command submitted. Waiting for printer telemetry.');await refresh();pollSoon();}catch(err){notice(err.message);}finally{b.disabled=false;}});
 $('devFiles').onclick=()=>downloadFileListing(selectedPrinter,$('devFiles'));
-$('detailDialog').addEventListener('close',()=>{$('jogArm').checked=false;clearTimeout(jogArmTimer);editingTile=null;$('tempTiles').dataset.printer='';});
+$('detailDialog').addEventListener('close',()=>{editingTile=null;$('tempTiles').dataset.printer='';});
 // The play button shows whenever live view isn't running, however it stopped.
 setInterval(()=>{$('cameraPlaceholder').hidden=!!livePrinter;$('stopLive').hidden=!livePrinter;},300);
 
-function loadSwapSettings(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap||{};$('swapEnabled').checked=!!cfg.enabled;$('swapModel').value=cfg.model||'A1 mini';$('swapSpares').value=cfg.spares||0;renderSwapStatus();renderAiStatus();}
-// Swapmod is only offered for A-series printers (A1 / A1 mini) (#17).
-function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;$('swapStatus').textContent=cfg?.enabled?`${cfg.model} kit enabled · ${cfg.spares} estimated magazine plates · ${cfg.verified?'Starting setup checked':'Starting setup check needed'}`:'Disabled for this printer — manual queue workflow.';}
+function loadSwapSettings(){renderSwapStatus();renderAiStatus();}
+// Swapmod (A1 / A1 mini): on/off and the swap print file; it swaps after each finished print and starts the next job.
+function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;if(!cfg?.available)return;
+ if(document.activeElement!==$('swapEnabled'))$('swapEnabled').checked=!!cfg.enabled;
+ $('swapStatus').textContent=!cfg.file?'Choose the swap print file to use Swapmod.':cfg.enabled?`On: after each finished print it runs “${cfg.file}” (plate ${cfg.plate}), then starts the next queued job.`:`Off. Swap print: “${cfg.file}” (plate ${cfg.plate}).`;
+ $('swapNow').disabled=!cfg.file;}
 function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;if(aiTestFor&&aiTestFor!==selectedPrinter){$('aiTestResult').hidden=true;aiTestFor='';}loadTraining(false);
  if(document.activeElement!==$('aiWatch'))$('aiWatch').checked=!!ai.watching;
- $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (it never pauses on its own; set "action": "pause" to allow that)';
+ $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (alert only: tick "Pause the print when a failure is found" below to pause too)';
+ if(document.activeElement!==$('aiPauseOn'))$('aiPauseOn').checked=ai.action==='pause';
  const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI unavailable'}[ai.status]||ai.status;
  const g=ai.geometry||{};$('aiGeometry').textContent=!g.enabled?'Print-file comparison is off.':(g.calibrated?'📐 Camera calibrated to the bed. ':'📐 Not calibrated: calibrate the camera to compare detections with the print file. ')+(g.message||'');
  $('aiCalibrate').textContent=g.calibrated?'Recalibrate camera to bed…':'Calibrate camera to bed…';$('aiCalibrate').hidden=!g.enabled;
@@ -283,7 +286,15 @@ function explainAiTuning(t){const v=aiTuningValues();if(!v.threshold){$('aiTunin
 function renderAiTuning(ai){const t=ai.tuning;$('aiTuningForm').hidden=!t;if(!t)return;
  if(aiTuningFor!==selectedPrinter){aiTuningDirty=false;aiTuningFor=selectedPrinter;}
  if(aiTuningDirty||$('aiTuningForm').contains(document.activeElement))return;
- $('aiPreset').value=t.preset;fillAiTuning(t);$('aiFocus').checked=!!t.focus;explainAiTuning(t);}
+ $('aiPreset').value=t.preset;fillAiTuning(t);$('aiFocus').checked=!!t.focus;explainAiTuning(t);renderAiLabels(t);}
+$('aiPauseOn').addEventListener('change',async e=>{const on=e.target.checked;
+ try{await api('ai-labels',{action:on?'pause':'notify'});notice(on?'A detected failure now pauses the print (all printers).':'A detected failure now only alerts (all printers).');await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
+// Which classes count as a failure, for every printer; a click applies straight away.
+function renderAiLabels(t){const box=$('aiLabelBoxes'),classes=t.classes||[],key=JSON.stringify([classes,t.labels]);$('aiLabels').hidden=classes.length<2;
+ if(box.dataset.key===key||$('aiLabels').contains(document.activeElement))return;box.dataset.key=key;
+ box.innerHTML=classes.map(c=>`<label class="checkbox"><input type="checkbox" value="${esc(c)}"${(t.labels||[]).includes(c)?' checked':''}> ${esc(c)}</label>`).join(' ');}
+$('aiLabelBoxes').addEventListener('change',async()=>{const labels=[...document.querySelectorAll('#aiLabelBoxes input:checked')].map(i=>i.value);
+ try{await api('ai-labels',{labels});notice('Counts as a failure: '+labels.join(', ')+'.');$('aiLabelBoxes').dataset.key='';await refresh();}catch(err){notice(err.message);$('aiLabelBoxes').dataset.key='';renderAiTuning(state?.printers.find(p=>p.name===selectedPrinter)?.ai||{});}});
 function currentTuning(){return state?.printers.find(p=>p.name===selectedPrinter)?.ai?.tuning||{};}
 $('aiPreset').addEventListener('change',()=>{aiTuningDirty=true;const t=currentTuning(),v=(t.presets||{})[$('aiPreset').value];if(v)fillAiTuning(v);explainAiTuning(t);});
 ['aiThreshold','aiHold','aiMinutes','aiShare'].forEach(id=>$(id).addEventListener('input',()=>{aiTuningDirty=true;$('aiPreset').value='custom';explainAiTuning(currentTuning());}));
@@ -293,7 +304,7 @@ $('aiTuningForm').addEventListener('submit',async e=>{e.preventDefault();const p
  try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/tuning',data);aiTuningDirty=false;notice(`AI sensitivity saved for ${printerLabel(selectedPrinter)}.`);await refresh();}catch(err){notice(err.message);}});
 // The printer's current errors and health alerts, each with Clear, plus Clear all (#34).
 function renderAlerts(p){const list=p.alerts||[],box=$('detailAlerts');box.hidden=!list.length;if(!list.length){box.innerHTML='';return;}
- const html=`<ul>${list.map(a=>`<li><span><strong>${a.kind==='error'?'Error':'Health alert'} ${esc(a.code)}</strong> ${esc(a.message)} <a href="${esc(a.url)}" target="_blank" rel="noopener">Help</a></span><button type="button" class="ghost small-btn" data-clear-alert="${esc(a.id)}">${a.kind==='error'?'Clear':'Dismiss'}</button></li>`).join('')}</ul>`+
+ const html=`<ul>${list.map(a=>`<li><span><strong>${a.kind==='error'?'Error '+esc(a.code):a.kind==='failed'?'Print failed':'Health alert '+esc(a.code)}</strong> ${esc(a.message)}${a.url?` <a href="${esc(a.url)}" target="_blank" rel="noopener">Help</a>`:''}</span><button type="button" class="ghost small-btn" data-clear-alert="${esc(a.id)}">${a.kind==='hms'?'Dismiss':'Clear'}</button></li>`).join('')}</ul>`+
   (list.length>1?'<button type="button" class="ghost small-btn" data-clear-alert="all">Clear all</button>':'');
  if(box.dataset.html!==html){box.dataset.html=html;box.innerHTML=html;}}
 $('detailAlerts').addEventListener('click',e=>{const b=e.target.closest('[data-clear-alert]');if(!b)return;const id=b.dataset.clearAlert;confirmClearAlerts(selectedPrinter,id==='all'?'all':[id]);});
@@ -363,12 +374,16 @@ $('aiCheck').addEventListener('click',e=>{const ai=state?.printers.find(p=>p.nam
  else aiCheckNow(e.target);});
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
-$('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};
-$('swapChecked').onclick=()=>{const name=selectedPrinter;confirmAction('Swapmod starting setup checked?',printerLabel(name)+' — this records your inspection; no swap movement is sent.','I checked the starting setup against Swaplist instructions, loaded the required magazine plates and cleared the ejection path.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/check',{confirmed:true});notice('Setup checked. Start the approved Swaplist batch when ready.');});};
-
-let swapApprovalJob=null;
-function openSwapApproval(id){const j=state.jobs.find(x=>x.id===id);swapApprovalJob=id;$('swapApproveText').textContent=j.label+' — '+printerLabel(j.printer);$('swapBatchPlates').value=j.options.swap_plates||1;$('swapBatchConfirm').checked=false;$('swapApproveDialog').showModal();}
-$('swapApproveForm').onsubmit=async e=>{e.preventDefault();try{await api('jobs/'+swapApprovalJob+'/swapapprove',{confirmed:$('swapBatchConfirm').checked,plates:Number($('swapBatchPlates').value)});$('swapApproveDialog').close();notice('Swaplist batch approved.');await refresh();}catch(e){notice(e.message);}};
+async function swapAction(action,body){const r=await api('plateswap/'+encodeURIComponent(selectedPrinter)+'/'+action,body||{});await refresh();return r;}
+$('swapEnabled').addEventListener('change',async e=>{const on=e.target.checked;try{await swapAction('configure',{enabled:on});notice(`Swapmod ${on?'on':'off'} for ${printerLabel(selectedPrinter)}.`);}catch(err){e.target.checked=!on;notice(err.message);}});
+let swapUpload=null;
+async function saveSwapFile(){try{const r=await swapAction('file',{asset:swapUpload.asset,plate:Number($('swapPlate').value||1)});notice(`Swap print file saved: ${r.file} (plate ${r.plate}).`);}catch(err){notice(err.message);}}
+$('swapFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;notice('Checking the swap print file…');
+ try{const form=new FormData();form.append('file',f);swapUpload=await api('upload',form);const plates=(swapUpload.plates||[]).filter(p=>p.sliced);
+  $('swapPlate').innerHTML=plates.map(p=>`<option value="${p.index}">${esc(p.name||'Plate '+p.index)}</option>`).join('');$('swapPlateRow').hidden=plates.length<2;
+  await saveSwapFile();}catch(err){notice(err.message);}finally{e.target.value='';}});
+$('swapPlate').addEventListener('change',()=>{if(swapUpload)saveSwapFile();});
+$('swapNow').addEventListener('click',async e=>{e.target.disabled=true;try{await swapAction('now');notice(`Swapping the plate on ${printerLabel(selectedPrinter)}.`);}catch(err){notice(err.message);}finally{e.target.disabled=false;}});
 // Cancel single objects mid-print, like Bambu Studio / Handy. Loaded when the panel opens and every 10 s while printing.
 let objectsFor='',objectsData=null;
 async function loadObjects(force){const p=devPrinter();if(!p||!$('detailDialog').open)return;const active=['RUNNING','PAUSE'].includes(p.state);

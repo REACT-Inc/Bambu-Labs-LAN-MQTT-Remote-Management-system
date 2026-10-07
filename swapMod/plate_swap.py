@@ -1,110 +1,149 @@
-import json
-import time
+"""Swapmod: swap the build plate by running a swap print file, then carry on with the queue.
+
+Per printer there are only two settings: Swapmod on/off, and the **swap print file** (the sliced .3mf you print to swap
+the plate). Nothing counts plates or approves batches. It works off the normal start-print machinery:
+
+1. You start a job from the queue as usual.
+2. When it **finishes**, the swap file is started as a normal queue job (uploaded and started the same way).
+3. When the swap print finishes, the **next waiting job** for that printer starts on its own, if there is one.
+4. After a **failed** print it doesn't swap on its own: the cause (a clog, a run-out) would just repeat. You're told,
+   and **Swap plate now** runs the swap whenever you want.
+
+Offered for the A1 family (A1 / A1 mini), the printers Swapmod kits fit (#17).
+"""
+import asyncio
+import hashlib
+import shutil
+from pathlib import Path
 
 import printer_models
 
-# Swapmod (the Swapmod A1m kit) is only offered for the A1 family (#17); models come from printer_models (#6).
-SWAPMOD_MODELS=('a1mini','a1')
-NOT_A_SERIES=('Swapmod is only available for Bambu Lab A-series printers (A1 / A1 mini). If this is one, set its "model" '
-              'in config.json (for example "A1 mini").')
+SWAPMOD_MODELS = ('a1mini', 'a1')
+NOT_A_SERIES = ('Swapmod is only available for Bambu Lab A-series printers (A1 / A1 mini). If this is one, set its "model" '
+                'in config.json (for example "A1 mini").')
+SETTLE = 5   # seconds after a print ends before the next start, so the printer has reported its new state
 
 
-def a_series_model(core,name):
-    """'A1 mini' or 'A1' for A1-family printers, otherwise None.
-
-    The configured "model" decides; without one, the serial number's first 3 characters; without a serial, the name.
-    """
-    key=printer_models.printer(core,name)['key']
+def a_series_model(core, name):
+    """'A1 mini' or 'A1' for A1-family printers, otherwise None (config "model", else the serial, else the name)."""
+    key = printer_models.printer(core, name)['key']
     return printer_models.label(key) if key in SWAPMOD_MODELS else None
 
 
 class PlateSwap:
-    def __init__(self,core,store):
-        self.core,self.store=core,store
-        store.db.execute('''CREATE TABLE IF NOT EXISTS plate_swap (
-            printer TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0,
-            model TEXT NOT NULL DEFAULT '', spares INTEGER NOT NULL DEFAULT 0,
-            verified INTEGER NOT NULL DEFAULT 0, revision INTEGER NOT NULL DEFAULT 0)''')
-        if 'provider' not in {r[1] for r in store.db.execute('PRAGMA table_info(plate_swap)')}:
-            store.db.execute("ALTER TABLE plate_swap ADD COLUMN provider TEXT NOT NULL DEFAULT ''")
-        # Retire previous Infinity Flow settings rather than reinterpret them.
-        store.db.execute("UPDATE plate_swap SET enabled=0,model='',spares=0,verified=0 WHERE provider!='swapmod_a1m'")
-        store.db.execute("UPDATE plate_swap SET provider='swapmod_a1m'")
-        # A restart loses evidence of the physical plate state.
-        store.db.execute('UPDATE plate_swap SET verified=0,revision=revision+1')
-        # Swapmod settings saved for a printer that isn't A-series (before #17) are switched off.
-        for row in list(store.db.execute('SELECT printer FROM plate_swap WHERE enabled=1')):
-            if row[0] in core.names() and not self.available(row[0]):
-                store.db.execute('UPDATE plate_swap SET enabled=0,model=\'\',verified=0,revision=revision+1 WHERE printer=?',(row[0],))
-                store.event(row[0],'Plate-swap settings','Disabled: Swapmod is only available for A-series printers (A1 / A1 mini).')
-        store.db.commit()
+    def __init__(self, core, store, settle=SETTLE):
+        self.core, self.store, self.settle = core, store, settle
+        db = store.db
+        db.execute('''CREATE TABLE IF NOT EXISTS plate_swap (
+            printer TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0)''')
+        columns = {r[1] for r in db.execute('PRAGMA table_info(plate_swap)')}
+        for column, kind in (('swap_file', "TEXT NOT NULL DEFAULT ''"), ('swap_name', "TEXT NOT NULL DEFAULT ''"),
+                             ('swap_plate', 'INTEGER NOT NULL DEFAULT 1')):
+            if column not in columns:
+                db.execute(f'ALTER TABLE plate_swap ADD COLUMN {column} {kind}')
+        db.commit()
+        self.folder = Path(getattr(core, 'DATA_DIR', '.')) / 'swapmod'
 
-    def available(self,name):
-        return a_series_model(self.core,name) is not None
+    def available(self, name):
+        return a_series_model(self.core, name) is not None
 
-    def state(self,name):
-        row=self.store.db.execute('SELECT * FROM plate_swap WHERE printer=?',(name,)).fetchone()
-        result=dict(row) if row else dict(printer=name,enabled=0,model='',spares=0,verified=0,revision=0)
-        result['enabled']=bool(result['enabled']);result['verified']=bool(result['verified'])
-        result['provider']='swapmod_a1m'
-        result['mode']='Prepared Swaplist batch; confirm setup before each batch'
-        result['printer_model']=a_series_model(self.core,name)
-        result['available']=result['printer_model'] is not None
-        return result
+    def state(self, name):
+        row = self.store.db.execute('SELECT enabled, swap_file, swap_name, swap_plate FROM plate_swap WHERE printer=?', (name,)).fetchone()
+        enabled, path, label, plate = (bool(row[0]), row[1], row[2], row[3]) if row else (False, '', '', 1)
+        has_file = bool(path) and Path(path).is_file()
+        return dict(available=self.available(name), enabled=enabled, file=label if has_file else '', plate=plate,
+                    ready=enabled and has_file, printer_model=a_series_model(self.core, name))
 
-    def configure(self,name,enabled,model,spares,confirmed,author):
-        if name not in self.core.names():raise ValueError('Unknown printer.')
-        if type(enabled) is not bool or type(spares) is not int or not 0<=spares<=100:
-            raise ValueError('Choose on/off and a magazine plate count from 0 to 100.')
-        if confirmed is not True:raise ValueError('Confirm the installed kit and actual magazine plate count.')
-        if self.store.active(name):raise ValueError('Finish or resolve the active job before changing plate-swap settings.')
-        if enabled:
-            if not self.available(name):raise ValueError(NOT_A_SERIES)
-            if model!='A1 mini':raise ValueError('Swapmod A1m supports the A1 mini only.')
-            if a_series_model(self.core,name)!='A1 mini':
-                raise ValueError('Swapmod A1m requires an A1 mini, not the full-size A1.')
-        previous=self.state(name)
+    def _save(self, name, **values):
+        current = self.store.db.execute('SELECT enabled, swap_file, swap_name, swap_plate FROM plate_swap WHERE printer=?', (name,)).fetchone()
+        row = dict(zip(('enabled', 'swap_file', 'swap_name', 'swap_plate'), current or (0, '', '', 1)), **values)
         with self.store.db:
-            self.store.db.execute('INSERT OR REPLACE INTO plate_swap(printer,enabled,model,spares,verified,revision,provider) VALUES(?,?,?,?,0,?,?)',
-                (name,int(enabled),model if enabled else '',spares,previous['revision']+1,'swapmod_a1m'))
-        self.store.event(name,'Plate-swap settings',f'{"Enabled" if enabled else "Disabled"} • {spares} magazine plates • {author}')
+            self.store.db.execute('INSERT OR REPLACE INTO plate_swap(printer, enabled, swap_file, swap_name, swap_plate) VALUES(?,?,?,?,?)',
+                                  (name, int(row['enabled']), row['swap_file'], row['swap_name'], int(row['swap_plate'])))
+
+    def configure(self, name, enabled, author):
+        """Swapmod on or off for a printer."""
+        if name not in self.core.names():
+            raise ValueError('Unknown printer.')
+        if type(enabled) is not bool:
+            raise ValueError('Choose on or off.')
+        if enabled and not self.available(name):
+            raise ValueError(NOT_A_SERIES)
+        self._save(name, enabled=enabled)
+        self.store.event(name, 'Swapmod', f"{'On' if enabled else 'Off'} • {author}")
         return self.state(name)
 
-    def approve_job(self,job_id,confirmed,author,plates=1):
-        if type(plates) is not int or not 1<=plates<=100:raise ValueError("Enter the batch plate count (1–100).")
-        if confirmed is not True:raise ValueError('Confirm this is a Swaplist-generated batch for Swapmod A1m and verify its total plate count.')
-        job=self.store.get(job_id);cfg=self.state(job['printer'])
-        if not cfg['enabled']:raise ValueError('Enable the installed plate-swap kit first.')
-        if job['status']!='queued':raise ValueError('Only waiting jobs can be approved.')
-        if 'swap_model' in job['options'] and job['options'].get('swap_provider')!='swapmod_a1m':
-            raise ValueError('This job was approved for another swap system. Add a newly generated Swaplist batch instead.')
-        opts=dict(job['options']);opts['swap_revision']=cfg['revision'];opts['swap_model']=cfg['model'];opts['swap_provider']='swapmod_a1m';opts['swap_plates']=plates
-        with self.store.db:
-            self.store.db.execute('UPDATE jobs SET options=?,updated=? WHERE id=?',(json.dumps(opts),time.time(),job_id))
-        self.store.event(job['printer'],'Swaplist batch attested',f'{job_id} • {author} • user attestation, not automatic G-code validation')
+    def set_file(self, name, source, label, plate, author):
+        """Keep the swap print file (an uploaded, sliced .3mf) for this printer."""
+        if name not in self.core.names():
+            raise ValueError('Unknown printer.')
+        self.folder.mkdir(parents=True, exist_ok=True)
+        target = self.folder / (hashlib.sha1(name.encode()).hexdigest()[:12] + '.3mf')
+        shutil.copyfile(source, target)
+        self._save(name, swap_file=str(target), swap_name=label[:120], swap_plate=int(plate))
+        self.store.event(name, 'Swapmod', f'Swap print file: {label} (plate {plate}) • {author}')
+        return self.state(name)
 
-    def verify(self,name,confirmed,author):
-        if confirmed is not True:raise ValueError('Check the printer starting setup and loaded magazine against the Swaplist instructions; clear the plate ejection path.')
-        if not self.available(name):raise ValueError(NOT_A_SERIES)
-        if not self.state(name)['enabled']:raise ValueError('Plate-swap mode is disabled.')
-        if self.store.active(name):raise ValueError('Finish or resolve the active job before checking the plate.')
-        with self.store.db:self.store.db.execute('UPDATE plate_swap SET verified=1 WHERE printer=?',(name,))
-        self.store.event(name,'Swapmod starting setup checked',author)
+    # The queue calls these; Swapmod no longer restricts or reserves anything.
+    def check(self, job, dispatch=False):
+        return None
 
-    def check(self,job,dispatch=False):
-        cfg=self.state(job['printer']);opts=job['options']
-        if not cfg['enabled']:
-            if 'swap_model' in opts:raise ValueError('This job contains an approved swap preset, but plate-swap mode is now disabled. Add a newly sliced standard job.')
+    def reserve(self, job):
+        return None
+
+    def invalidate(self, name):
+        return None
+
+    # ---- the swap --------------------------------------------------------------------------------------------------
+    def swap_job(self, name, author):
+        """Queue the swap print at the front of this printer's queue."""
+        from queueing import options
+        row = self.store.db.execute('SELECT swap_file, swap_name, swap_plate FROM plate_swap WHERE printer=?', (name,)).fetchone()
+        if not row or not row[0] or not Path(row[0]).is_file():
+            raise ValueError('Choose the swap print file first (Swapmod in the printer panel).')
+        opts = dict(options(row[2] or 1, False, '', 'textured_plate'), swap=True)
+        job = self.store.add(name, 'Plate swap', row[0], row[1] or 'plate-swap.gcode.3mf', opts, author, bool(getattr(self.core, 'EXAMPLE_MODE', False)))
+        self.store.move_to_front(job['id'])
+        return job
+
+    async def swap_now(self, engine, name, author):
+        if not self.state(name)['ready']:
+            raise ValueError('Turn Swapmod on and choose the swap print file first.')
+        job = self.swap_job(name, author)
+        try:
+            return await engine.start(job['id'], True, author)
+        except Exception:
+            if self.store.get(job['id'])['status'] == 'queued':
+                self.store.set_status(job['id'], 'cancelled', 'Plate swap could not start.')
+            raise
+
+    async def after(self, engine, name, job, state):
+        """Called when a queue job on this printer ended (FINISH or FAILED)."""
+        if not self.state(name)['ready']:
             return
-        if opts.get('swap_revision')!=cfg['revision'] or opts.get('swap_model')!=cfg['model'] or opts.get('swap_provider')!='swapmod_a1m':
-            raise ValueError('Approve this job as a Swaplist-generated Swapmod A1m batch and enter its plate count.')
-        if not dispatch and not cfg['verified']:raise ValueError('Check the Swapmod starting setup using /plateswap check or the dashboard first.')
-        if not dispatch and cfg['spares']<opts['swap_plates']:raise ValueError('Not enough magazine plates for this batch. Refill and update the count.')
-
-    def reserve(self,job):
-        if self.state(job['printer'])['enabled']:
-            # Called inside the same transaction as queue claim. Never auto-refund uncertain outcomes.
-            self.store.db.execute('UPDATE plate_swap SET spares=spares-?,verified=0 WHERE printer=?',(job['options']['swap_plates'],job['printer']))
-
-    def invalidate(self,name):
-        with self.store.db:self.store.db.execute('UPDATE plate_swap SET verified=0 WHERE printer=?',(name,))
+        notify = getattr(self.core, 'notify', None)
+        try:
+            if job['options'].get('swap'):
+                if state != 'FINISH':
+                    if notify:
+                        await notify(name, '♻️ Plate swap failed', 'The swap print did not finish. Check the printer; the queue waits.', self.core.RED)
+                    return
+                following = next((j for j in self.store.jobs(name) if j['status'] == 'queued' and j['id'] != job['id']
+                                  and not j['options'].get('swap')), None)
+                if not following:
+                    if notify:
+                        await notify(name, '♻️ Plate swapped', 'Fresh plate ready. Nothing else is waiting in the queue.', self.core.GREEN)
+                    return
+                await asyncio.sleep(self.settle)
+                await engine.start(following['id'], True, 'Swapmod')
+                if notify:
+                    await notify(name, '♻️ Plate swapped, next print started', following['label'], self.core.GREEN)
+            elif state == 'FINISH':
+                await asyncio.sleep(self.settle)
+                await self.swap_now(engine, name, 'Swapmod')
+            elif notify:
+                await notify(name, '♻️ Not swapping', f"{job['label']} failed, so the plate wasn't swapped automatically "
+                             '(the cause would just repeat). Check the printer, then use Swap plate now.', self.core.YELLOW)
+        except Exception as exc:
+            if notify:
+                await notify(name, '♻️ Swapmod stopped', f'Could not continue: {str(exc)[:300]}', self.core.RED)
