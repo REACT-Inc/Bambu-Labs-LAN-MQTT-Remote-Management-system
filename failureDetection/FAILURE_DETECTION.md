@@ -142,14 +142,21 @@ Even 50–100 labelled pictures from your own cameras usually make a big differe
 
 ## AI boxes on the camera view
 
-A printer's camera view, live or still, shows what the AI found in the frame it checked last, with the same colours as **Test AI now**:
+A printer's camera view shows what the AI found, with the same colours as **Test AI now**:
 
 - **Red:** a failure at or above the failure score.
 - **Yellow:** a failure at or above the keep-counting score.
 - **Blue:** a class that isn't a failure (for example `print`).
 - **🔍 AI zoom:** a dashed outline where the AI zooms in on the next checks.
 
-The corner label says how many seconds ago that frame was checked. With the AI HAT this is a few seconds, so the boxes can trail a moving toolhead slightly. Boxes older than 20 s (or three check intervals) aren't shown. Untick **AI boxes** under the picture to hide them; the choice is remembered in this browser.
+**Live view:** the AI looks at every new frame while you watch, printing or not, and each frame arrives together with its own boxes, so they follow a moving toolhead. The corner label says **AI live**.
+- **On the CPU** (no AI HAT): it looks at most every 3 seconds, so the Pi isn't overloaded. The picture keeps updating and the boxes follow when ready (**AI live · last look**).
+- **Display only:** these looks are never judged, saved or acted on. Failures are still judged by the regular checks (every 5 s with the AI HAT), so watching live doesn't make the AI pause sooner or more often.
+- **Load:** it only runs for printers someone is watching live, and stops with the live view.
+
+**Still picture:** the boxes from the AI's last regular check. The corner label says how many seconds ago that was. Boxes older than 20 s (or three check intervals) aren't shown.
+
+Untick **AI boxes** under the picture to hide them; the choice is remembered in this browser.
 
 ## Comparing with the print file
 

@@ -184,7 +184,7 @@ Set `camera_type` on each printer in [config.json](configuration.md#printer-entr
   - **Failing cameras:** a camera that doesn't answer is skipped for about 2 minutes, and its card says so.
   - **No hanging requests:** the browser only downloads the last saved still, so a slow camera can't hold up the dashboard.
   - **When it stops:** nothing is captured when no dashboard is open.
-- **Live view:** press **▶** in a printer's panel. It shows about one frame per second, isn't full-motion video, and nothing is recorded.
+- **Live view:** press **▶** in a printer's panel. It shows every new camera frame (up to 5 per second on RTSP cameras), with the AI's boxes on each frame when AI failure detection is on. It isn't full-motion video, and nothing is recorded.
   - **One shared connection:** all viewers and snapshots share one camera connection per printer. While live view is open, that printer's still is taken from the live stream instead of a second connection (A1-family cameras accept one client at a time).
   - **When it stops:** closing the panel, hiding the browser tab or signing out stops your live view.
 - **Login required:** camera access needs a dashboard login, and the session is re-checked while streaming.

@@ -74,6 +74,7 @@ class Dashboard:
         self.app.on_cleanup.append(self.alert_targets.close)
         self.failure = FailureMonitor(core, engine)
         core.failure_monitor = self.failure   # Discord /printer shows the AI watch line (#70)
+        self.cameras.scorer = self.failure.live   # AI boxes on every live-view frame
         self.app.on_startup.append(self.failure.start);self.app.on_shutdown.append(self.failure.stop)
         self.app.add_routes([
             web.get('/api/liveframe/{name}',self.cameras.frame_response),
