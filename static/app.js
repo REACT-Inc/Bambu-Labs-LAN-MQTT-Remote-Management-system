@@ -30,7 +30,8 @@ function isPending(key,p){const x=pending[key];if(!x)return false;
  if(p&&x.done(p)){delete pending[key];return false;}
  if(Date.now()>x.until){delete pending[key];if(x.label)notice(x.label+': the printer hasn\'t reported the change. Check the printer.');return false;}
  return true;}
-function pollSoon(){for(const ms of [1500,4000,7000,10500,15000])setTimeout(refresh,ms);}
+// After a command: look again soon and often, so the result shows as soon as the printer reports it (#60).
+function pollSoon(){for(const ms of [600,1500,3000,5000,8000,12000,16000])setTimeout(refresh,ms);}
 function reportedLight(p){return ((p.data||{}).lights_report||[]).find(l=>l.node==='chamber_light')?.mode==='on';}
 function lightShown(p){const key='light|'+p.name;return isPending(key,p)?{on:pending[key].on,busy:true}:{on:reportedLight(p),busy:false};}
 async function toggleLight(name){const p=state.printers.find(x=>x.name===name),on=!lightShown(p).on;

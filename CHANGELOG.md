@@ -42,6 +42,9 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 - **Important alerts ping people in Discord:** AI failure alerts and printer errors mention **@here** by default. Choose @everyone, a role or nobody under Settings → Discord settings.
 
 ### Fixed
+- **Commands show their result much sooner (#60).** The printer usually acted right away, but the dashboard could keep showing "waiting for the printer" for many seconds.
+  - **Full report after a command:** the app now asks the printer for a full report shortly after each command (light, pause/resume/stop, temperatures, fans, speed, moves, filament, cancelling objects, clearing errors). Before, an idle A1 or P1 could take a long time to report the change. The request is limited to once every 10 seconds per printer, because frequent full reports can make some printers stutter.
+  - **Faster checks after a click:** the dashboard looks again 0.6, 1.5, 3, 5, 8, 12 and 16 seconds after every control, instead of only after the light and print buttons.
 - **Movement commands didn't work after a failed or cancelled print.** Moves required IDLE or FINISH and refused the FAILED state that printers keep reporting. A queue job left in "needs review" also blocked moves forever, and the buttons needed an "unlock" checkbox. All three are fixed; the printer must still be idle with no error.
 - **Cancel object did nothing for prints started from Bambu Studio, Handy or the printer.** The section only appeared for prints started from this app. Now the print file is copied from the printer's storage once per print, and its objects can be cancelled. Prints sent from the cloud keep their file internally, which the app says.
 - **AI boxes on the live camera** now also show while the printer isn't printing: the AI looks at the live view while it's open (display only, never judged or paused on).

@@ -92,6 +92,8 @@ class Alerts:
             body = {root: dict(payload[root], sequence_id=str(time.time_ns() % 1000000000))}
             if client.publish(topic, json.dumps(body), qos=1).rc != 0:
                 raise ValueError('Sending the clear to the printer failed. Try again.')
+        if hasattr(self.core, 'request_report'):
+            self.core.request_report(name, delay=1)   # its next report says whether the error is gone
 
     async def clear(self, name, ids, confirmed, author='unknown', wait=WAIT):
         """Clear the alerts with these ids ('all' for every one). Returns {'cleared', 'still', 'message'}."""
