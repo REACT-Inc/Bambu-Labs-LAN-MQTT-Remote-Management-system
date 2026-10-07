@@ -85,8 +85,28 @@ class SkipTests(unittest.TestCase):
 
     def test_prints_not_started_by_the_app(self):
         self.store.set_status(self.job['id'],'finished')
-        info=self.skip.objects('P');self.assertEqual(info['objects'],[]);self.assertIn('queue or Print now',info['reason'])
-        with self.assertRaisesRegex(ValueError,'queue or Print now'):self.skip.skip('P',[75],True,'web')
+        info=self.skip.objects('P');self.assertEqual(info['objects'],[]);self.assertIn("couldn't be read from the printer",info['reason'])
+        with self.assertRaisesRegex(ValueError,"couldn't be read"):self.skip.skip('P',[75],True,'web')
+
+    def test_print_started_elsewhere_reads_its_file_from_the_printer(self):
+        import asyncio,shutil
+        self.store.set_status(self.job['id'],'finished')       # no queue job: started from Bambu Studio / Handy
+        self.data={'subtask_name':'Plate','gcode_file':'Plate.gcode.3mf','subtask_id':'77'}
+        tried=[]
+        def download(printer,remote,dest):
+            tried.append(remote)
+            if remote!='Plate.gcode.3mf':raise ValueError('missing')
+            shutil.copy(self.job['asset'],dest)
+        self.core.DATA_DIR=Path(self.tmp.name);self.skip=ObjectSkip(self.core,self.store,self.controls,download=download)
+        asyncio.run(self.skip.fetch('P'))
+        info=self.skip.objects('P')
+        self.assertEqual((info['job'],info['reason']),('Plate',''));self.assertEqual(len(info['objects']),3)
+        self.assertEqual(tried,['Plate.gcode.3mf'])
+        asyncio.run(self.skip.fetch('P'));self.assertEqual(tried,['Plate.gcode.3mf'])   # copied once per print
+        self.skip.skip('P',[75],True,'web');self.assertEqual(self.sent()[1]['obj_list'],[75])
+        self.data={'subtask_name':'Other','gcode_file':'/data/Metadata/plate_1.gcode','subtask_id':'78'}   # a cloud print
+        asyncio.run(self.skip.fetch('P'))
+        self.assertIn("couldn't be read",self.skip.objects('P')['reason'])
 
 
 class DashboardRouteTests(unittest.TestCase):

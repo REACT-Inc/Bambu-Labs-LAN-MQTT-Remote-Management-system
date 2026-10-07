@@ -345,6 +345,42 @@ class MonitorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((state['boxes_at'],state['threshold'],state['hold']),(self.clock.now,0.6,0.45))
         self.assertEqual(len(state['zoom']),2)   # where it zooms in next: the print area and the spot
 
+    async def test_live_view_gets_boxes_while_idle(self):
+        import time as _time
+        class Boxes(FakeBackend):
+            async def score(self,jpeg,crops=None):
+                self.calls+=1;return 0.3,[{'label':'spaghetti','score':0.3,'box':[0.1,0.1,0.2,0.2]}]
+        core=FakeCore(state='IDLE');backend=Boxes();m=self.monitor(core,backend=backend)
+        await self.run_checks(m,1)
+        self.assertEqual(backend.calls,0)                     # idle and no live view: nothing to look at
+        core.live_cameras=SimpleNamespace(feeds={'H2D':SimpleNamespace(frame=b'live',updated=_time.time())})
+        await self.run_checks(m,1)
+        state=m.state('H2D')
+        self.assertEqual(backend.calls,1);self.assertEqual(state['boxes'][0]['label'],'spaghetti')
+        self.assertEqual(state['status'],'idle');core.notify.assert_not_awaited()   # display only, never judged
+
+    async def test_stringing_can_count_as_a_failure_for_all_printers(self):
+        class Stringy(FakeBackend):
+            async def score(self,jpeg,crops=None):
+                return 0.0,[{'label':'stringing','score':0.7,'box':[0.1,0.1,0.2,0.2]}]   # the helper counts only its own labels
+        core=FakeCore();m=self.monitor(core,backend=Stringy())
+        m.settings.update(classes=['spaghetti','stringing','warping','print'],labels=['spaghetti','warping'])
+        await self.run_checks(m,1);self.assertEqual(m.state('H2D')['score'],0.0)
+        with self.assertRaisesRegex(ValueError,'Choose at least one'):m.set_labels(['print'])   # an area class never counts
+        m.set_labels(['stringing','spaghetti','warping'])
+        self.assertEqual(core.settings['ai_labels'],['spaghetti','stringing','warping'])
+        await self.run_checks(m,1);self.assertEqual(m.state('H2D')['score'],0.7)
+        t=m.state('H2D')['tuning'];self.assertEqual((t['classes'],t['labels']),(['spaghetti','stringing','warping'],['spaghetti','stringing','warping']))
+
+    async def test_dashboard_switch_makes_a_failure_pause_the_print(self):
+        core=FakeCore();m=self.monitor(core,'notify',backend=FakeBackend(0.95))   # config.json says notify
+        self.assertEqual(m.state('H2D')['action'],'notify')
+        with self.assertRaisesRegex(ValueError,'pause or notify'):m.set_action('stop')
+        m.set_action('pause')
+        self.assertEqual((core.settings['ai_action'],m.state('H2D')['action']),('pause','pause'))
+        await self.run_checks(m,40)
+        self.engine.control.assert_awaited_once_with('H2D','pause','AI failure detection')
+
     async def test_off_without_config(self):
         m=FailureMonitor(FakeCore(),None)
         self.assertFalse(m.enabled);self.assertEqual(m.state('H2D'),{'enabled':False,'status':'off'})

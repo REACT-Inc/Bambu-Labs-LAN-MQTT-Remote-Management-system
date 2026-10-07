@@ -2,6 +2,64 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.8.0)
+
+### Added
+- **Clear printer errors and health alerts from the dashboard and Discord (#34).**
+  - **Dashboard:** printer cards get **Clear error…**. The printer panel lists each error and alert with its official description, with **Clear** / **Dismiss** and **Clear all**.
+  - **Discord:** `/clearerror name?` (open to everyone, configurable), and a **Clear error…** button under error notifications.
+  - **Same as Bambu Studio:** print errors are cleared on the printer with the commands Bambu Studio's error dialog sends (`clean_print_error`, then `uiop` to close the dialog).
+  - **Health alerts:** they are hidden in the dashboard until the printer stops reporting them, and are never muted on the printer.
+  - **Honest result:** the reply says **Cleared** only once the printer stops reporting the error; otherwise it says the error is still reported.
+  - **Queue:** a FAILED printer whose error was cleared starts its next queued job normally (the plate-clear confirmation is still required).
+  - **Logged:** every clear is recorded in Activity with who did it.
+- **pm-doctor, an independent watchdog (#43).** It keeps working when the app doesn't start, crashes or freezes while systemd says "running".
+  - **Checks every 30 s:** the app service, restart loops, whether the dashboard answers, start-up tracebacks, disk, memory, temperature, under-voltage, and printer and internet reachability.
+  - **When something's wrong:**
+    - it saves an incident record (secrets removed), including a stack dump of a frozen app;
+    - it alerts once when the problem starts and once when it clears, through a Discord webhook (works without the bot) and optionally a GitHub issue;
+    - if you turn it on, it restarts a frozen app.
+  - **Its own status page** on port 8081, using the dashboard password, with restart and report downloads. On the command line: `sudo pm-doctor` and `sudo pm-doctor report`.
+  - **Independent:** Python standard library only, installed outside the app, with CPU and memory limits. See [docs/doctor.md](docs/doctor.md).
+- **Alerts beyond Discord: Home Assistant, ntfy and webhooks (#9).**
+  - **Setup:** under the dashboard's **Settings → Other alerts**, add targets that receive the same alerts as Discord (print finished or failed, printer errors and health alerts, AI failure alerts…): all of them, or only the important ones.
+  - **Target types:**
+    - **ntfy:** push to your phone.
+    - **Home Assistant:** an automation webhook, or a notify service with a long-lived token.
+    - **Any JSON webhook.**
+    - **Discord channel webhook.**
+  - **No bot needed:** the targets work even without the Discord bot.
+  - **Testing:** **Send test** checks each target, and the last result is shown.
+  - **Privacy:** tokens never leave the Pi.
+
+### Changed
+- **No confirmation screens in the dashboard.** Every action runs straight away, and the server still checks it is safe (temperature limits, an idle printer for moves). Discord keeps its confirmations.
+- **Printer states people understand.**
+  - **Ready:** after a print, Bambu printers keep reporting FINISH, or FAILED after a failed or cancelled print, while they sit idle and ready. Cards and the printer panel now say **Ready**, with "last print finished" / "last print failed or was cancelled", plus **Printing**, **Paused**, **Error** (only with a real error code) and **Offline**. Discord `/printer` and `/status` match.
+  - **Queue:** a FAILED printer without an error starts the next job normally.
+- **Choose which classes count as a failure** (for all printers), for example **stringing**: tick them in a printer's AI panel. New installs count stringing too.
+- **"Pause the print when a failure is found"** is now a checkbox in the AI panel (all printers), instead of `"action"` in config.json.
+- **Important alerts ping people in Discord:** AI failure alerts and printer errors mention **@here** by default. Choose @everyone, a role or nobody under Settings → Discord settings.
+
+### Fixed
+- **Movement commands didn't work after a failed or cancelled print.** Moves required IDLE or FINISH and refused the FAILED state that printers keep reporting. A queue job left in "needs review" also blocked moves forever, and the buttons needed an "unlock" checkbox. All three are fixed; the printer must still be idle with no error.
+- **Cancel object did nothing for prints started from Bambu Studio, Handy or the printer.** The section only appeared for prints started from this app. Now the print file is copied from the printer's storage once per print, and its objects can be cancelled. Prints sent from the cloud keep their file internally, which the app says.
+- **AI boxes on the live camera** now also show while the printer isn't printing: the AI looks at the live view while it's open (display only, never judged or paused on).
+
+## Unreleased (1.7.5)
+
+### Changed
+- **One Start button (#65).**
+  - **Queue:** the separate **Start ignoring error** button is gone. When the printer reports FAILED or an error, **Start next** turns red, says so, and asks whether to start anyway (bypassing the management error check for that one start).
+  - **Print now:** the same applies when queueing a new print; **Print now ignoring error** is gone.
+
+### Fixed
+- **The Discord bot reconnects without a restart (#14).** Once connected, it already reconnected by itself after the internet dropped. But if the internet was down when the bot first logged in (a Pi booting before its network, or a router restart), it stayed offline until the service was restarted. Now it tries again after 15 seconds, backing off to every 5 minutes. A rejected token is reported in the log, without retrying.
+- **Permission refusals are always private (#23).** "You can't use this command" used to be posted publicly in the commands channel. Now only the person who ran the command sees it, in every channel.
+- **Rounded numbers in Discord (#42).** `/printer`, progress notifications and `/filaments` showed values as reported, such as `219.96875°C` or `312 min`. They now show `220°C` and `5 h 12 min`. The dashboard already rounded them.
+- **Fewer camera pictures at once.** Since 1.7.2 the AI checks every printer in each round. It now fetches at most two camera pictures at a time instead of every printer's at once, which is easier on the Pi and on Bambu cameras that take one connection at a time. Each round still finishes within a few seconds with seven printers.
+- **Saving AI training pictures no longer slows the app.** Each save used to list every kept picture (up to 5,000 on the SD card) on the app's main thread. Now the saving happens in the background, and the folder is tidied only once every 20 or so pictures. The picture cap is still never exceeded.
+
 ## 1.7.4-beta.1
 
 Built on 1.7.3-beta.1. Fixes the dashboard and Discord staying down after an update or restart while the service showed "running". **Update from 1.7.2 or 1.7.3 as soon as you can.**

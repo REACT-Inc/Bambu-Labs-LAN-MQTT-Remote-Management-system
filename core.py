@@ -29,6 +29,7 @@ EXAMPLE_DATA = CONFIG.get('example_data') or {
     for p in (PRINTERS or [{'name':'Demo H2D'}, {'name':'Demo A1'}])
 }
 import asyncio
+import contextlib
 import base64
 import copy
 import difflib
@@ -66,6 +67,8 @@ progress_tracker = ProgressTracker()
 report_listener = None
 event_listener = None
 failure_monitor = None   # set by the dashboard (failureDetection, #70)
+notification_view = None   # (printer, title) -> buttons for a notification, set by clear_errors_discord (#34)
+alert_targets = None   # other alert destinations (alert_targets.py, #9), set by the dashboard
 
 
 def load_settings():
@@ -83,6 +86,25 @@ public_channels = {}
 from printer_errors import describe as describe_error, errors as decode_errors
 import filament_sides
 from diagnostics import log_error
+
+# What the printer's raw state means for people. Bambu printers keep reporting FINISH or FAILED (FAILED also after a
+# cancelled print) until the next print starts, while they sit idle and ready, so those read as Ready.
+STATE_NAMES = {'RUNNING': 'Printing', 'PAUSE': 'Paused', 'PREPARE': 'Preparing', 'SLICING': 'Preparing', 'IDLE': 'Ready',
+               'FINISH': 'Ready', 'FAILED': 'Ready', 'UNKNOWN': 'Waiting for a report', 'INIT': 'Starting up'}
+LAST_PRINT = {'FINISH': 'last print finished', 'FAILED': 'last print failed or was cancelled'}
+
+
+def display_state(state, error=0, connected=True):
+    if not connected:
+        return 'Offline'
+    if error:
+        return 'Error'
+    return STATE_NAMES.get(str(state), str(state or 'Unknown').title())
+
+
+def last_print_note(state, error=0):
+    return '' if error else LAST_PRINT.get(str(state), '')
+
 
 def printer_error_text(name, error, data=None):
     printer = printer_config(name) or {}
@@ -316,10 +338,11 @@ async def require(interaction, root):
         return True
     log.warning('Denied %s for %s (%s)', command_summary(interaction) if getattr(interaction, 'data', None) else '/' + root, who(interaction), command_level(root))
     text = denial_text(root)
+    # Always private, even in the commands channel: nobody else needs to see who was refused what (#23).
     if interaction.response.is_done():
-        await interaction.followup.send(text, ephemeral=ephemeral(interaction))
+        await interaction.followup.send(text, ephemeral=True)
     else:
-        await interaction.response.send_message(text, ephemeral=ephemeral(interaction))
+        await interaction.response.send_message(text, ephemeral=True)
     return False
 
 
@@ -340,6 +363,32 @@ class PrinterTree(app_commands.CommandTree):
             return False
         log.info('%s ran %s in channel %s', who(interaction), command_summary(interaction), interaction.channel_id)
         return True
+
+
+async def run_discord(client, token, sleep=asyncio.sleep, first_delay=15, max_delay=300):
+    """Keep the Discord bot connected (#14). Once connected, discord.py reconnects by itself after a dropped
+    connection. But if the internet is down when the bot first logs in (a Pi booting before its network, or a router
+    restart), start() fails, and the bot used to stay offline until the service was restarted. Now it tries again
+    (15 s, doubling to every 5 min). A rejected token is not retried: that needs fixing in config.json."""
+    delay = first_delay
+    while True:
+        try:
+            await client.start(token)
+            return   # closed on purpose (the service is stopping)
+        except discord.LoginFailure:
+            log.error('Discord rejected the bot token. Fix "discord_token" in config.json and restart; the dashboard keeps working.')
+            return
+        except discord.PrivilegedIntentsRequired:
+            log.error('Discord requires an intent that is not enabled for this bot in the Developer Portal; the dashboard keeps working.')
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning('Discord could not connect (%s: %s); retrying in %d s. The dashboard keeps working.', type(exc).__name__, exc, delay)
+        with contextlib.suppress(Exception):
+            await client.http.close()   # the next login opens a fresh HTTP session
+        await sleep(delay)
+        delay = min(max_delay, delay * 2)
 
 
 class PrinterBot(commands.Bot):
@@ -521,6 +570,23 @@ async def snapshot(name, timeout=25, max_age=60):
         return None
 
 
+def whole(value):
+    """A reported number rounded for display (219.96875 -> '220'), or '?' (#42)."""
+    try:
+        return str(round(float(value)))
+    except (TypeError, ValueError):
+        return '?'
+
+
+def duration(minutes):
+    """Minutes for display: '45 min', '5 h 12 min', or '?' (#42)."""
+    try:
+        total = max(0, round(float(minutes)))
+    except (TypeError, ValueError):
+        return '?'
+    return f'{total // 60} h {total % 60:02d} min' if total >= 60 else f'{total} min'
+
+
 def progress(value):
     try:
         percent = max(0, min(100, float(value)))
@@ -542,22 +608,23 @@ def printer_reply(embed, picture):
 
 def printer_embed(name):
     state, error, data, connected = state_data(name)
-    embed = card('🖨️ ' + display_name(name), f"{'🟢 Connected' if connected else '🔴 Offline / reconnecting'} • **{safe(state)}**",
+    note = last_print_note(state, error)
+    embed = card('🖨️ ' + display_name(name), f"{'🟢 Connected' if connected else '🔴 Offline / reconnecting'} • **{display_state(state, error, connected)}**" + (f' ({note})' if note else ''),
                  RED if error or not connected else STATE_COLORS.get(state, GRAY))
     field(embed, 'File', safe(data.get('subtask_name', 'No file reported')), False)
     field(embed, 'Progress', progress(data.get('mc_percent')), False)
-    field(embed, 'Time remaining', str(data.get('mc_remaining_time', '?')) + ' min')
+    field(embed, 'Time remaining', duration(data.get('mc_remaining_time')))
     field(embed, 'Layer', f"{data.get('layer_num', '?')} / {data.get('total_layer_num', '?')}")
     sides = filament_sides.nozzles(data)
     if sides:
         # Dual-nozzle printers: each nozzle's temperature, fitted hotend and loaded filament (multi-hotend).
         for n in sides:
-            heat = f"{n['current'] if n['current'] is not None else '?'}°C → {n['target'] if n['target'] else 'off'}{'°C' if n['target'] else ''}"
+            heat = f"{whole(n['current'])}°C → {whole(n['target']) + '°C' if n['target'] else 'off'}"
             details = [heat, n['hotend']['label'] if n['hotend'] else '', n['filament'] and 'Loaded: ' + n['filament']]
             field(embed, f"{n['side']} nozzle" + (' • in use' if n['active'] else ''), '\n'.join(d for d in details if d))
     else:
-        field(embed, 'Nozzle', f"{data.get('nozzle_temper', '?')}°C → {data.get('nozzle_target_temper', '?')}°C")
-    field(embed, 'Bed', f"{data.get('bed_temper', '?')}°C → {data.get('bed_target_temper', '?')}°C")
+        field(embed, 'Nozzle', f"{whole(data.get('nozzle_temper'))}°C → {whole(data.get('nozzle_target_temper'))}°C")
+    field(embed, 'Bed', f"{whole(data.get('bed_temper'))}°C → {whole(data.get('bed_target_temper'))}°C")
     rack = filament_sides.hotends(data)[1]
     if rack:
         field(embed, 'Hotend rack', '\n'.join(f"Slot {h['slot'] + 1}: {h['label']}" for h in rack), False)
@@ -620,7 +687,7 @@ def filament_embed(name):
         return f" • ◀ loaded in the {filament_sides.SIDES[nozzle].lower()} nozzle" if nozzle is not None else ''
 
     for unit in units[:24]:
-        text = f"Humidity: {unit.get('humidity', '?')} • Temperature: {unit.get('temp', '?')}°C\n"
+        text = f"Humidity: {unit.get('humidity', '?')} • Temperature: {whole(unit.get('temp'))}°C\n"
         try:
             unit_id = int(unit.get('id'))
         except (TypeError, ValueError):
@@ -777,7 +844,7 @@ async def status_command(interaction: discord.Interaction):
     lines = [f'**Uptime:** {uptime // 3600}h {(uptime % 3600) // 60}m', f'**Connected:** {online}/{len(available)}', '']
     for name in available:
         state, error, data, connected = state_data(name)
-        line = f"{'🟢' if connected else '🔴'} **{safe(name)}** — {safe(state)}"
+        line = f"{'🟢' if connected else '🔴'} **{safe(name)}** — {display_state(state, error, connected)}"
         if state == 'RUNNING':
             line += f" • {data.get('mc_percent', '?')}%"
         if error:
@@ -884,6 +951,8 @@ async def command_error(interaction, error):
 async def notify(name, title, description, color, camera=False):
     if event_listener:
         event_listener(name, title, description)
+    if alert_targets:   # Home Assistant, ntfy, webhooks (#9): also without the Discord bot
+        alert_targets.dispatch(name, title, description, color)
     channel_id = settings.get('notification_channel_id')
     if not channel_id or not bot.is_ready():
         return
@@ -899,9 +968,29 @@ async def notify(name, title, description, color, camera=False):
             kwargs['file'] = discord.File(io.BytesIO(picture), filename='printer.jpg')
         elif camera:
             field(embed, 'Camera', 'Snapshot unavailable; status update delivered without an image.', False)
-        await channel.send(**kwargs)
+        view = notification_view(name, title) if notification_view else None   # e.g. Clear error (#34)
+        if view:
+            kwargs['view'] = view
+        content, mentions = ping_for(title)   # important alerts ping people (@here by default)
+        await channel.send(content=content, allowed_mentions=mentions, **kwargs)
     except Exception:
         log.exception('Notification failed for %s', name)
+
+
+PING_TITLES = ('🤖', '🛑 Printer error')   # AI failure alerts and printer errors ping people
+
+
+def ping_for(title):
+    """(message text, allowed mentions) for an important alert, from settings "alert_ping": "here" (default),
+    "everyone", a role ID, or "none"."""
+    if not str(title).startswith(PING_TITLES):
+        return None, discord.AllowedMentions.none()
+    choice = str(settings.get('alert_ping', 'here') or 'none')
+    if choice in ('here', 'everyone'):
+        return f'@{choice}', discord.AllowedMentions(everyone=True, users=False, roles=False)
+    if choice.isdigit():
+        return f'<@&{choice}>', discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(int(choice))])
+    return None, discord.AllowedMentions.none()
 
 
 def queue_notification(*args):
@@ -914,9 +1003,9 @@ def progress_description(data):
         f"**File:** {safe(data.get('subtask_name', 'Unknown'))}\n"
         f"**Status:** {safe(data.get('gcode_state', data.get('state', 'Unknown')))}\n"
         f"{progress(data.get('mc_percent'))}\n"
-        f"**Remaining:** {safe(data.get('mc_remaining_time', '?'))} min • "
+        f"**Remaining:** {duration(data.get('mc_remaining_time'))} • "
         f"**Layer:** {safe(data.get('layer_num', '?'))}/{safe(data.get('total_layer_num', '?'))}\n"
-        f"**Nozzle:** {safe(data.get('nozzle_temper', '?'))}°C • **Bed:** {safe(data.get('bed_temper', '?'))}°C"
+        f"**Nozzle:** {whole(data.get('nozzle_temper'))}°C • **Bed:** {whole(data.get('bed_temper'))}°C"
     )
 
 

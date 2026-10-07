@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import faulthandler
 import os
 import signal
 import threading
@@ -12,6 +13,7 @@ from dashboard import Dashboard
 from discord_Intergration.discord_queue import install
 from discord_Intergration.extra_discord import install as install_extras
 from discord_Intergration.controls_discord import install as install_controls
+from discord_Intergration.clear_errors_discord import install as install_clear_errors
 from swapMod.plate_swap_discord import install as install_plate_swap
 from team import Team
 from discord_Intergration.team_discord import install as install_team
@@ -60,6 +62,8 @@ async def retry_listen(runner,hosts,port,every=30):
 
 async def main():
     diagnostics.setup(core.DATA_DIR,core.log)
+    # pm-doctor (#43) sends SIGUSR1 when the app stops answering: every thread's stack goes to the journal.
+    faulthandler.register(signal.SIGUSR1,all_threads=True)
     diagnostics.install_loop_handler(asyncio.get_running_loop(),core.log)
     store=Store(core.DATA_DIR/'management.sqlite3')
     engine=Engine(core,store)
@@ -73,6 +77,7 @@ async def main():
     install_team(core,team)
     install_extras(core,store)
     install_controls(core,dashboard.controls)
+    install_clear_errors(core,dashboard.alerts)
     install_plate_swap(core,engine)
     diagnostics.install_discord(core,store)
     issue_reports.install_discord(core,dashboard.issue_reports)
@@ -100,10 +105,7 @@ async def main():
     async def discord_task():
         if not core.DISCORD_BOT_TOKEN:
             core.log.warning('No Discord token configured: dashboard-only mode.');return
-        try:
-            await core.bot.start(core.DISCORD_BOT_TOKEN)
-        except Exception:
-            core.log.exception('Discord stopped. Dashboard remains available; correct token/access and restart the service.')
+        await core.run_discord(core.bot,core.DISCORD_BOT_TOKEN)   # retries until connected; reconnects by itself after
     task=asyncio.create_task(discord_task())
     scheduler=asyncio.create_task(team.scheduler())
     try:

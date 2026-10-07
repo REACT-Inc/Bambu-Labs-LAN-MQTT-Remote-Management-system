@@ -18,6 +18,9 @@ function showLogin(){ $('app').hidden=true;$('loginScreen').hidden=false;state=n
 function notice(text){$('notice').textContent=text;$('notice').hidden=false;setTimeout(()=>$('notice').hidden=true,7000);}
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.'}[name];}
 function printerLabel(name){return state?.printers.find(p=>p.name===name)?.display_name||name;}
+// Printer badges use the server's display_state (Ready / Printing / Paused / Error / Offline), not the raw state.
+function printerClass(p){const d=p.display_state||p.state;return !p.connected||d==='Error'||d==='Offline'?'bad':['Paused','Preparing'].includes(d)?'warn':d==='Printing'?'blue':'';}
+function printerStateText(p){return p.connected?(p.display_state||p.state)+(p.last_print?` · ${p.last_print}`:''):'OFFLINE';}
 function statusClass(s,online=true){return !online||['FAILED','failed','needs_review'].includes(s)?'bad':['PAUSE','paused','PREPARE','staging','awaiting_start'].includes(s)?'warn':['RUNNING','printing'].includes(s)?'blue':'';}
 // Requested but not yet confirmed: the button pulses purple, a colour no result state uses, until the
 // printer reports the result (then it shows the real state, e.g. amber for light on) or the time runs out.
@@ -63,14 +66,14 @@ function render(){if($('jobDialog').open)renderPrintNowOverride();
  }
  renderJobs();
  $('events').innerHTML=state.events.map(e=>`<div class="event"><small>${new Date(e.time*1000).toLocaleString()}</small><div><strong>${esc(e.title)} · ${esc(printerLabel(e.printer)||'System')}</strong><p>${esc(e.detail)}</p></div></div>`).join('')||'<div class="empty">Events will appear here as printers report and jobs change.</div>';
- if(!settingsLoaded){$('notificationChannel').value=state.settings.notification_channel_id||'';$('commandsChannel').value=state.settings.commands_channel_id||'';$('adminIds').value=(state.settings.admin_user_ids||[]).join('\n');settingsLoaded=true;}
+ if(!settingsLoaded){$('notificationChannel').value=state.settings.notification_channel_id||'';$('commandsChannel').value=state.settings.commands_channel_id||'';$('adminIds').value=(state.settings.admin_user_ids||[]).join('\n');const ping=String(state.settings.alert_ping??'here');$('alertPing').value=/^\d+$/.test(ping)?'role':ping;$('alertPingRole').value=/^\d+$/.test(ping)?ping:'';$('alertPingRoleRow').hidden=$('alertPing').value!=='role';settingsLoaded=true;}
  $('refreshed').textContent='Updated '+new Date().toLocaleTimeString();
  if(selectedPrinter&&$('detailDialog').open)renderDetails();
 }
 function renderJobs(){
  if(!state)return;const filter=$('queueFilter').value,jobs=state.jobs.filter(j=>!filter||j.printer===filter);
  const row=j=>{const q=`data-job="${esc(j.id)}"`;let buttons='';
-  if(j.status==='queued'){if(state.printers.find(p=>p.name===j.printer)?.plate_swap?.enabled)buttons+=actionButton('swapapprove','Approve Swaplist batch…',q);const first=state.jobs.find(x=>x.printer===j.printer&&x.status==='queued');if(first?.id===j.id)buttons+=actionButton('start','Start next',q,'primary')+actionButton('startOverride','Start ignoring error',q,'danger');buttons+=actionButton('up','↑',q)+actionButton('down','↓',q)+actionButton('remove','Remove',q);}
+  if(j.status==='queued'){if(state.printers.find(p=>p.name===j.printer)?.plate_swap?.enabled)buttons+=actionButton('swapapprove','Approve Swaplist batch…',q);const first=state.jobs.find(x=>x.printer===j.printer&&x.status==='queued');if(first?.id===j.id)buttons+=printerError(j.printer)?actionButton('start','Start next (printer reports an error)…',q,'danger'):actionButton('start','Start next',q,'primary');buttons+=actionButton('up','↑',q)+actionButton('down','↓',q)+actionButton('remove','Remove',q);}
   if(j.status==='needs_review')buttons+=['finished','failed','cancelled'].map(o=>actionButton('resolve','Mark '+o,`${q} data-outcome="${o}"`)).join('');
   if(terminal.has(j.status))buttons+=actionButton('reprint','Queue again',q);
   if(terminal.has(j.status)&&state.printers.length>1)buttons+=actionButton('sendto','Print on another printer…',q);
@@ -79,7 +82,9 @@ function renderJobs(){
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
 }
 async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;$('connectionBanner').hidden=true;render();}catch(e){if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
-function confirmAction(title,text,label,callback){$('confirmTitle').textContent=title;$('confirmText').textContent=text;$('confirmLabel').textContent=label;$('confirmCheck').checked=false;pendingConfirmation=callback;$('confirmDialog').showModal();}
+// No confirmation screens in the dashboard: every action runs straight away (the server still checks it is safe,
+// e.g. temperature limits and an idle printer for moves). Discord keeps its confirmations.
+async function confirmAction(title,text,label,callback){notice(title.replace(/\?$/,'')+'…');try{await callback();await refresh();}catch(e){notice(e.message);}}
 function renderDetails(){if(typeof renderDevice==='function')renderDevice();}
 function fmtMinutes(v){const n=Number(v);if(v===null||v===undefined||v===''||!Number.isFinite(n))return '';return n>=60?Math.floor(n/60)+' h '+n%60+' min':n+' min';}
 function miniSwatches(d){const ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),trays=(ams.ams||[]).flatMap(u=>(u.tray||[]).map(t=>t));trays.push(...(Array.isArray(d.vir_slot)&&d.vir_slot.length?d.vir_slot:d.vt_tray?[d.vt_tray]:[]));
@@ -102,12 +107,12 @@ function printerCard(x){
  if(active)actions+=actionButton('stop','■ Stop',n,'danger'+pendingClass('stop',x));
  actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':'')+(lt.busy?' pending':''));
  return `<article class="printer-card${x.connected?'':' offline'}" ${n} tabindex="0" role="button" aria-label="Open ${esc(x.display_name||x.name)}">
-<div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${statusClass(x.state,x.connected)}">${esc(x.connected?x.state:'OFFLINE')}</span></div>
+<div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${printerClass(x)}" title="${esc(x.state||'')}">${esc(x.connected?(x.display_state||x.state):'OFFLINE')}</span></div>
 ${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/${encodeURIComponent(x.name)}?t=${x.snapshot.time}" alt="${esc(x.display_name||x.name)} camera"><small class="pc-cam-time">📷 ${new Date(x.snapshot.time*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</small>`:`<small class="pc-cam-msg">${esc(x.snapshot?.error||'Waiting for the first snapshot…')}</small>`}</div>`:''}
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
-${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${aiLine(x.ai)}
+${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${(x.alerts||[]).length?`<div class="pc-clear">${actionButton('clearerrors','Clear error…',n,'ghost small-btn')}</div>`:''}${aiLine(x.ai)}
 <div class="pc-actions">${actions}<span class="spacer"></span>${actionButton('printerQueue',waiting?`${waiting} queued →`:'Queue →',n,'ghost')}</div></article>`;}
 async function downloadFileListing(printer,button){if(button)button.disabled=true;notice('Reading printer storage…');
  try{const r=await api('files/'+encodeURIComponent(printer),undefined,'GET'),url=URL.createObjectURL(new Blob([r.text],{type:'text/plain'})),a=document.createElement('a');
@@ -153,8 +158,12 @@ function renderPlates(){const sliced=jobUpload.plates.filter(p=>p.sliced);if(!sl
  $('jobPlates').hidden=false;applyStyles($('jobPlates'));suggestAms();}
 $('jobPlates').addEventListener('click',e=>{const b=e.target.closest('[data-plate]');if(!b||b.disabled)return;jobPlate=Number(b.dataset.plate);renderPlates();});
 $('jobPrinter').addEventListener('change',()=>{if(jobUpload)suggestAms();renderPrintNowOverride();});
-// Print now ignoring error: offered only while the chosen printer reports FAILED or an error code (like the queue's Start ignoring error).
-function renderPrintNowOverride(){const p=state?.printers.find(x=>x.name===$('jobPrinter').value);$('printNowOverride').hidden=!(p&&p.connected&&(p.state==='FAILED'||p.error));}
+// One Start / Print now button (#65): when the printer reports an error code, the same button asks whether to
+// start anyway (bypassing the management error check for that one attempt) instead of offering a second button.
+// Only a reported error code counts: FAILED by itself just means the last print failed or was cancelled (ready).
+function printerError(name){const p=state?.printers.find(x=>x.name===name);return p&&p.connected&&p.error?p:null;}
+function errorText(p){return p.error?'error '+(p.error_text||p.error):p.state;}
+function renderPrintNowOverride(){const p=printerError($('jobPrinter').value);$('printNow').textContent=p?'Print now (printer reports an error)…':'Print now';$('printNow').classList.toggle('danger',!!p);}
 async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUpload.asset,printer=$('jobPrinter').value;$('jobAmsHint').textContent='Checking the AMS on that printer…';
  try{const r=await api(`uploads/${encodeURIComponent(asset)}/suggest?printer=${encodeURIComponent(printer)}&plate=${jobPlate}`,undefined,'GET');
   if(jobUpload?.asset!==asset||$('jobPrinter').value!==printer)return;
@@ -170,14 +179,21 @@ function jobDone(message){$('jobDialog').close();$('jobForm').reset();resetJobUp
 $('jobForm').onsubmit=async e=>{e.preventDefault();$('jobError').textContent='';$('submitJob').disabled=true;
  try{await api('jobs',jobData());jobDone('Added to the shared queue.');await refresh();}catch(e){$('jobError').textContent=e.message;}finally{$('submitJob').disabled=false;}};
 $('printNow').onclick=()=>{$('jobError').textContent='';if(!$('jobForm').reportValidity())return;let data;try{data=jobData();}catch(e){$('jobError').textContent=e.message;return;}
+ const p=printerError(data.printer);
+ if(p){confirmAction('Print now, ignoring the reported error?',`${data.label} on ${printerLabel(data.printer)}, plate ${data.plate}. The printer reports ${errorText(p)}. This bypasses the management error check for this print and allows a FAILED state. It does not clear the printer error or override firmware protections.`,
+  'I inspected the printer, cleared the plate, and verified the material and sliced file. Print despite the reported error.',
+  async()=>{await api('jobs',{...data,print_now:true,confirmed:true,override_error:true});jobDone(`Starting on ${printerLabel(data.printer)} (error check bypassed).`);});return;}
  confirmAction('Print now?',`${data.label} on ${printerLabel(data.printer)}, plate ${data.plate}, straight away. ${data.use_ams?'AMS mapping: '+data.mapping+'.':'External spool.'}`,
   'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',
   async()=>{await api('jobs',{...data,print_now:true,confirmed:true});jobDone(`Starting on ${printerLabel(data.printer)}.`);});};
-$('printNowOverride').onclick=()=>{$('jobError').textContent='';if(!$('jobForm').reportValidity())return;let data;try{data=jobData();}catch(e){$('jobError').textContent=e.message;return;}
- const p=state?.printers.find(x=>x.name===data.printer);
- confirmAction('Print now ignoring the reported error?',`${data.label} on ${printerLabel(data.printer)}, plate ${data.plate}. The printer reports ${p?.error?'error '+(p.error_text||p.error):p?.state||'an error'}. This bypasses the management error check and allows a FAILED state. It does not clear the printer error or override firmware protections.`,
-  'I inspected the printer, cleared the plate, and verified the material and sliced file. Print despite the reported error.',
-  async()=>{await api('jobs',{...data,print_now:true,confirmed:true,override_error:true});jobDone(`Starting on ${printerLabel(data.printer)} (error check bypassed).`);});};
+// Clear printer errors and health alerts (#34): the printer is told to dismiss its error the way Bambu Studio does,
+// and the answer only says "Cleared" once the printer stops reporting it.
+function confirmClearAlerts(printer,ids){const p=state?.printers.find(x=>x.name===printer),all=(p?.alerts||[]),chosen=ids==='all'?all:all.filter(a=>ids.includes(a.id));
+ if(!chosen.length){notice('The printer reports no error or alert to clear.');return;}
+ const list=chosen.map(a=>`“${a.message}” (${a.code})`).join('; ');
+ confirmAction(chosen.length>1?`Clear ${chosen.length} alerts on ${printerLabel(printer)}?`:`Clear this alert on ${printerLabel(printer)}?`,
+  `${list}. Check the printer first: clearing only dismisses the message, it doesn't fix the cause. Health (HMS) alerts are hidden in the dashboard until the printer stops reporting them.`,
+  'I checked the printer.',async()=>{notice('Clearing… waiting for the printer to confirm.');const r=await api('printers/'+encodeURIComponent(printer)+'/clearerrors',{ids,confirmed:true});notice(r.message);});}
 $('confirmForm').onsubmit=async e=>{e.preventDefault();const callback=pendingConfirmation;pendingConfirmation=null;$('confirmDialog').close();if(callback){try{await callback();await refresh();}catch(e){notice(e.message);}}};
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b){const card=e.target.closest('.printer-card[data-printer]');if(card)openPrinter(card.dataset.printer);return}const {action,printer,job,outcome}=b.dataset;try{
  if(action==='files'){await downloadFileListing(printer,b);return}
@@ -187,17 +203,18 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  if(action==='lighton'||action==='lightoff'){await toggleLight(printer);return;}
  if(action==='resume'){await printAction(printer,'resume');return;}
  if(action==='stop'){confirmStop(printer);return;}
+ if(action==='clearerrors'){confirmClearAlerts(printer,'all');return;}
  if(action==='swapapprove'){openSwapApproval(job);return;}
  if(action==='sendto'){openSendTo(job);return;}
- if(action==='startOverride'){const j=state.jobs.find(x=>x.id===job);confirmAction('Start ignoring reported error?',`${j.label} on ${printerLabel(j.printer)}. This bypasses the management error check and allows FAILED state. It does not clear the printer error or override firmware protections.`,'I inspected the printer, cleared the plate, and verified the material and sliced file. Start despite the reported error.',()=>api('jobs/'+job+'/start',{confirmed:true,override_error:true}));return;}
- if(action==='start'){const j=state.jobs.find(x=>x.id===job);confirmAction('Start next print?',`${j.label} on ${printerLabel(j.printer)}. Plate ${j.options.plate}. ${j.options.use_ams?'AMS mapping: '+j.options.ams_mapping.join(', '):'External spool'}.`,'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',()=>api('jobs/'+job+'/start',{confirmed:true}));return;}
+ if(action==='start'){const j=state.jobs.find(x=>x.id===job),bad=printerError(j.printer);
+  if(bad){confirmAction('Start next, ignoring the reported error?',`${j.label} on ${printerLabel(j.printer)}. The printer reports ${errorText(bad)}. This bypasses the management error check for this start and allows a FAILED state. It does not clear the printer error or override firmware protections.`,'I inspected the printer, cleared the plate, and verified the material and sliced file. Start despite the reported error.',()=>api('jobs/'+job+'/start',{confirmed:true,override_error:true}));return;}confirmAction('Start next print?',`${j.label} on ${printerLabel(j.printer)}. Plate ${j.options.plate}. ${j.options.use_ams?'AMS mapping: '+j.options.ams_mapping.join(', '):'External spool'}.`,'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',()=>api('jobs/'+job+'/start',{confirmed:true}));return;}
  if(action==='resolve'){confirmAction('Record the verified outcome?',`Mark ${job} as ${outcome}. This records a result; it does not send any command to the printer.`,'I inspected the physical printer and verified this outcome.',()=>api('jobs/'+job+'/resolve',{confirmed:true,outcome}));return;}
  if(action==='remove'){confirmAction('Remove this queued job?',job,'Remove this waiting job from the queue.',()=>api('jobs/'+job+'/remove',{}));return;}
  if(['up','down','reprint'].includes(action)){b.classList.add('pending');await api('jobs/'+job+'/'+action,{});if(action==='reprint')notice('A new copy was added to the queue.');}
  await refresh();
  }catch(e){notice(e.message);}});
 $('takeSnapshot').onclick=async()=>{$('takeSnapshot').disabled=true;$('cameraMessage').textContent='Requesting snapshot…';try{const r=await fetch('/api/camera/'+encodeURIComponent(selectedPrinter));if(!r.ok){const data=await r.json();throw new Error(data.error||'Camera unavailable.');}if(cameraUrl)URL.revokeObjectURL(cameraUrl);cameraUrl=URL.createObjectURL(await r.blob());$('cameraImage').src=cameraUrl;$('cameraImage').hidden=false;$('cameraMessage').textContent='Snapshot captured '+new Date().toLocaleTimeString();}catch(e){$('cameraMessage').textContent=e.message;}finally{$('takeSnapshot').disabled=false;}};
-$('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value});notice('Settings saved.');}catch(e){notice(e.message);}};
+$('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value,alert_ping:$('alertPing').value==='role'?$('alertPingRole').value.trim():$('alertPing').value});notice('Settings saved.');}catch(e){notice(e.message);}};
 $('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';showLogin();}catch(e){notice(e.message);}};
 $('testNotification').onclick=async()=>{try{await api('testnotification',{});notice('Test requested. Check Discord and the activity feed.');}catch(e){notice(e.message);}};
 refresh();setInterval(()=>{if(state&&!document.hidden)refresh();},5000);
@@ -244,3 +261,26 @@ $('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarg
  try{await api('jobs/'+encodeURIComponent(sendJob)+'/sendto',{printer:target,use_ams:$('sendToAms').checked,mapping:$('sendToAms').checked?$('sendToMapping').value:'',checked:$('sendToChecked').checked});
   $('sendToDialog').close();notice(`Added to ${printerLabel(target)}'s queue. Start it from the queue when that printer is ready.`);await refresh();}
  catch(e){$('sendToReason').textContent=e.message;}finally{$('sendToSubmit').classList.remove('pending');}};
+// pm-doctor (#43) runs separately on port 8081 of the same host.
+$('doctorLink').href=`${location.protocol}//${location.hostname}:8081/`;
+// Other alerts (#9): Home Assistant, ntfy, webhooks. Tokens never come back from the server; blank keeps the saved one.
+const ALERT_TYPES={ntfy:'ntfy',home_assistant:'Home Assistant',webhook:'Webhook (JSON)',discord_webhook:'Discord webhook'};
+let alertTargets=[];
+function renderAlertTargets(){$('alertTargets').innerHTML=alertTargets.length?alertTargets.map((t,i)=>`<fieldset class="alert-target" data-index="${i}">
+ <div class="alert-target-row"><label>Type<select data-field="type">${Object.entries(ALERT_TYPES).map(([v,n])=>`<option value="${v}"${t.type===v?' selected':''}>${n}</option>`).join('')}</select></label>
+ <label>Name<input data-field="name" maxlength="60" value="${esc(t.name||'')}" placeholder="e.g. Phone"></label>
+ <label>Send<select data-field="events"><option value="all"${t.events!=='important'?' selected':''}>All alerts</option><option value="important"${t.events==='important'?' selected':''}>Important only</option></select></label></div>
+ <label>URL<input data-field="url" type="url" required value="${esc(t.url||'')}" placeholder="https://ntfy.sh/my-printers"></label>
+ <label>Token (optional)<input data-field="token" type="password" autocomplete="new-password" placeholder="${t.has_token?'Blank keeps the saved token':'For ntfy access tokens or Home Assistant notify'}"></label>
+ <div class="alert-target-row"><label class="checkbox"><input data-field="enabled" type="checkbox"${t.enabled!==false?' checked':''}> On</label>${t.has_token?'<label class="checkbox"><input data-field="clear_token" type="checkbox"> Remove saved token</label>':''}
+ ${t.id?'<button type="button" data-alert-test>Send test</button>':''}<button type="button" class="ghost" data-alert-remove>Remove</button><small class="muted">${esc(t.status||'')}</small></div></fieldset>`).join(''):'<p class="muted">No other alert targets yet.</p>';}
+function readAlertTargets(){return [...document.querySelectorAll('#alertTargets .alert-target')].map(f=>{const t=alertTargets[Number(f.dataset.index)]||{},get=k=>f.querySelector(`[data-field="${k}"]`);
+ return {id:t.id,type:get('type').value,name:get('name').value,url:get('url').value.trim(),events:get('events').value,enabled:get('enabled').checked,token:get('token').value,clear_token:!!get('clear_token')?.checked};});}
+async function loadAlertTargets(){try{alertTargets=(await api('alerttargets',undefined,'GET')).targets;renderAlertTargets();}catch(e){$('alertsStatus').textContent=e.message;}}
+$('addAlertTarget').onclick=()=>{alertTargets=readAlertTargets().map((t,i)=>({...alertTargets[i],...t}));alertTargets.push({type:'ntfy',events:'all',enabled:true});renderAlertTargets();};
+$('alertTargets').addEventListener('click',async e=>{const f=e.target.closest('.alert-target');if(!f)return;const i=Number(f.dataset.index);
+ if(e.target.closest('[data-alert-remove]')){alertTargets=readAlertTargets().map((t,j)=>({...alertTargets[j],...t}));alertTargets.splice(i,1);renderAlertTargets();return;}
+ if(e.target.closest('[data-alert-test]')){const b=e.target;b.disabled=true;try{const r=await api('alerttargets/test',{id:alertTargets[i].id});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Test: '+r.result;}catch(err){$('alertsStatus').textContent=err.message;}finally{b.disabled=false;}}});
+$('alertsForm').onsubmit=async e=>{e.preventDefault();try{const r=await api('alerttargets',{targets:readAlertTargets()});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Saved. Use Send test to check each target.';}catch(err){$('alertsStatus').textContent=err.message;}};
+const tabWithAlerts=tab;tab=function(name){tabWithAlerts(name);if(name==='settings')loadAlertTargets();};
+$('alertPing').addEventListener('change',()=>{$('alertPingRoleRow').hidden=$('alertPing').value!=='role';});

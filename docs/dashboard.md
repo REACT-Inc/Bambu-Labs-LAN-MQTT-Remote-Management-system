@@ -29,6 +29,8 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
 
 ## Printer details
 
+When a printer reports an error or health alert, its card shows **Clear error…**, and the panel lists each alert with **Clear** / **Dismiss** and **Clear all** (see [Clearing errors](printer-controls.md#clearing-errors-and-health-alerts)).
+
 Clicking a printer card opens its **printer panel**. It slides in from the right on a computer, or up from the bottom on a phone.
 
 | Part | What it shows / does |
@@ -49,7 +51,7 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 
 ## Print queue
 
-- **The queue:** each printer's waiting jobs in order. The first job has **Start next** and **Start ignoring error**, and every waiting job has **↑ ↓ Remove**.
+- **The queue:** each printer's waiting jobs in order. The first job has **Start next**. When the printer reports an error, the button says so and asks before starting anyway. and every waiting job has **↑ ↓ Remove**.
 - **Needs review:** jobs whose outcome is uncertain show **Mark finished / failed / cancelled**.
 - **History:** finished jobs, each with **Queue again**, and **Print on another printer…** to send it to a different printer of the same model (see [Print queue](print-queue.md)).
 - **Filter:** a printer filter at the top.
@@ -96,6 +98,7 @@ MeshCentral connection settings, the matching laptops with their online state, a
 | Panel | Use it to |
 |---|---|
 | Discord settings | Set the notification channel ID, the **commands channel ID** (replies are public there and private in every other channel) and **approved user IDs** (admins without Discord Administrator). **Send test notification** checks the channel. |
+| Other alerts | Send the same alerts as Discord to **Home Assistant**, **ntfy** (phone push), any **webhook**, or a **Discord channel webhook**, even without the Discord bot. See [Other alerts](#other-alerts). |
 | Discord command permissions | Choose who can use each Discord command: Everyone, Allowed roles + admins (with the **Allowed role IDs** list), Admins only, or Off. Commands marked 🔒 can only be admin-only or off. Opening an admin command to everyone asks for confirmation, and **Reset all to defaults** restores the defaults. See [Commands and permissions](commands.md). |
 | Dashboard access | Change the dashboard password (12+ characters). This signs everyone out. |
 | Diagnostics & error logs | Download a diagnostic ZIP and see recent errors with their error IDs. See [Troubleshooting](troubleshooting.md). |
@@ -103,3 +106,19 @@ MeshCentral connection settings, the matching laptops with their online state, a
 | GitHub releases | Repository, token, **update channel** (stable / beta / alpha), automatic installation, **Check now**. See [Updates](updates.md). |
 | Software update | Upload a release ZIP, review it, install it. See [Updates](updates.md). |
 | Quick guide | A short summary of the queue rules and Discord commands |
+
+## Other alerts
+
+**Settings → Other alerts** sends every alert the app posts to Discord to other places too. It works even with no Discord bot configured. Add a target, choose **All alerts** or **Important only** (errors, failed prints, AI failure alerts), press **Save alerts**, then **Send test**. The last result is shown under each target.
+
+| Type | URL | Token | What it receives |
+|---|---|---|---|
+| ntfy | `https://ntfy.sh/your-topic`, or your own server. Subscribe to the topic in the ntfy app. | Optional access token | A push with the printer and title as the title; important alerts get high priority |
+| Home Assistant (webhook) | `http://homeassistant.local:8123/api/webhook/<id>` from an automation's **Webhook** trigger | none | JSON `{printer, title, message, level}`, for your automation to use (`trigger.json.title` …) |
+| Home Assistant (notify) | `http://homeassistant.local:8123/api/services/notify/mobile_app_your_phone` | A long-lived access token (your profile → Security) | A notification on that device: `{title, message}` |
+| Webhook | Any URL that accepts JSON | Optional (sent as `Authorization: Bearer …`) | `{printer, title, message, level, color, time}`; `level` is `important` or `info` |
+| Discord webhook | A channel's webhook URL (channel settings → Integrations) | none | The same embed as the bot posts, without needing the bot |
+
+- **Privacy:** tokens are stored on the Pi only. They never come back to the browser; leave the token box blank to keep the saved one.
+- **No slowdown:** each alert is sent in the background with a 10-second limit. A failed send is logged and shown in Settings; it isn't queued for later.
+

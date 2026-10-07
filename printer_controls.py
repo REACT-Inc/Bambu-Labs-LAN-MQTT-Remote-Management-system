@@ -16,6 +16,8 @@ NOZZLE_DIAMETERS=(0.2,0.4,0.6,0.8)
 NOZZLE_TYPES={'stainless_steel':'Stainless steel','hardened_steel':'Hardened steel','tungsten_carbide':'Tungsten carbide'}
 EXTERNAL_SPOOL=255
 EXTERNAL_LEFT=254
+# Bambu printers keep reporting FINISH or FAILED after a print until the next one starts, while sitting idle and ready.
+IDLE_STATES=('IDLE','FINISH','FAILED')
 
 
 def limits(core,name):
@@ -169,10 +171,11 @@ class Controls:
         if not connected:raise ValueError('Printer is offline.')
         if kind in ('move','home'):
             if kind=='move' and homed is not True:raise ValueError('Confirm the printer was homed and the movement area is clear.')
-            if state not in ('IDLE','FINISH') or error:raise ValueError(('Homing' if kind=='home' else 'Jogging')+' requires an idle, error-free printer; paused prints are blocked.')
+            if state not in IDLE_STATES or error:raise ValueError(('Homing' if kind=='home' else 'Jogging')+' requires an idle, error-free printer; paused prints are blocked.')
             if not self.core.EXAMPLE_MODE and time.time()-self.core.last_seen.get(name,0)>15:
                 raise ValueError('Telemetry is stale. Wait for a fresh printer report.')
-            if any(j['printer']==name and j['status'] in ('staging','awaiting_start','printing','paused','needs_review') for j in self.store.jobs()):
+            # A job left "needs review" no longer blocks moves: the printer itself reports it is idle (checked above).
+            if any(j['printer']==name and j['status'] in ('staging','awaiting_start','printing','paused') for j in self.store.jobs()):
                 raise ValueError('Resolve the active queue job before '+('homing.' if kind=='home' else 'jogging.'))
             if time.monotonic()-self.moved.get(name,-100)<3:raise ValueError('Wait three seconds between moves.')
             if kind=='move' and axis in unhomed_axes(data):

@@ -275,11 +275,13 @@ class Engine:
         state, error, data, connected = self.core.state_data(printer)
         if not connected or (not self.core.EXAMPLE_MODE and time.time() - self.core.last_seen.get(printer, 0) > 90):
             raise ValueError('Printer is offline or telemetry is stale. Wait for a fresh report.')
-        allowed = ('IDLE', 'FINISH', 'FAILED') if override_error else ('IDLE', 'FINISH')
+        # FINISH and FAILED are what Bambu printers keep reporting after a print (FAILED also after a cancelled one) while
+        # they sit idle and ready, so both count as ready. A reported error code still blocks (Clear error, or start anyway).
+        allowed = ('IDLE', 'FINISH', 'FAILED')
         if state not in allowed:
-            raise ValueError(f'Printer reports {state}. Stop any current print and wait for an idle/finished/failed report.')
+            raise ValueError(f'Printer reports {state}. Stop any current print and wait until it is ready.')
         if error and not override_error:
-            raise ValueError(f'Printer reports error {error}. Inspect the printer, then use Start ignoring error if appropriate.')
+            raise ValueError(f'Printer reports error {error}. Inspect the printer, then use Clear error, or start anyway if appropriate.')
 
     async def start(self, job_id, confirmed, author, override_error=False):
         if type(override_error) is not bool:

@@ -4,6 +4,7 @@ Self-hosted management for **Bambu Lab printers on your local network**. One ser
 
 - a **web dashboard**, reachable over Tailscale or your LAN
 - a **Discord bot**
+- alerts to **Home Assistant, ntfy and webhooks** (optional, set up in the dashboard)
 
 Both share the same printer connections, print queues, files and history. Nothing runs in the cloud: the printers are controlled over LAN MQTT and FTPS, and the dashboard is served from the Pi.
 

@@ -6,6 +6,10 @@
 - [Sending a problem report](#sending-a-problem-report)
 - [Common problems](#common-problems)
 
+## When the dashboard and Discord are both down
+
+**pm-doctor** keeps working when the app doesn't: open `http://<pi address>:8081/` (dashboard password), or run `sudo pm-doctor` over SSH. It shows why the app is down, and keeps incident records with stack dumps of a frozen app. Set a Discord webhook in `/etc/pm-doctor/config.json` to be told when it happens. See [pm-doctor](doctor.md).
+
 ## Where to look first
 
 | What | Where |
@@ -128,6 +132,10 @@ The dashboard and the Discord bot share one event loop. A watchdog thread checks
 - the **diagnostic report** ZIP, which includes `stalls.log`
 
 Attach it to a problem report or GitHub issue. If this repeats, it's a bug; please report it with that file.
+
+### A printer keeps showing an error
+
+Use **Clear error…** on the printer card, or `/clearerror` in Discord. If the reply says the printer **still reports** the error, its cause is still there (for example a filament runout or a clog): fix it on the printer, then clear again. Health alerts you dismiss come back only if the printer reports them again.
 
 ### A job is stuck in "needs review"
 

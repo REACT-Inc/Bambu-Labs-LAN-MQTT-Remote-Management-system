@@ -69,8 +69,8 @@ The start is refused if:
 - the printer already has an active or unresolved job
 - a software update is in progress
 
-**Start ignoring error** (dashboard) / `/queueforce` (Discord) also allows a printer in FAILED state or with a reported error, for that one attempt only.
-- It **doesn't** clear the error on the printer or bypass firmware protections.
+When the printer reports FAILED or an error, the dashboard's **Start next** (and **Print now**) button says so and asks whether to start anyway. Confirming allows that one attempt despite the error; `/queueforce` does the same in Discord.
+- It **doesn't** clear the error on the printer or bypass firmware protections. To clear the error itself, use **Clear error** (dashboard) or `/clearerror` (Discord); see [Clearing errors](printer-controls.md#clearing-errors-and-health-alerts). After clearing, a FAILED printer starts its next job normally.
 - Use it only after inspecting the printer.
 - Every use is recorded in Activity.
 

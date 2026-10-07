@@ -7,6 +7,7 @@ You can change temperatures, speed, fans and lights, and jog the axes, from the 
 In demo mode, controls only change the simulated data.
 
 - [Pause, resume, stop and light](#pause-resume-stop-and-light)
+- [Clearing errors and health alerts](#clearing-errors-and-health-alerts)
 - [Cancelling single objects](#cancelling-single-objects)
 - [Temperatures](#temperatures)
 - [Chamber heating (H2D)](#chamber-heating-h2d)
@@ -31,6 +32,24 @@ In demo mode, controls only change the simulated data.
 - **After the print command may have been sent:** the job becomes *needs review*. See [Print queue](print-queue.md#when-a-job-needs-review).
 
 Light control uses the standard `chamber_light` command. Whether it works depends on the model and firmware.
+
+## Clearing errors and health alerts
+
+When a printer reports an error (for example after a print finished or failed) or a health (HMS) alert, it keeps reporting it until it is dismissed. You can clear it without walking to the printer.
+
+| Where | How |
+|---|---|
+| Dashboard, printer card | **Clear error…** clears everything the printer reports |
+| Dashboard, printer panel | Each error and alert is listed with its official description: **Clear** (error) or **Dismiss** (health alert), plus **Clear all** |
+| Discord | `/clearerror name?`, or **Clear error…** under an error notification |
+
+How it works:
+- **Confirmation first.** Clearing only dismisses the message; it doesn't fix the cause. Check the printer first.
+- **Print errors** are cleared on the printer with the same commands as Bambu Studio's error dialog: `clean_print_error`, then closing the dialog with `uiop`.
+- **Honest result.** The app waits up to 20 seconds for the printer's next reports. It says **Cleared** only if the printer stopped reporting the error. Otherwise it says **the printer still reports this error**: fix the cause, then clear it again.
+- **Health alerts** are hidden in the dashboard until the printer stops reporting them, and show again if they come back. They are not muted on the printer: Bambu Studio's only command for that is "don't remind me again", which would hide future alerts too.
+- **The queue.** A printer left in FAILED by a finished or failed print can start the next queued job normally once its error is cleared, without starting anyway despite the error. Clearing never starts a job, and the next job still needs the plate-clear confirmation.
+- **Logged.** Every clear goes to Activity with who did it, the printer and the error.
 
 ## Cancelling single objects
 
