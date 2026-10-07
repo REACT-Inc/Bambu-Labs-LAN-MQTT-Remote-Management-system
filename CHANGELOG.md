@@ -39,7 +39,7 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Queue:** a FAILED printer without an error starts the next job normally.
 - **Choose which classes count as a failure** (for all printers), for example **stringing**: tick them in a printer's AI panel. New installs count stringing too.
 - **"Pause the print when a failure is found"** is now a checkbox in the AI panel (all printers), instead of `"action"` in config.json.
-- **Important alerts ping people in Discord:** AI failure alerts and printer errors mention **@here** by default. Choose @everyone, a role or nobody under Settings → Discord settings.
+- **Important alerts ping the people you choose in Discord:** AI failure alerts and printer errors mention the people listed under Settings → Discord settings → **People to ping** (Discord user IDs). Nobody is pinged by default, and never @here or @everyone.
 
 ### Fixed
 - **Movement commands didn't work after a failed or cancelled print.** Moves required IDLE or FINISH and refused the FAILED state that printers keep reporting. A queue job left in "needs review" also blocked moves forever, and the buttons needed an "unlock" checkbox. All three are fixed; the printer must still be idle with no error.

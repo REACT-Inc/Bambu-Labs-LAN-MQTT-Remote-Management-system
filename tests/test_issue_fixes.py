@@ -87,16 +87,20 @@ class ReadableStates(unittest.TestCase):
 
 
 class AlertPings(unittest.TestCase):
-    def test_important_alerts_ping(self):
+    """Important alerts ping only the people chosen in the dashboard: nobody by default, never @here/@everyone."""
+    def test_only_chosen_people_are_pinged(self):
         with tempfile.TemporaryDirectory() as d:
             core=load_core(d)
-            self.assertEqual(core.ping_for('🤖 AI paused a failing print')[0],'@here')            # default
-            self.assertEqual(core.ping_for('🛑 Printer error')[0],'@here')
-            self.assertIsNone(core.ping_for('✅ Print complete')[0])                          # routine updates stay quiet
-            core.settings['alert_ping']='123456789012345678'
+            self.assertIsNone(core.ping_for('🤖 AI paused a failing print')[0])   # nobody by default
+            core.settings['alert_ping_users']=[111111111111111111,222222222222222222]
             text,mentions=core.ping_for('🤖 AI: print may be failing')
-            self.assertEqual(text,'<@&123456789012345678>');self.assertEqual([r.id for r in mentions.roles],[123456789012345678])
-            core.settings['alert_ping']='none';self.assertIsNone(core.ping_for('🛑 Printer error')[0])
+            self.assertEqual(text,'<@111111111111111111> <@222222222222222222>')
+            self.assertEqual([u.id for u in mentions.users],[111111111111111111,222222222222222222])
+            self.assertFalse(mentions.everyone);self.assertFalse(mentions.roles)
+            self.assertEqual(core.ping_for('🛑 Printer error')[0],text)
+            self.assertIsNone(core.ping_for('✅ Print complete')[0])          # routine updates stay quiet
+            core.settings['alert_ping']='everyone';core.settings['alert_ping_users']=[]
+            self.assertIsNone(core.ping_for('🛑 Printer error')[0])           # the old @here/@everyone setting is ignored
             asyncio.run(core.bot.close())
 
 

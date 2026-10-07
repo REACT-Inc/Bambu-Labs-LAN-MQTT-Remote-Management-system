@@ -66,7 +66,7 @@ function render(){if($('jobDialog').open)renderPrintNowOverride();
  }
  renderJobs();
  $('events').innerHTML=state.events.map(e=>`<div class="event"><small>${new Date(e.time*1000).toLocaleString()}</small><div><strong>${esc(e.title)} · ${esc(printerLabel(e.printer)||'System')}</strong><p>${esc(e.detail)}</p></div></div>`).join('')||'<div class="empty">Events will appear here as printers report and jobs change.</div>';
- if(!settingsLoaded){$('notificationChannel').value=state.settings.notification_channel_id||'';$('commandsChannel').value=state.settings.commands_channel_id||'';$('adminIds').value=(state.settings.admin_user_ids||[]).join('\n');const ping=String(state.settings.alert_ping??'here');$('alertPing').value=/^\d+$/.test(ping)?'role':ping;$('alertPingRole').value=/^\d+$/.test(ping)?ping:'';$('alertPingRoleRow').hidden=$('alertPing').value!=='role';settingsLoaded=true;}
+ if(!settingsLoaded){$('notificationChannel').value=state.settings.notification_channel_id||'';$('commandsChannel').value=state.settings.commands_channel_id||'';$('adminIds').value=(state.settings.admin_user_ids||[]).join('\n');$('alertPingUsers').value=(state.settings.alert_ping_users||[]).join('\n');settingsLoaded=true;}
  $('refreshed').textContent='Updated '+new Date().toLocaleTimeString();
  if(selectedPrinter&&$('detailDialog').open)renderDetails();
 }
@@ -214,7 +214,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  await refresh();
  }catch(e){notice(e.message);}});
 $('takeSnapshot').onclick=async()=>{$('takeSnapshot').disabled=true;$('cameraMessage').textContent='Requesting snapshot…';try{const r=await fetch('/api/camera/'+encodeURIComponent(selectedPrinter));if(!r.ok){const data=await r.json();throw new Error(data.error||'Camera unavailable.');}if(cameraUrl)URL.revokeObjectURL(cameraUrl);cameraUrl=URL.createObjectURL(await r.blob());$('cameraImage').src=cameraUrl;$('cameraImage').hidden=false;$('cameraMessage').textContent='Snapshot captured '+new Date().toLocaleTimeString();}catch(e){$('cameraMessage').textContent=e.message;}finally{$('takeSnapshot').disabled=false;}};
-$('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value,alert_ping:$('alertPing').value==='role'?$('alertPingRole').value.trim():$('alertPing').value});notice('Settings saved.');}catch(e){notice(e.message);}};
+$('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value,alert_ping_users:$('alertPingUsers').value});notice('Settings saved.');}catch(e){notice(e.message);}};
 $('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';showLogin();}catch(e){notice(e.message);}};
 $('testNotification').onclick=async()=>{try{await api('testnotification',{});notice('Test requested. Check Discord and the activity feed.');}catch(e){notice(e.message);}};
 refresh();setInterval(()=>{if(state&&!document.hidden)refresh();},5000);
@@ -283,4 +283,3 @@ $('alertTargets').addEventListener('click',async e=>{const f=e.target.closest('.
  if(e.target.closest('[data-alert-test]')){const b=e.target;b.disabled=true;try{const r=await api('alerttargets/test',{id:alertTargets[i].id});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Test: '+r.result;}catch(err){$('alertsStatus').textContent=err.message;}finally{b.disabled=false;}}});
 $('alertsForm').onsubmit=async e=>{e.preventDefault();try{const r=await api('alerttargets',{targets:readAlertTargets()});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Saved. Use Send test to check each target.';}catch(err){$('alertsStatus').textContent=err.message;}};
 const tabWithAlerts=tab;tab=function(name){tabWithAlerts(name);if(name==='settings')loadAlertTargets();};
-$('alertPing').addEventListener('change',()=>{$('alertPingRoleRow').hidden=$('alertPing').value!=='role';});
