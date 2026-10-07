@@ -1012,16 +1012,13 @@ PING_TITLES = ('🤖', '🛑 Printer error')   # AI failure alerts and printer e
 
 
 def ping_for(title):
-    """(message text, allowed mentions) for an important alert, from settings "alert_ping": "here" (default),
-    "everyone", a role ID, or "none"."""
-    if not str(title).startswith(PING_TITLES):
+    """(message text, allowed mentions) for an important alert: the people chosen in the dashboard (settings
+    "alert_ping_users", Discord user IDs). Nobody by default, and never @here / @everyone or roles."""
+    users = [int(u) for u in settings.get('alert_ping_users') or [] if str(u).isdigit()]
+    if not str(title).startswith(PING_TITLES) or not users:
         return None, discord.AllowedMentions.none()
-    choice = str(settings.get('alert_ping', 'here') or 'none')
-    if choice in ('here', 'everyone'):
-        return f'@{choice}', discord.AllowedMentions(everyone=True, users=False, roles=False)
-    if choice.isdigit():
-        return f'<@&{choice}>', discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(int(choice))])
-    return None, discord.AllowedMentions.none()
+    return ' '.join(f'<@{u}>' for u in users), discord.AllowedMentions(everyone=False, roles=False,
+                                                                     users=[discord.Object(u) for u in users])
 
 
 def queue_notification(*args):

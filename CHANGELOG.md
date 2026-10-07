@@ -39,7 +39,7 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Queue:** a FAILED printer without an error starts the next job normally.
 - **Choose which classes count as a failure** (for all printers), for example **stringing**: tick them in a printer's AI panel. New installs count stringing too.
 - **"Pause the print when a failure is found"** is now a checkbox in the AI panel (all printers), instead of `"action"` in config.json.
-- **Important alerts ping people in Discord:** AI failure alerts and printer errors mention **@here** by default. Choose @everyone, a role or nobody under Settings → Discord settings.
+- **Important alerts ping the people you choose in Discord:** AI failure alerts and printer errors mention the people listed under Settings → Discord settings → **People to ping** (Discord user IDs). Nobody is pinged by default, and never @here or @everyone.
 
 ### Fixed
 - **Commands show their result much sooner (#60).** The printer usually acted right away, but the dashboard could keep showing "waiting for the printer" for many seconds.

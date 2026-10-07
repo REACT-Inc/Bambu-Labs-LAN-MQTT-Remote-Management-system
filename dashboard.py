@@ -307,7 +307,9 @@ class Dashboard:
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
             discord=self.core.bot.is_ready(), printers=printers,jobs=jobs,events=self.store.events(),
-            settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)]},
+            settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)],
+                      # Discord IDs are sent as text: they are larger than JavaScript numbers can hold exactly.
+                      'alert_ping_users':[str(x) for x in self.core.settings.get('alert_ping_users') or []]},
             csrf=request['session']['csrf']))
 
     async def upload(self, request):
@@ -490,10 +492,12 @@ class Dashboard:
             value=data.get(key)
             updated[key]=int(value) if value else None
             if updated[key] is not None and updated[key]<=0: raise ValueError('IDs must be positive.')
-        ping=str(data.get('alert_ping',updated.get('alert_ping','here')) or 'none').strip().lstrip('@')
-        if ping not in ('none','here','everyone') and not (ping.isdigit() and 0<int(ping)<2**63):
-            raise ValueError('Ping: choose none, @here, @everyone or a role ID.')
-        updated['alert_ping']=ping
+        # People to ping for important alerts: Discord user IDs, one per line or comma-separated.
+        people=[v.strip().strip('<@!>') for v in str(data.get('alert_ping_users','')).replace('\n',',').split(',') if v.strip()]
+        if any(not p.isdigit() or not 0<int(p)<2**63 for p in people) or len(people)>25:
+            raise ValueError('People to ping: up to 25 Discord user IDs (numbers), one per line.')
+        updated['alert_ping_users']=list(dict.fromkeys(int(p) for p in people))
+        updated.pop('alert_ping',None)
         ids=[int(v.strip()) for v in str(data.get('admin_user_ids','')).replace('\n',',').split(',') if v.strip()]
         if any(v<=0 for v in ids): raise ValueError('IDs must be positive.')
         updated['admin_user_ids']=ids
