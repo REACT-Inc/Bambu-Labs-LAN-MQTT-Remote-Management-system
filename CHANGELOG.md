@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.8.0)
+## 1.7.5-beta.1
+
+Built on 1.7.4-beta.1. Clear printer errors, the pm-doctor watchdog, alerts to Home Assistant / ntfy / webhooks, the reworked Swapmod, no confirmation screens, readable printer states and many fixes.
 
 ### Added
 - **Clear printer errors and health alerts from the dashboard and Discord (#34).**
@@ -40,6 +42,14 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 - **Choose which classes count as a failure** (for all printers), for example **stringing**: tick them in a printer's AI panel. New installs count stringing too.
 - **"Pause the print when a failure is found"** is now a checkbox in the AI panel (all printers), instead of `"action"` in config.json.
 - **Important alerts ping the people you choose in Discord:** AI failure alerts and printer errors mention the people listed under Settings → Discord settings → **People to ping** (Discord user IDs). Nobody is pinged by default, and never @here or @everyone.
+- **Swapmod reworked: it runs your swap print and keeps the queue going.**
+  - **Settings:** per printer there's only **on/off** and the **swap print file** (the sliced `.3mf` that swaps the plate). Plate counts, Swaplist batch approvals and starting-setup checks are gone.
+  - **Finished print:** the swap print starts as a normal queue job, then the next waiting job starts on its own.
+  - **Failed print:** it doesn't swap automatically, so the cause doesn't repeat. **Swap plate now** in the printer panel, or `/plateswap now`, runs the swap any time.
+  - **Discord:** the commands are `/plateswap set` and `/plateswap now`.
+- **One Start button (#65).**
+  - **Queue:** the separate **Start ignoring error** button is gone. When the printer reports FAILED or an error, **Start next** turns red, says so, and asks whether to start anyway (bypassing the management error check for that one start).
+  - **Print now:** the same applies when queueing a new print; **Print now ignoring error** is gone.
 
 ### Fixed
 - **Commands show their result much sooner (#60).** The printer usually acted right away, but the dashboard could keep showing "waiting for the printer" for many seconds.
@@ -48,22 +58,6 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 - **Movement commands didn't work after a failed or cancelled print.** Moves required IDLE or FINISH and refused the FAILED state that printers keep reporting. A queue job left in "needs review" also blocked moves forever, and the buttons needed an "unlock" checkbox. All three are fixed; the printer must still be idle with no error.
 - **Cancel object did nothing for prints started from Bambu Studio, Handy or the printer.** The section only appeared for prints started from this app. Now the print file is copied from the printer's storage once per print, and its objects can be cancelled. Prints sent from the cloud keep their file internally, which the app says.
 - **AI boxes on the live camera** now also show while the printer isn't printing: the AI looks at the live view while it's open (display only, never judged or paused on).
-
-### Changed
-- **Swapmod reworked: it runs your swap print and keeps the queue going.**
-  - **Settings:** per printer there's only **on/off** and the **swap print file** (the sliced `.3mf` that swaps the plate). Plate counts, Swaplist batch approvals and starting-setup checks are gone.
-  - **Finished print:** the swap print starts as a normal queue job, then the next waiting job starts on its own.
-  - **Failed print:** it doesn't swap automatically, so the cause doesn't repeat. **Swap plate now** in the printer panel, or `/plateswap now`, runs the swap any time.
-  - **Discord:** the commands are `/plateswap set` and `/plateswap now`.
-
-## Unreleased (1.7.5)
-
-### Changed
-- **One Start button (#65).**
-  - **Queue:** the separate **Start ignoring error** button is gone. When the printer reports FAILED or an error, **Start next** turns red, says so, and asks whether to start anyway (bypassing the management error check for that one start).
-  - **Print now:** the same applies when queueing a new print; **Print now ignoring error** is gone.
-
-### Fixed
 - **The Discord bot reconnects without a restart (#14).** Once connected, it already reconnected by itself after the internet dropped. But if the internet was down when the bot first logged in (a Pi booting before its network, or a router restart), it stayed offline until the service was restarted. Now it tries again after 15 seconds, backing off to every 5 minutes. A rejected token is reported in the log, without retrying.
 - **Permission refusals are always private (#23).** "You can't use this command" used to be posted publicly in the commands channel. Now only the person who ran the command sees it, in every channel.
 - **Rounded numbers in Discord (#42).** `/printer`, progress notifications and `/filaments` showed values as reported, such as `219.96875°C` or `312 min`. They now show `220°C` and `5 h 12 min`. The dashboard already rounded them.
