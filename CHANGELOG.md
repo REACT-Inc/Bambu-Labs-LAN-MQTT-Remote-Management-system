@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.7.6)
+## 1.7.6-beta.1
+
+Built on 1.7.5-beta.1. A bed check AI that tells whether a printer's bed is empty, a status and notification icon at the top left, and AI boxes on every live-view frame.
 
 ### Added
 - **Bed check AI: is the bed empty?** A second AI model on the AI HAT, next to the failure model. See [Bed check AI](failureDetection/FAILURE_DETECTION.md#bed-check-ai-is-the-bed-empty).
