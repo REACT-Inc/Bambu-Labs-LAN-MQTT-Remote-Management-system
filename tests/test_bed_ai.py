@@ -70,18 +70,30 @@ class BedTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([p.name for p in (Path(self.tmp.name)/'models'/'bed').glob('*.hef')],['clip_resnet_50x4-v2.15.0-hailo8.hef'])
 
     async def test_download_progress_and_failure_show_in_the_status_icon(self):
-        seen=[]
-        def fetch(url,path,progress):
-            progress(0.4);raise OSError('network unreachable')
+        import threading
+        seen,shown=[],threading.Event()
+        def fetch(url,path,progress):   # runs in a thread: waits until its progress update is on screen, then fails
+            progress(0.4);shown.wait(5);raise OSError('network unreachable')
         self.bed.fetch=fetch
         original=self.center.set
-        def spy(key,title,detail='',level='busy',progress=None):seen.append((title,level,progress));original(key,title,detail,level,progress)
+        def spy(key,title,detail='',level='busy',progress=None):
+            seen.append((title,level,progress));original(key,title,detail,level,progress)
+            if progress==0.4:shown.set()
         self.center.set=spy
         await self.setup();await asyncio.sleep(0)
         self.assertEqual(seen[0],('Downloading the bed check AI','busy',0))
         self.assertIn(('Downloading the bed check AI','busy',0.4),seen)
         item=self.center.snapshot()['items'][0];self.assertEqual((item['title'],item['level']),('Bed check AI setup failed','warn'))
         self.assertIn('network unreachable',item['detail']);self.assertFalse(self.bed.ready)
+
+    async def test_a_late_progress_update_does_not_cover_the_result(self):
+        late=[]
+        def fetch(url,path,progress):
+            late.append(progress);path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'hef')
+        self.bed.fetch=fetch
+        await self.setup()
+        late[0](0.99);await asyncio.sleep(0.01)   # handled only after the download ended
+        item=self.center.snapshot()['items'][0];self.assertEqual((item['title'],item['level']),('Bed check AI ready','ok'))
 
     async def test_nothing_without_an_ai_hat(self):
         self.monitor.settings['model']='/models/print_failure.onnx'   # CPU model: no AI HAT
