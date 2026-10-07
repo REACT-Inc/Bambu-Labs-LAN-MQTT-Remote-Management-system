@@ -149,10 +149,15 @@ class BedAI:
         try:
             if not path.is_file():
                 self.status('Downloading the bed check AI', f'{MODEL} from the Hailo Model Zoo, for {path.stem.rsplit("-", 1)[-1]}', 'busy', 0)
-                loop = asyncio.get_running_loop()
-                progress = lambda fraction: loop.call_soon_threadsafe(
-                    self.status, 'Downloading the bed check AI', 'From the Hailo Model Zoo', 'busy', fraction)
-                await asyncio.to_thread(self.fetch, url, path, progress)
+                loop, downloading = asyncio.get_running_loop(), [True]
+
+                def shown(fraction):   # on the event loop; a late update must not cover the final status
+                    if downloading[0]:
+                        self.status('Downloading the bed check AI', 'From the Hailo Model Zoo', 'busy', fraction)
+                try:
+                    await asyncio.to_thread(self.fetch, url, path, lambda fraction: loop.call_soon_threadsafe(shown, fraction))
+                finally:
+                    downloading[0] = False
                 for old in self.folder.glob(f'{MODEL}-*.hef'):   # a model for an older HailoRT
                     if old != path:
                         old.unlink(missing_ok=True)

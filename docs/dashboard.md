@@ -51,7 +51,7 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 | Part | What it shows / does |
 |---|---|
 | Header | Name, state, a progress ring with layers and time left, and **Pause / Resume / Stop / light** |
-| Camera | Shows the latest still snapshot straight away. **▶** starts live view (about 1 frame per second) and **Stop live view** stops it. See [Printer controls & camera](printer-controls.md#camera). |
+| Camera | Shows the latest still snapshot straight away. **▶** starts live view (every new camera frame, with AI boxes) and **Stop live view** stops it. See [Printer controls & camera](printer-controls.md#camera). |
 | Temperature | Tiles for nozzle, bed and chamber. Tap a tile to type a new target. |
 | Print speed | Silent, Standard, Sport, Ludicrous |
 | Fans | A slider per fan, plus all fans. The fan is set when you let go of the slider. It shows *Setting…* until the printer reports the new speed. |

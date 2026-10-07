@@ -54,6 +54,7 @@ DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], thres
                 geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
                 hold=None, focus=True, bed_ai={}, bed_model='')
 CAMERAS = 2   # camera pictures fetched at the same time
+LIVE_CPU_GAP = 3   # seconds between live-view AI looks on the CPU (the AI HAT looks at every frame)
 START_DELAY = 5   # seconds after start-up before the AI helper is started
 START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
 GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
@@ -776,8 +777,6 @@ class FailureMonitor:
         if state != 'RUNNING' or not connected:
             self.judges.pop(name, None)
             self._set(name, status='idle', message='Watches while the printer is printing.', score=None, failing=0, frames=0, job='')
-            if connected:
-                await self.preview(name)
             return
         tuning = self.tuning(name)
         if judge is None or judge.job != job:
@@ -888,18 +887,16 @@ class FailureMonitor:
                     labels=sorted(tuning['labels']), detections=detections, crops=crops, where=where,
                     picture=base64.b64encode(picture).decode(), checked=self.clock())
 
-    async def preview(self, name):
-        """While someone has the live view open on a printer that isn't printing, show the AI's boxes on it anyway:
-        one look at the newest live frame per round. Display only: nothing is judged, saved or acted on."""
-        feed = getattr(getattr(self.core, 'live_cameras', None), 'feeds', {}).get(name)
-        if not feed or not getattr(feed, 'frame', None) or time.time() - getattr(feed, 'updated', 0) > 5:
-            return
+    async def live(self, name, frame):
+        """The boxes for one live-view frame, printing or not: called for each new frame while someone watches the
+        printer live (live_camera.Cameras.score_frames). Display only: nothing is judged, saved or acted on.
+        With the AI HAT it keeps up with the camera (sync); on the CPU it looks at most every LIVE_CPU_GAP seconds."""
+        if not self.enabled or not self.watching(name):
+            return None
         tuning = self.tuning(name)
-        try:
-            _, detections = await self.backend.score(feed.frame, self.crops(name, tuning))
-        except Exception:
-            return
-        self._set(name, **self.overlay(name, detections, tuning))
+        _, detections = await self.backend.score(frame, self.crops(name, tuning))
+        on_hat = getattr(self.backend, 'backend_name', '').startswith('AI HAT')
+        return dict(self.overlay(name, detections, tuning), sync=on_hat, gap=0 if on_hat else LIVE_CPU_GAP)
 
     def overlay(self, name, detections, tuning):
         """What the dashboard draws over the camera picture: the boxes the model found in the last checked frame

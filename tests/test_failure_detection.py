@@ -345,19 +345,20 @@ class MonitorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((state['boxes_at'],state['threshold'],state['hold']),(self.clock.now,0.6,0.45))
         self.assertEqual(len(state['zoom']),2)   # where it zooms in next: the print area and the spot
 
-    async def test_live_view_gets_boxes_while_idle(self):
-        import time as _time
+    async def test_live_view_frames_get_boxes_while_idle(self):
         class Boxes(FakeBackend):
+            backend_name='AI HAT (Hailo-8)'
             async def score(self,jpeg,crops=None):
-                self.calls+=1;return 0.3,[{'label':'spaghetti','score':0.3,'box':[0.1,0.1,0.2,0.2]}]
+                self.calls+=1;self.jpeg=jpeg;return 0.3,[{'label':'spaghetti','score':0.3,'box':[0.1,0.1,0.2,0.2]}]
         core=FakeCore(state='IDLE');backend=Boxes();m=self.monitor(core,backend=backend)
         await self.run_checks(m,1)
-        self.assertEqual(backend.calls,0)                     # idle and no live view: nothing to look at
-        core.live_cameras=SimpleNamespace(feeds={'H2D':SimpleNamespace(frame=b'live',updated=_time.time())})
-        await self.run_checks(m,1)
-        state=m.state('H2D')
-        self.assertEqual(backend.calls,1);self.assertEqual(state['boxes'][0]['label'],'spaghetti')
-        self.assertEqual(state['status'],'idle');core.notify.assert_not_awaited()   # display only, never judged
+        self.assertEqual(backend.calls,0)                     # idle and nobody watching live: nothing to look at
+        overlay=await m.live('H2D',b'frame-7')
+        self.assertEqual((backend.calls,backend.jpeg),(1,b'frame-7'))   # the live frame itself
+        self.assertEqual(overlay['boxes'][0]['label'],'spaghetti');self.assertEqual((overlay['sync'],overlay['gap']),(True,0))
+        self.assertNotEqual(m.state('H2D').get('status'),'failure');core.notify.assert_not_awaited()   # display only, never judged
+        backend.backend_name='CPU';self.assertEqual((await m.live('H2D',b'f'))['gap'],3)   # the CPU looks less often
+        m.set_watching('H2D',False);self.assertIsNone(await m.live('H2D',b'f'))
 
     async def test_stringing_can_count_as_a_failure_for_all_printers(self):
         class Stringy(FakeBackend):
