@@ -1039,5 +1039,6 @@ class FailureMonitor:
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
+        await self.bed.stop()
         if self.backend and hasattr(self.backend, 'close'):
             await self.backend.close()

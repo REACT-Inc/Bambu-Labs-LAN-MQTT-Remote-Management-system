@@ -98,6 +98,7 @@ class BedAI:
         self.task, self.checked, self.failed_at = None, 0, 0
         self.message = ''
         self.last = {}   # printer -> the last check: {'vector', 'state', 'detail', 'checked'}
+        self.cache = {}   # printer -> its examples, read from disk once (the dashboard asks for the counts constantly)
 
     # ---- the model file ----
 
@@ -131,6 +132,11 @@ class BedAI:
             return   # the helper hasn't said which chip and HailoRT it has yet
         self.checked = self.clock()
         self.task = asyncio.create_task(self.setup())
+
+    async def stop(self):
+        if self.task and not self.task.done():
+            self.task.cancel()
+            await asyncio.gather(self.task, return_exceptions=True)
 
     async def setup(self):
         wanted = self.wanted()
@@ -179,11 +185,13 @@ class BedAI:
         return self.memory / f'{safe_name(name)}.examples.json'
 
     def examples(self, name):
-        try:
-            data = json.loads(self.path(name).read_text())
-            return {kind: list(data.get(kind) or []) for kind in ('empty', 'parts')}
-        except (OSError, ValueError):
-            return {'empty': [], 'parts': []}
+        if name not in self.cache:
+            try:
+                data = json.loads(self.path(name).read_text())
+                self.cache[name] = {kind: list(data.get(kind) or []) for kind in ('empty', 'parts')}
+            except (OSError, ValueError):
+                self.cache[name] = {'empty': [], 'parts': []}
+        return {kind: list(items) for kind, items in self.cache[name].items()}
 
     def counts(self, name):
         return {kind: len(items) for kind, items in self.examples(name).items()}
@@ -195,6 +203,7 @@ class BedAI:
         temporary = self.path(name).with_suffix('.tmp')
         temporary.write_text(json.dumps(examples, separators=(',', ':')))
         os.replace(temporary, self.path(name))
+        self.cache[name] = examples
 
     def bed_crop(self, name):
         """The calibrated bed outline's bounding box (with a margin for tall parts), or None for the whole picture."""
