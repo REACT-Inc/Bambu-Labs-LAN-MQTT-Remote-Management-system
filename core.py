@@ -297,7 +297,7 @@ def default_level(root):
 
 
 def command_level(root):
-    """Effective permission level for a top-level command name (e.g. 'plateswap' for /plateswap check)."""
+    """Effective permission level for a top-level command name (e.g. 'plateswap' for /plateswap now)."""
     level = (settings.get('command_permissions') or {}).get(root, default_level(root))
     if level not in LEVELS:
         level = default_level(root)
@@ -884,7 +884,7 @@ def help_embed(admin=False):
         ('📊 Printers & files', {'status','printer','filaments','file','help','adminhelp'}, 'Printer status, camera snapshots, filament and stored files.'),
         ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move','home'}, 'Pause/resume/cancel, lights, temperatures, speed, fan, homing and axis jogging.'),
         ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'View, add, start and manage jobs. Starts and changes ask for confirmation and are logged.'),
-        ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
+        ('🔄 Swapmod', {'plateswap'}, 'Turn Swapmod on or off, and swap the plate now with the swap print.'),
         ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),
         ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','attending','notattending','attendance','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes, reminders and meeting attendance.'),
         ('💻 Laptops & server', {'laptops','laptop','server','reboot'}, 'MeshCentral laptops and commands, Pi status and reboot.'),

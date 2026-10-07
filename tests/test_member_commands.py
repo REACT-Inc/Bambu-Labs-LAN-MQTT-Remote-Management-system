@@ -151,7 +151,7 @@ class MemberCommandTests(unittest.IsolatedAsyncioTestCase):
                 async def json(self):return self.data
             state=dash.permission_state();rows={r['command']:r for r in state['commands']}
             self.assertEqual((rows['pause']['level'],rows['move']['level'],rows['reboot']['locked']),('everyone','admin',True))
-            self.assertIn('plateswap check',rows['plateswap']['subcommands'])
+            self.assertIn('plateswap now',rows['plateswap']['subcommands'])
             for bad in [{'levels':{'nope':'admin'}},{'levels':{'pause':'sometimes'}},{'levels':{'reboot':'everyone'}},{'levels':{},'member_role_ids':'-5'}]:
                 with self.assertRaises(ValueError):await dash.save_permissions(Request(bad))
             response=await dash.save_permissions(Request({'levels':{'move':'role','pause':'everyone','fan':'admin'},'member_role_ids':'555\n777'}))

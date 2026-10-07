@@ -99,9 +99,8 @@ Every command in this table shows a confirmation card first. Only the person who
 
 | Command | Parameters | What it does | Notes / limits |
 |---|---|---|---|
-| `/plateswap configure` | `name` `enabled` `model?` `spares?` | Enable/disable an installed Swapmod kit and set its magazine plate count | |
-| `/plateswap approve` | `job_id` `plates` | Approve a Swaplist batch and its total plate count | |
-| `/plateswap check` | `name` | Confirm the starting setup before a batch | Records the check. Sends no movement |
+| `/plateswap set` | `name` `enabled` | Turn Swapmod on or off for an A1 / A1 mini | The swap print file is chosen in the dashboard |
+| `/plateswap now` | `name` | Swap the plate now by running the swap print | |
 
 ### Server administration
 
