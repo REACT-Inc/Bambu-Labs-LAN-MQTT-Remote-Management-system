@@ -181,7 +181,9 @@ class Checks:
 
     def network(self, config):
         printers = []
-        for printer in (config.get('printers') or [])[:20]:
+        # Printers from config.json and the ones added in the dashboard (printers.json in the app's data folder, #8).
+        added = [p for p in load_json(self.data_dir / 'printers.json', []) if isinstance(p, dict)]
+        for printer in ((config.get('printers') or []) + added)[:20]:
             if isinstance(printer, dict) and printer.get('ip'):
                 printers.append(dict(name=printer.get('name', '?'), mqtt=self.reachable(printer['ip'], 8883)))
         tailscale = ''

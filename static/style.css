@@ -251,3 +251,9 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 @media(prefers-reduced-motion:reduce){.status-dot.busy{animation:none}}
 .pc-ai{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
 .reprint-printers{list-style:none;padding:0;margin:8px 0 12px}.reprint-printers li{padding:6px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.6}.reprint-printers button{margin-left:6px}
+.setup-banner{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.restart-note{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0 14px;padding:10px 12px;border:1px solid #576b48;background:#263020;border-radius:9px;font-size:13px}
+.setup-printers{list-style:none;padding:0;margin:12px 0 4px}.setup-printers li{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 0;border-top:1px solid var(--line);font-size:13px}
+.setup-printers li small{display:block}.setup-printers button{padding:6px 10px;font-size:12px}
+.printer-form{margin-top:10px;border-top:1px solid var(--line);padding-top:12px}.printer-form h3{font-size:15px;margin:0 0 4px}
+.discord-setup{margin:4px 0 12px}.discord-setup summary{cursor:pointer;color:var(--green);margin-bottom:8px}

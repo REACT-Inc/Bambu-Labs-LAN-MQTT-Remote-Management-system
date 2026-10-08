@@ -5,6 +5,13 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased (1.7.7)
 
 ### Added
+- **The dashboard is the primary way to set up and use the app; Discord is optional (#8).**
+  - **New installations need no Discord and no file editing:** the installer no longer requires the old Discord bot (or demo mode). Sign in, press **Add a printer** on the **Welcome** banner, and enter each printer's name, IP address, serial number and access code. The model and camera type are worked out from the serial number. Demo printers are shown until the first printer is added.
+  - **Printers in the dashboard:** **Settings & help → Printers** adds, edits and removes printers. They're saved in the data folder, readable only by the service. Access codes are never shown again (blank keeps the saved one). Printers can't be renamed (use **Rename** for the display name) or removed while they have queue jobs. Printers in `config.json` are listed and still work.
+  - **Discord, optional:** **Settings & help → Discord (optional) → Connect a Discord bot** takes the bot token (never shown again) and server IDs. `discord_token` and `guild_ids` in `config.json` still work and take precedence. The sidebar says **Discord: not set up (optional)** instead of "offline".
+  - **Restart now:** printer and Discord changes apply when the app restarts, now possible from the dashboard (the service exits so systemd starts it again, about 15 seconds).
+  - **pm-doctor** checks the reachability of printers added in the dashboard too (after its next install).
+  - **Docs:** the README, installation, configuration, dashboard and Discord guides are now dashboard-first.
 - **Mark a printer available for an automatic reprint.** The reprint section of an AI-paused print now lists every other printer with why it can't take the job. **Mark available** uses a printer you've looked at even when the app can't confirm it: bed not confirmed empty, unknown model, or filament that isn't an exact match. It never overrides a different model, an offline, printing or erroring printer, or one busy with another job. The mark ends as soon as that printer is seen printing (from here, Bambu Studio or its screen), or after 12 hours. The reprint notification says who marked the printer.
 - **Reprint priority (1–5)** when queueing a print (dashboard and `/queueadd`), shown on each queue job. It sets how long an AI-paused print waits before it's reprinted elsewhere: 1 = 5 minutes, 2 = 1 hour, 3 = 1.5 hours, 4 = 2 hours, 5 = 2.5 hours (the default).
 

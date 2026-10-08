@@ -73,7 +73,8 @@ function render(){if($('jobDialog').open)renderPrintNowOverride();renderStatus()
  const p=state.printers,j=state.jobs;
  $('printerSubtitle').textContent=state.demo?'Demo data. No real printers are controlled.':'Live telemetry. Shared control with Discord.';
  $('mode').textContent=state.demo?'DEMO MODE':'LIVE';$('mode').classList.toggle('demo',state.demo);
- $('discordState').textContent=state.discord?'Discord connected':'Discord offline · Dashboard available';
+ $('discordState').textContent=!state.discord_configured?'Discord: not set up (optional)':state.discord?'Discord connected':'Discord offline · Dashboard available';
+ $('setupBanner').hidden=!state.setup_needed;   // a new installation: no printers yet (#8)
  $('stats').innerHTML=[['Printers online',p.filter(x=>x.connected).length+' / '+p.length],['Printing now',p.filter(x=>x.state==='RUNNING').length],['Waiting in queue',j.filter(x=>x.status==='queued').length],['Need attention',p.filter(x=>x.error||!x.connected).length+j.filter(x=>x.status==='needs_review').length]].map(([label,n],i)=>`<div class="stat"><small>${label}</small><strong class="${i===1?'green':''}">${n}</strong></div>`).join('');
  $('printers').innerHTML=p.map(printerCard).join('')||'<div class="empty">No printers configured.</div>'
  applyStyles($('printers'));
@@ -305,3 +306,40 @@ $('alertTargets').addEventListener('click',async e=>{const f=e.target.closest('.
  if(e.target.closest('[data-alert-test]')){const b=e.target;b.disabled=true;try{const r=await api('alerttargets/test',{id:alertTargets[i].id});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Test: '+r.result;}catch(err){$('alertsStatus').textContent=err.message;}finally{b.disabled=false;}}});
 $('alertsForm').onsubmit=async e=>{e.preventDefault();try{const r=await api('alerttargets',{targets:readAlertTargets()});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Saved. Use Send test to check each target.';}catch(err){$('alertsStatus').textContent=err.message;}};
 const tabWithAlerts=tab;tab=function(name){tabWithAlerts(name);if(name==='settings')loadAlertTargets();};
+// ---- Printers and the optional Discord bot, set up here (printer_setup.py, #8) ----
+let setupState=null,editingPrinter='';
+const CAMERA_NAMES={none:'no camera',jpeg_tcp:'JPEG camera',rtsp:'RTSP camera'};
+async function loadSetup(){try{setupState=await api('setup',undefined,'GET');renderSetup();}catch(e){$('printerStatus').textContent=e.message;}}
+function renderSetup(){const s=setupState;if(!s)return;
+ if($('printerModel').options.length===1)$('printerModel').insertAdjacentHTML('beforeend',s.models.map(m=>`<option value="${esc(m.key)}">${esc(m.name)}</option>`).join(''));
+ $('setupPrinters').innerHTML=s.printers.map(p=>`<li><div><strong>${esc(p.name)}</strong><small>${esc(p.model_label)} · ${esc(p.ip)} · ${esc(CAMERA_NAMES[p.camera]||p.camera)}${p.has_access_code?'':' · no access code'}</small></div>`+
+  (p.source==='dashboard'?`<span><button type="button" data-edit-printer="${esc(p.name)}">Edit</button> <button type="button" class="danger" data-remove-printer="${esc(p.name)}">Remove</button></span>`:'<small class="muted">set in config.json</small>')+'</li>').join('')
+  ||'<li class="muted">No printers yet. Add your first printer below.</li>';
+ $('restartNote').hidden=!s.pending_restart;document.querySelector('[data-restart-note]').hidden=!s.pending_discord;
+ document.querySelectorAll('[data-restart]').forEach(b=>{b.disabled=!s.can_restart;b.title=s.can_restart?'':'Restart the app yourself: it is not run by systemd here.';});
+ const d=s.discord;$('discordSetupSummary').textContent=d.has_token?(d.connected?'Discord bot connected':'Discord bot set up (not connected yet)'):'Connect a Discord bot';
+ $('discordStatus').textContent=d.token_in_config?'The bot token is set in config.json; change it there.':d.saved_token?'A bot token is saved. Leave the token blank to keep it.':'';
+ if(document.activeElement!==$('discordGuilds'))$('discordGuilds').value=d.guild_ids.join('\n');$('discordGuilds').disabled=d.guilds_in_config;
+ $('discordToken').disabled=$('discordClearToken').disabled=d.token_in_config;}
+function printerForm(p){editingPrinter=p?.name||'';$('printerFormTitle').textContent=p?`Edit ${p.name}`:'Add a printer';$('printerSave').textContent=p?'Save changes':'Add printer';
+ $('printerName').value=p?.name||'';$('printerName').readOnly=!!p;$('printerIp').value=p?.ip||'';$('printerSerial').value=p?.serial||'';$('printerCode').value='';
+ $('printerCode').placeholder=p?'Blank keeps the saved code':'8 characters';$('printerCode').required=!p;
+ const key=p&&setupState?.models.find(m=>m.name===p.model)?.key;$('printerModel').value=key||'';$('printerCamera').value=p?(p.camera||'none'):'auto';
+ $('printerCancel').hidden=!p;$('printerStatus').textContent='';}
+$('printerForm').onsubmit=async e=>{e.preventDefault();const b=$('printerSave');b.disabled=true;
+ try{setupState=await api('setup/printer',{name:$('printerName').value,ip:$('printerIp').value,serial:$('printerSerial').value,access_code:$('printerCode').value,
+   model:$('printerModel').value,camera:$('printerCamera').value,edit:!!editingPrinter});
+  const saved=$('printerName').value.trim();printerForm(null);renderSetup();$('printerStatus').textContent=`${saved} saved. Restart to connect to it.`;}
+ catch(err){$('printerStatus').textContent=err.message;}finally{b.disabled=false;}};
+$('printerCancel').onclick=()=>printerForm(null);
+$('setupPrinters').addEventListener('click',async e=>{const edit=e.target.closest('[data-edit-printer]'),remove=e.target.closest('[data-remove-printer]');
+ if(edit){printerForm(setupState.printers.find(p=>p.name===edit.dataset.editPrinter));$('printerIp').focus();}
+ if(remove)try{setupState=await api('setup/printer/remove',{name:remove.dataset.removePrinter});renderSetup();$('printerStatus').textContent=`${remove.dataset.removePrinter} removed. Restart to apply.`;}catch(err){$('printerStatus').textContent=err.message;}});
+$('discordSave').onclick=async()=>{const b=$('discordSave');b.disabled=true;
+ try{setupState=await api('setup/discord',{token:$('discordToken').value,clear_token:$('discordClearToken').checked,guild_ids:$('discordGuilds').value});
+  $('discordToken').value='';$('discordClearToken').checked=false;renderSetup();notice('Discord connection saved. Restart to apply.');}
+ catch(err){$('discordStatus').textContent=err.message;}finally{b.disabled=false;}};
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-restart]');if(!b)return;b.disabled=true;
+ try{const r=await api('setup/restart',{});notice(r.message);}catch(err){notice(err.message);b.disabled=false;}});
+$('setupAddPrinter').onclick=()=>{tab('settings');printerForm(null);$('printersPanel').scrollIntoView({behavior:'smooth',block:'start'});$('printerName').focus();};
+const tabWithSetup=tab;tab=function(name){tabWithSetup(name);if(name==='settings')loadSetup();};
