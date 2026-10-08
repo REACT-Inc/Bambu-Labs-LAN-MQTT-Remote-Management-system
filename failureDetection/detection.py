@@ -772,15 +772,16 @@ class FailureMonitor:
         state, _, _, connected = self.core.state_data(name)
         if state != 'RUNNING' or not connected:
             raise ValueError(f"Check AI now works while a print is running (the printer reports {state or 'unknown'}). "
-                             'Use Test AI now to see what the AI makes of the camera any time.')
+                             'Check AI now shows what the AI makes of the camera any time.')
         async with self.lock(name):
             result = await self.check(name, on_request=True)
         if not result:
             raise ValueError(self.status.get(name, {}).get('message') or 'The check could not run.')
         return result
 
-    async def check(self, name, on_request=False):
-        """One look at one printer. Returns what it found (or None when it couldn't look)."""
+    async def check(self, name, on_request=False, picture=None):
+        """One look at one printer. Returns what it found (or None when it couldn't look). picture: one already taken
+        for this request (Check AI now)."""
         state, _, data, connected = self.core.state_data(name)
         config = self.core.printer_config(name) or {}
         if (not self.watching(name) and not on_request) or config.get('camera_type') not in ('rtsp', 'jpeg_tcp'):
@@ -801,8 +802,7 @@ class FailureMonitor:
             judge = self.judges[name] = Judge(tuning, self.clock);judge.reset(job)
         judge.settings = tuning   # a sensitivity change applies to the evidence already collected
         self.focus.reset(name, job)
-        picture = None
-        if on_request and getattr(self.core, 'capture_still', None):   # a fresh picture, not a reused one
+        if picture is None and on_request and getattr(self.core, 'capture_still', None):   # a fresh picture, not a reused one
             try:
                 picture = await self.core.capture_still(name, 20)
             except Exception:
@@ -846,7 +846,8 @@ class FailureMonitor:
             labels = f'{labels}, {where}' if labels else where
         threshold = tuning['threshold']
         result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, hold=tuning['hold'], verdict=verdict, where=where,
-                      detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted)
+                      detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted,
+                      crops=crops, labels=sorted(tuning['labels']))
         if judge.acted:   # already reported (and maybe paused) for this print: keep that status, don't act again
             self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), **self.overlay(name, detections, tuning))
             return result
@@ -861,8 +862,11 @@ class FailureMonitor:
         return result
 
     async def test(self, name):
-        """"Test AI now": one check on a fresh camera picture at any time, printing or not. It doesn't count towards
-        the failure rules and never pauses anything; the picture is kept as a training picture."""
+        """"Check AI now" (one button): the AI checks a fresh camera picture now and shows it with its boxes.
+        - While a print is running, it's a real check: it counts towards the failure rules, and because a person asked
+          for a decision, a picture at or above the failure score acts straight away (pause or alert, as set).
+        - Otherwise it only shows what the AI sees: nothing is counted or paused.
+        The picture is kept as a training picture either way."""
         if not self.enabled:
             raise ValueError('AI failure detection is not enabled in config.json.')
         if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
@@ -877,6 +881,18 @@ class FailureMonitor:
         picture = picture or await self.core.snapshot(name, timeout=20)
         if not picture:
             raise ValueError('No camera picture right now. Check the camera, then try again.')
+        state, _, _, connected = self.core.state_data(name)
+        if state == 'RUNNING' and connected:   # printing: a real check on this picture, which acts if it looks failed
+            async with self.lock(name):
+                result = await self.check(name, on_request=True, picture=picture)
+            if result:
+                self.store_event(name, 'AI check on request', f"Score {result['score']:.2f} (threshold {result['threshold']:g})"
+                                 + (' • acted' if result['acted'] else ''))
+                return dict(score=result['raw'], judged=result['score'], threshold=result['threshold'], hold=result['hold'],
+                            failing=result['verdict'] == 'failure' or result['score'] >= result['threshold'],
+                            labels=result['labels'], detections=result['detections'], crops=result['crops'], where=result['where'],
+                            picture=base64.b64encode(picture).decode(), checked=self.clock(), printing=True,
+                            acted=result['acted'], already=result['already'], status=self.status.get(name, {}).get('status'))
         tuning = self.tuning(name)
         crops = self.crops(name, tuning)
         try:
@@ -901,9 +917,9 @@ class FailureMonitor:
             pass
         self._set(name, **self.overlay(name, detections, tuning))   # the camera view shows these boxes too
         self.store_event(name, 'AI test', f'Score {score:.2f} (threshold {threshold:g})' + (f' • {where}' if where else ''))
-        return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, failing=score_on_file >= threshold,
-                    labels=sorted(tuning['labels']), detections=detections, crops=crops, where=where,
-                    picture=base64.b64encode(picture).decode(), checked=self.clock())
+        return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, hold=tuning['hold'],
+                    failing=score_on_file >= threshold, labels=sorted(tuning['labels']), detections=detections, crops=crops,
+                    where=where, picture=base64.b64encode(picture).decode(), checked=self.clock(), printing=False, printer_state=state)
 
     async def look(self, name, picture):
         """The boxes the AI finds in this picture, printing or not, for showing on it. Display only: nothing is

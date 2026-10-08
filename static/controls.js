@@ -29,7 +29,7 @@ function showCamera(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
   :snap.error&&!snap.time?snap.error:'Live view: every new camera frame, with the AI\'s boxes on each one. Nothing is recorded.';
  if(!livePrinter)$('liveStatus').textContent=!p?.has_camera?'No camera.':snap.time?'Snapshot from '+new Date(snap.time*1000).toLocaleTimeString()+' · ▶ for live view':(snap.error||'Waiting for the first snapshot…');
  renderStill(p);}
-// AI boxes over the camera view, like Test AI now: what the model found in the frame it checked last.
+// AI boxes over the camera view, like Check AI now: what the model found in the frame it checked last.
 let aiOverlayOn=true;try{aiOverlayOn=localStorage.getItem('aiOverlay')!=='off';}catch{}
 $('aiOverlayOn').checked=aiOverlayOn;
 $('aiOverlayOn').addEventListener('change',e=>{aiOverlayOn=e.target.checked;try{localStorage.setItem('aiOverlay',aiOverlayOn?'on':'off');}catch{}drawAiOverlay();document.querySelectorAll('.pc-cam img').forEach(drawCardAi);});
@@ -370,39 +370,27 @@ async function loadTraining(force){if(!force&&Date.now()-trainingLoaded<30000)re
  try{const t=await api('ai-training',undefined,'GET');$('aiTraining').textContent=t.enabled?`${t.count} pictures collected (${t.mb} MB): a still every ${t.every_minutes} min while printing, plus every frame the AI found suspicious.`+(t.problem?' ⚠️ '+t.problem:' Download them, label the failures in Roboflow and retrain for a model that knows these cameras.'):'Collecting training pictures is turned off.';
   $('aiTrainingDownload').hidden=!t.count;$('aiTrainingClear').hidden=!t.count;}catch(e){$('aiTrainingBlock').hidden=true;}}
 $('aiTrainingClear').addEventListener('click',()=>confirmAction('Delete the collected training pictures?','All pictures collected for training are deleted from the Pi. Download them first if you still need them.','Delete the training pictures.',async()=>{await api('ai-training/clear',{});trainingLoaded=0;await loadTraining(true);notice('Training pictures deleted.');}));
-// Test AI now: a fresh picture, checked right away, with the boxes the model found drawn on it.
+// Check AI now (one button): a fresh picture, checked right away, with the boxes the model found drawn on it. While a
+// print is running it's also a real check that pauses or alerts straight away if the picture looks failed.
 let aiTestResult=null,aiTestUrl='',aiTestFor='';
-function drawAiTest(){const r=aiTestResult,img=$('aiTestImage'),c=$('aiTestCanvas');if(!r||!img.naturalWidth)return;
- c.width=img.clientWidth;c.height=img.clientHeight;const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
- g.setLineDash([6,5]);g.strokeStyle='rgba(255,255,255,.35)';g.lineWidth=1;
- (r.crops||[]).forEach(([x0,y0,x1,y1])=>g.strokeRect(x0*c.width,y0*c.height,(x1-x0)*c.width,(y1-y0)*c.height));   // where it zoomed in
- g.setLineDash([]);g.font='bold 13px sans-serif';g.textBaseline='bottom';
- r.detections.filter(d=>d.box).forEach(d=>{const counts=r.labels.includes(d.label),strong=d.score>=r.threshold;
-  const color=counts&&strong?'#ff5c52':counts?'#f3d684':'#8dc6ff';const [x0,y0,x1,y1]=d.box;const x=x0*c.width,y=y0*c.height,w=(x1-x0)*c.width,h=(y1-y0)*c.height;
-  g.strokeStyle=color;g.lineWidth=strong?3:2;g.strokeRect(x,y,w,h);const text=`${d.label} ${Math.round(d.score*100)}%`;const tw=g.measureText(text).width+8;
-  g.fillStyle=color;g.fillRect(x,Math.max(0,y-18),tw,18);g.fillStyle='#111';g.fillText(text,x+4,Math.max(18,y)-3);});}
+function drawAiTest(){const r=aiTestResult,img=$('aiTestImage');if(!r||!img.naturalWidth)return;
+ // Drawn like every other camera view (paintAi), plus the areas it zoomed in on for this check.
+ paintAi($('aiTestCanvas'),img,{boxes:r.detections.filter(d=>d.box).map(d=>({...d,counts:r.labels.includes(d.label)})),
+  zoom:r.crops||[],threshold:r.threshold,hold:r.hold??r.threshold},'');}
 $('aiTest').addEventListener('click',async e=>{const b=e.target;b.disabled=true;b.textContent='Checking…';
  try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/test',{});aiTestResult=r;aiTestFor=selectedPrinter;
   const bytes=Uint8Array.from(atob(r.picture),ch=>ch.charCodeAt(0));if(aiTestUrl)URL.revokeObjectURL(aiTestUrl);aiTestUrl=URL.createObjectURL(new Blob([bytes],{type:'image/jpeg'}));
   $('aiTestImage').onload=drawAiTest;$('aiTestImage').src=aiTestUrl;$('aiTestResult').hidden=false;
   const pct=v=>Math.round(v*100)+'%';
   $('aiTestText').className=r.failing?'bad':'good';
-  $('aiTestText').textContent=(r.failing?`⚠️ Looks like a failure: score ${pct(r.judged)}, at or above the ${pct(r.threshold)} threshold.`:`✅ No failure: score ${pct(r.judged)}, below the ${pct(r.threshold)} threshold.`)+(r.where?` (${r.where})`:'')+(r.judged!==r.score?` Raw model score ${pct(r.score)}.`:'')+' One frame only: a real alarm needs several failing frames over a few minutes.';
+  const done=!r.printing?(r.printer_state==='PAUSE'?' The print is paused, so nothing was paused or reported.':' Not printing, so nothing was paused or reported.'):r.already?' This print was already reported, so nothing more was done.':
+   r.acted?(r.status==='paused'?' The print was paused and reported.':' Reported in Discord and Activity.'):' Counted as a check of this print.';
+  $('aiTestText').textContent=(r.failing?`⚠️ Looks like a failure: score ${pct(r.judged)}, at or above the ${pct(r.threshold)} threshold.`:`✅ No failure: score ${pct(r.judged)}, below the ${pct(r.threshold)} threshold.`)+(r.where?` (${r.where})`:'')+(r.judged!==r.score?` Raw model score ${pct(r.score)}.`:'')+done;
+  if(r.printing)await refresh();
   $('aiTestList').innerHTML=r.detections.length?r.detections.map(d=>`<li>${esc(d.label)} ${pct(d.score)}${r.labels.includes(d.label)?'':' (not counted as a failure)'}${d.on_part!==undefined?` • ${d.on_part>=0.5?'on the part':'off the part'}`:''}</li>`).join(''):'<li>Nothing found above 5%.</li>';
   trainingLoaded=0;loadTraining(true);}
- catch(err){notice(err.message);}finally{b.disabled=false;b.textContent='Test AI now';}});
+ catch(err){notice(err.message);}finally{b.disabled=false;b.textContent='Check AI now';}});
 window.addEventListener('resize',()=>{if(!$('aiTestResult').hidden)drawAiTest();});
-// Check AI now: a real check while printing; acts (pause / notify, as set) straight away if this frame looks failed.
-async function aiCheckNow(button){button.disabled=true;button.textContent='Checking…';
- try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/check',{});const pct=v=>Math.round(v*100)+'%';
-  const action=r.state?.status==='paused'?'The print was paused.':r.acted?'Reported in Discord and Activity.':'';
-  notice(r.already?`Score ${pct(r.score)}. This print was already reported, so nothing more was done.`:
-   r.acted?`⚠️ The AI sees a failure (score ${pct(r.score)}, threshold ${pct(r.threshold)}). ${action}`:
-   `✅ No failure in this picture: score ${pct(r.score)}, below the ${pct(r.threshold)} threshold.`);await refresh();}
- catch(err){notice(err.message);}finally{button.disabled=false;button.textContent='Check AI now';}}
-$('aiCheck').addEventListener('click',e=>{const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai||{};
- if(ai.action==='pause')confirmAction('Check now and pause if needed?',`The AI checks a fresh picture of ${printerLabel(selectedPrinter)} now. If it scores at or above the threshold, the print is paused straight away and reported.`,'Check the print now and pause it if the AI sees a failure.',()=>aiCheckNow(e.target));
- else aiCheckNow(e.target);});
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
 async function swapAction(action,body){const r=await api('plateswap/'+encodeURIComponent(selectedPrinter)+'/'+action,body||{});await refresh();return r;}
