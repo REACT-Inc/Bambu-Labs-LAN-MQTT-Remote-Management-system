@@ -353,3 +353,44 @@ class TimeBasedJudgeTests(unittest.TestCase):
         j,add,_=self.judge(10)
         for _ in range(60):add(0.1)
         self.assertLessEqual(len(j.frames),31)                               # 5 minutes at 10 s
+
+
+class OneButtonTests(CheckNowTests):
+    """"Check AI now" is one button: test() shows the picture with its boxes any time, and while a print is running
+    it's also the real check that acts on a failing picture."""
+    async def test_while_printing_it_shows_the_picture_and_acts(self):
+        m=self.monitor()
+        r=await m.test('James')
+        self.assertTrue(r['printing']);self.assertTrue(r['acted']);self.assertTrue(r['failing']);self.assertEqual(r['status'],'paused')
+        self.assertEqual(r['hold'],m.tuning('James')['hold'])
+        self.assertTrue(base64.b64decode(r['picture']).startswith(b'pic'));self.assertEqual(r['detections'][0]['label'],'spaghetti')
+        self.engine.control.assert_awaited_once_with('James','pause','AI failure detection')
+        self.assertEqual(self.core.capture_still.await_count,1)   # the picture shown is the one judged
+        self.states['James']='RUNNING'
+        r=await m.test('James');self.assertTrue(r['already']);self.engine.control.assert_awaited_once()
+
+    async def test_good_picture_while_printing_just_counts(self):
+        m=self.monitor(score=0.1)
+        r=await m.test('James')
+        self.assertTrue(r['printing']);self.assertFalse(r['acted']);self.assertFalse(r['failing'])
+        self.engine.control.assert_not_awaited();self.assertEqual(m.state('James')['status'],'watching')
+
+    async def test_when_not_printing_it_only_shows(self):
+        m=self.monitor(state='IDLE')
+        r=await m.test('James')
+        self.assertFalse(r['printing']);self.assertTrue(r['failing']);self.engine.control.assert_not_awaited()
+        self.core.notify.assert_not_awaited();self.assertNotIn('James',m.judges)
+        self.assertEqual((r['printer_state'],r['hold']),('IDLE',m.tuning('James')['hold']))   # what the page needs
+
+    async def test_a_paused_print_is_only_shown(self):
+        m=self.monitor(state='PAUSE')
+        r=await m.test('James')
+        self.assertFalse(r['printing']);self.assertEqual(r['printer_state'],'PAUSE')   # the page says it's paused
+        self.engine.control.assert_not_awaited();self.core.notify.assert_not_awaited()
+
+
+
+class OneButtonPageTests(unittest.TestCase):
+    def test_one_button_in_the_dashboard(self):
+        page=(Path(__file__).parents[1]/'static/index.html').read_text()
+        self.assertIn('id="aiTest" class="primary">Check AI now</button>',page);self.assertNotIn('id="aiCheck"',page)

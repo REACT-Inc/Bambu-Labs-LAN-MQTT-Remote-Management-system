@@ -15,6 +15,7 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Always plain:** the pictures the AI judges, the training pictures and the calibration picture.
   - **Display only:** these looks never pause or alert anything, and never hold up the real checks. If the AI can't look in time, the picture is still shown or sent, without boxes.
 - **Automatic reprints wait at most 2.5 hours** instead of 12. `after_hours` in config.json is now the longest wait, 2.5 by default.
+- **One Check AI now button** instead of separate **Test AI now** and **Check AI now** buttons. It always shows a fresh picture with what the AI sees. While a print is running it's also a real check: if the picture looks failed, the print is paused or reported straight away, as set. When not printing, nothing is paused or reported.
 
 ## 1.7.6-beta.1
 

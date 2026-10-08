@@ -142,7 +142,7 @@ Even 50–100 labelled pictures from your own cameras usually make a big differe
 
 ## AI boxes on the camera view
 
-Every camera picture you see shows what the AI found in that picture, with the same colours as **Test AI now**:
+Every camera picture you see shows what the AI found in that picture, with the same colours as **Check AI now**:
 
 - **Red:** a failure at or above the failure score.
 - **Yellow:** a failure at or above the keep-counting score.
@@ -164,7 +164,7 @@ Every camera picture you see shows what the AI found in that picture, with the s
 | More → **Take camera snapshot** | Drawn onto the picture. |
 | Discord `/printer` and notifications with a picture (including AI failure alerts) | Drawn onto the picture. |
 | The raw live stream (`/api/live/<printer>`) | Drawn onto every frame: with the AI HAT, each frame is one the AI looked at; on the CPU, its latest look. |
-| **Test AI now** | Its own detailed boxes and list. |
+| **Check AI now** | The fresh picture it checked, with its boxes, the areas it zoomed in on and a list of what it found. |
 
 - **Every still gets its own boxes.** The dashboard's stills (one printer at a time, while the dashboard is open) are each looked at by the AI, printing or not. A new still is shown straight away and its boxes appear a moment later, once the AI has looked at it.
 - **Boxes always belong to the picture shown.** A still the AI couldn't look at is shown without boxes, never with another picture's.
@@ -500,6 +500,10 @@ Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 
 - **Printer card:** while watching a print, the card shows **🤖 AI watching**, **suspect frames**, **print may be failing** or **AI paused this print**, with the failing-frame count.
 - **Printer panel → More → AI failure watch:** the current status, the last score and a tick box to **turn watching off for that printer**. This is useful for a print that confuses the model. It's saved on the Pi and recorded in Activity.
+- **Check AI now** (one button, in the same place): the AI checks a fresh camera picture straight away and shows it with its boxes, the zoomed-in areas and a list of what it found.
+  - **While a print is running,** it's also a real check: it counts towards the failure rules. Because you asked for a decision, a picture at or above the failure score acts at once (pauses or alerts, as set) instead of waiting for several failing frames. A print that was already reported isn't acted on again.
+  - **Otherwise,** it only shows what the AI sees: nothing is paused or reported.
+  - **Either way,** the picture is kept as a training picture.
 - **Discord `/printer`:** an *AI failure watch* line.
 - **Notifications:** a red 🤖 message with the camera picture.
 
