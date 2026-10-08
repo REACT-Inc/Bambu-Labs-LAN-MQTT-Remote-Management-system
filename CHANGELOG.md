@@ -2,6 +2,15 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.7)
+
+### Changed
+- **AI boxes on every camera view.** Every camera picture now shows what the AI found in that very picture. See [AI boxes on the camera view](failureDetection/FAILURE_DETECTION.md#ai-boxes-on-the-camera-view).
+  - **Dashboard:** the overview printer cards and the printer panel's still picture show the boxes the AI found in that still, printing or not. A new still is shown straight away and its boxes follow a moment later; a still never shows another picture's boxes. Live view already had them on every frame.
+  - **Pictures sent as images:** Discord `/printer`, notifications with a picture (including AI failure alerts), **Take camera snapshot** and the raw live stream have the boxes drawn on. A picture the AI already looked at for the dashboard isn't looked at again, so `/printer` still answers quickly.
+  - **Always plain:** the pictures the AI judges, the training pictures and the calibration picture.
+  - **Display only:** these looks never pause or alert anything, and never hold up the real checks. If the AI can't look in time, the picture is still shown or sent, without boxes.
+
 ## 1.7.6-beta.1
 
 Built on 1.7.5-beta.1. A bed check AI that tells whether a printer's bed is empty, a status and notification icon at the top left, and AI boxes on every live-view frame.
