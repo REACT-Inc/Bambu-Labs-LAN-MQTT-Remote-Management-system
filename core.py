@@ -543,6 +543,26 @@ async def capture_still(name, timeout=25):
     return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
 
 
+def known_overlay(name, picture):
+    """The AI's boxes for a picture the dashboard already had the AI look at (its latest still, or a live-view
+    frame), so it isn't looked at twice. None when the AI hasn't looked at this very picture."""
+    rotation = globals().get('snapshot_rotation')
+    overlay = rotation.overlay_for(name, picture) if hasattr(rotation, 'overlay_for') else None
+    if overlay is None:
+        scored = getattr(getattr(globals().get('live_cameras'), 'feeds', {}).get(name), 'scored', None)
+        if scored and scored[3] is picture:
+            overlay = scored[1]
+    return overlay
+
+
+async def ai_picture(name, picture):
+    """A camera picture with the AI's boxes drawn on it, for pictures sent out as images (Discord). The AI itself
+    always gets plain pictures: only pictures for people go through here."""
+    if not picture or not failure_monitor or not getattr(failure_monitor, 'enabled', False):
+        return picture
+    return await failure_monitor.annotated(name, picture, known_overlay(name, picture))
+
+
 def recent_picture(name, max_age=60):
     """A picture that's already on hand: a frame from an open live view, or the dashboard's latest still."""
     feed = getattr(globals().get('live_cameras'), 'feeds', {}).get(name)
@@ -817,13 +837,13 @@ async def run_action(interaction, action, name):
             await interaction.response.defer(ephemeral=ephemeral(interaction))
         # Reply with the status straight away; the camera picture is added when it arrives (#44, #54).
         embed = printer_embed(name)
-        picture = recent_picture(name) if not EXAMPLE_MODE else None
+        picture = await ai_picture(name, recent_picture(name)) if not EXAMPLE_MODE else None
         if picture or EXAMPLE_MODE:
             await interaction.followup.send(**printer_reply(embed, picture), ephemeral=ephemeral(interaction))
             return
         field(embed, 'Camera', '📷 Getting a picture…', False)
         message = await interaction.followup.send(embed=embed, ephemeral=ephemeral(interaction), wait=True)
-        picture = await snapshot(name, timeout=20)
+        picture = await ai_picture(name, await snapshot(name, timeout=20))
         embed.remove_field(len(embed.fields) - 1)
         reply = printer_reply(embed, picture)
         try:
@@ -996,7 +1016,7 @@ async def notify(name, title, description, color, camera=False):
         if getattr(getattr(channel, 'guild', None), 'id', None) not in ALLOWED_GUILD_IDS:
             return
         embed = card(title, f'**{safe(name)}**\n{description}', color)
-        picture = await snapshot(name) if camera else None
+        picture = await ai_picture(name, await snapshot(name)) if camera else None
         kwargs = dict(embed=embed)
         if picture:
             embed.set_image(url='attachment://printer.jpg')

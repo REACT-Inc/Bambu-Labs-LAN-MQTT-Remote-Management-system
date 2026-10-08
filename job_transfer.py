@@ -128,7 +128,8 @@ def send(core, store, job_id, target, use_ams, mapping, checked, author, asset=N
     job = validate(core, store, job_id, target, checked, asset)
     # Plate and bed type carry over; the AMS mapping is chosen again for the new printer's trays.
     # Swapmod approvals don't carry over: a batch is approved again on the printer it runs on.
-    opts = dict(options(job['options'].get('plate', 1), use_ams, mapping, job['options'].get('bed', 'textured_plate')))
+    opts = dict(options(job['options'].get('plate', 1), use_ams, mapping, job['options'].get('bed', 'textured_plate'),
+                        job['options'].get('priority')))
     copy = store.add(target, job['label'], asset or job['asset'], job['remote'], opts, author, bool(job['demo']))
     copied = ' • file copied from that printer' if asset else ''
     store.event(target, 'Job sent from another printer', f"{job['label']} • from {job['printer']} ({job_id}){copied} • new job {copy['id']} • {author}")

@@ -66,7 +66,7 @@ class TrainingPictures:
 
     def save(self, name, job, picture, score, status, force=False):
         """Keep this frame when it's time for the periodic still, or when the AI found it suspicious (or force:
-        a manual "Test AI now" picture)."""
+        a manual "Check AI now" picture)."""
         if not self.settings['enabled'] or not picture or not self.folder:
             return None
         now = self.clock()
@@ -89,7 +89,7 @@ class TrainingPictures:
             self.last_flagged[name] = now
         target = self.folder / safe(name) / safe(job or 'no-job') / f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}_score{score:.2f}.jpg"
         number = 2
-        while target.exists():   # two pictures in the same second (e.g. repeated "Test AI now")
+        while target.exists():   # two pictures in the same second (e.g. repeated "Check AI now")
             target = target.with_name(f'{target.stem.rsplit("~", 1)[0]}~{number}.jpg')
             number += 1
         try:

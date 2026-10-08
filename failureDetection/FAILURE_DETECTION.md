@@ -142,7 +142,7 @@ Even 50–100 labelled pictures from your own cameras usually make a big differe
 
 ## AI boxes on the camera view
 
-A printer's camera view shows what the AI found, with the same colours as **Test AI now**:
+Every camera picture you see shows what the AI found in that picture, with the same colours as **Check AI now**:
 
 - **Red:** a failure at or above the failure score.
 - **Yellow:** a failure at or above the keep-counting score.
@@ -154,9 +154,30 @@ A printer's camera view shows what the AI found, with the same colours as **Test
 - **Display only:** these looks are never judged, saved or acted on. Failures are still judged by the regular checks (every 5 s with the AI HAT), so watching live doesn't make the AI pause sooner or more often.
 - **Load:** it only runs for printers someone is watching live, and stops with the live view.
 
-**Still picture:** the boxes from the AI's last regular check. The corner label says how many seconds ago that was. Boxes older than 20 s (or three check intervals) aren't shown.
+**Where the boxes are shown:**
 
-Untick **AI boxes** under the picture to hide them; the choice is remembered in this browser.
+| View | Boxes |
+|---|---|
+| Printer panel, live view | Every frame, with that frame's own boxes (above). |
+| Printer panel, still picture | The boxes the AI found in that still (**AI · this picture**). |
+| Overview printer cards | The boxes the AI found in each card's still. |
+| More → **Take camera snapshot** | Drawn onto the picture. |
+| Discord `/printer` and notifications with a picture (including AI failure alerts) | Drawn onto the picture. |
+| The raw live stream (`/api/live/<printer>`) | Drawn onto every frame: with the AI HAT, each frame is one the AI looked at; on the CPU, its latest look. |
+| **Check AI now** | The fresh picture it checked, with its boxes, the areas it zoomed in on and a list of what it found. |
+
+- **Every still gets its own boxes.** The dashboard's stills (one printer at a time, while the dashboard is open) are each looked at by the AI, printing or not. A new still is shown straight away and its boxes appear a moment later, once the AI has looked at it.
+- **Boxes always belong to the picture shown.** A still the AI couldn't look at is shown without boxes, never with another picture's.
+- **No double work:** a picture the dashboard already had the AI look at (the latest still, or a live-view frame) goes to Discord with those boxes, without asking the AI again, so `/printer` still answers quickly.
+- **Display only:** like the live view, these looks are never judged, saved or acted on. They also never get in the way of the real checks: if a picture for display waits too long (15 s) it's shown or sent without boxes, and the AI still finishes that look before answering the next check.
+- **Always plain:**
+  - the pictures the AI itself judges;
+  - the training pictures;
+  - the calibration picture, where you click the bed's corners.
+- **Off:**
+  - when AI failure detection is off;
+  - when watching is turned off for that printer;
+  - in the dashboard only, untick **AI boxes** under the panel's picture. This hides them on the cards too, and is remembered in this browser.
 
 ## Comparing with the print file
 
@@ -246,13 +267,30 @@ The helper limits OpenCV to 2 threads, so the dashboard, MQTT and cameras stay r
 When the AI **pauses** a failing queue print, the job can carry on somewhere else:
 
 1. **The pause notification** says which printers could take it, for example *"Available for a reprint: Mini 2 (bed checked empty)"*, or why none can.
-2. **Countdown:** if nobody resumes or stops the paused print within **12 hours**, the app reprints the job on an available printer:
+2. **Countdown:** if nobody resumes or stops the paused print in time, the app reprints the job on an available printer. How long it waits is the job's **reprint priority**, chosen in **Queue a print** (or `/queueadd priority:`):
+
+   | Priority | Waits |
+   |---|---|
+   | 1 (urgent) | 5 minutes |
+   | 2 | 1 hour |
+   | 3 | 1.5 hours |
+   | 4 | 2 hours |
+   | 5 (default) | 2.5 hours |
+
+   When it's reprinted, the app:
    - it stops the paused print, so the printer doesn't sit paused and heated;
    - records the job as failed;
    - starts a copy on the chosen printer;
    - says so in Discord and Activity.
 3. **Reprint now:** open the printer → **More → AI failure watch → Reprint now…** does the same at once. **Cancel automatic reprint** stops the countdown, and **Check available printers** looks again.
 4. **No printer free when it's time:** it keeps waiting, tries again every minute, and tells you once why.
+
+**Mark available:** the reprint section lists every other printer, available or why not. If you've looked at a printer and know it's fine, press **Mark available** next to it, and it's used although the app can't confirm it. This works for:
+- a bed that isn't confirmed empty (or that the camera thinks has parts on it);
+- a printer model the app doesn't know;
+- filament that isn't an exact match: the closest loaded filaments are used, as long as every filament the plate needs is loaded.
+
+It never overrides what would make the print fail: a different printer model, a printer that's offline, printing or reporting an error, or one busy with another queue job. The mark ends as soon as that printer is seen printing (whether the print was started here, from Bambu Studio or on the printer's screen), or after 12 hours. **Undo** removes it sooner. Marking is instant: the list updates without looking at any camera, and the reprint itself checks everything again. Before the paused print is stopped, the app also checks that the copy can really be made, so a reprint that can't happen never leaves a stopped print behind. Marks are saved on the Pi and recorded in Activity, and the reprint notification says who marked the printer.
 
 **What makes a printer available:**
 - it's the **model the file was sliced for**;
@@ -267,13 +305,13 @@ When the AI **pauses** a failing queue print, the job can carry on somewhere els
 The countdown is saved in `/var/lib/3d-printer-management/ai-reprints.json`, so it survives restarts. It's only for prints the AI paused (`"action": "pause"`) and for queue jobs; a print started from Bambu Studio has no file on the Pi to reprint. Settings (optional), under `failure_detection`:
 
 ```json
-"auto_reprint": {"enabled": true, "after_hours": 12, "stop_original": true, "bed_threshold": 0.005}
+"auto_reprint": {"enabled": true, "after_hours": 2.5, "stop_original": true, "bed_threshold": 0.005}
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Offer and run automatic reprints. |
-| `after_hours` | `12` | How long a paused print waits before it's reprinted elsewhere. |
+| `after_hours` | `2.5` | The longest a paused print waits before it's reprinted elsewhere. Each job's reprint priority sets its wait, up to this. |
 | `stop_original` | `true` | Stop the paused print when reprinting. |
 | `bed_threshold` | `0.005` | Share of the bed that may differ from the empty-bed picture and still count as empty. |
 
@@ -462,6 +500,10 @@ Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 
 - **Printer card:** while watching a print, the card shows **🤖 AI watching**, **suspect frames**, **print may be failing** or **AI paused this print**, with the failing-frame count.
 - **Printer panel → More → AI failure watch:** the current status, the last score and a tick box to **turn watching off for that printer**. This is useful for a print that confuses the model. It's saved on the Pi and recorded in Activity.
+- **Check AI now** (one button, in the same place): the AI checks a fresh camera picture straight away and shows it with its boxes, the zoomed-in areas and a list of what it found.
+  - **While a print is running,** it's also a real check: it counts towards the failure rules. Because you asked for a decision, a picture at or above the failure score acts at once (pauses or alerts, as set) instead of waiting for several failing frames. A print that was already reported isn't acted on again.
+  - **Otherwise,** it only shows what the AI sees: nothing is paused or reported.
+  - **Either way,** the picture is kept as a training picture.
 - **Discord `/printer`:** an *AI failure watch* line.
 - **Notifications:** a red 🤖 message with the camera picture.
 

@@ -117,6 +117,7 @@ class Cameras:
     def __init__(self,core):
         self.core=core;self.feeds={};self.closing=False;self.idle={}
         self.scorer=None   # async (name, jpeg) -> AI overlay for that frame, or None; set by the dashboard
+        self.drawer=None   # async (jpeg, overlay) -> jpeg with the boxes drawn on, for the raw stream (/api/live)
 
     async def score_frames(self,name,feed):
         """While someone watches a printer live, the AI looks at every new frame it can keep up with (the newest one
@@ -192,23 +193,30 @@ class Cameras:
             except ValueError:pass
             # A new feed resets its counter; only use versions belonging to this feed.
             if request.query.get('feed')!=str(id(feed)):version=0
-            if self.scorer and not feed.ai_task:
-                # Assume the AI keeps up until its first look says otherwise, so even the first frame has its boxes.
-                feed.ai_sync=True;feed.ai_task=asyncio.create_task(self.score_frames(name,feed))
-            frame=None
-            if feed.ai_sync:   # the AI keeps up: send the next frame it has looked at, with its own boxes
-                frame=await self.scored_frame(feed,version)
-                if frame:version=frame[0];frame=frame[1]
-            if frame is None:
-                try:version,frame=await feed.next(version,10)
-                except asyncio.TimeoutError:
-                    raise web.HTTPServiceUnavailable(text=feed.error or 'No camera frames received. Check camera settings, access code and LAN connectivity.')
+            try:version,frame=await self.next_frame(name,feed,version,10)
+            except asyncio.TimeoutError:
+                raise web.HTTPServiceUnavailable(text=feed.error or 'No camera frames received. Check camera settings, access code and LAN connectivity.')
             headers={'Cache-Control':'no-store','X-Camera-Version':str(version),'X-Camera-Feed':str(id(feed))}
             scored=feed.scored
             if scored and time.time()-scored[2]<10:
                 headers['X-AI']=json.dumps(dict(scored[1],frame=scored[0],same=scored[0]==version),separators=(',',':'))
             return web.Response(body=frame,content_type='image/jpeg',headers=headers)
         finally:await self.release(name,feed,linger=15)
+
+    def watch_ai(self,name,feed):
+        """Start the AI on this feed's frames (once). It's assumed to keep up until its first look says otherwise, so
+        even the first frame has its boxes."""
+        if self.scorer and not feed.ai_task:
+            feed.ai_sync=True;feed.ai_task=asyncio.create_task(self.score_frames(name,feed))
+
+    async def next_frame(self,name,feed,version,timeout):
+        """(version, jpeg) of the next frame to show: when the AI keeps up, the next frame it has looked at (so its
+        boxes match it exactly), otherwise simply the newest frame."""
+        self.watch_ai(name,feed)
+        if feed.ai_sync:
+            scored=await self.scored_frame(feed,version)
+            if scored:return scored
+        return await feed.next(version,timeout)
 
     async def scored_frame(self,feed,version):
         """(version, jpeg) of the next frame the AI has finished, or None if it doesn't come in time. The frame is
@@ -227,8 +235,14 @@ class Cameras:
             while not self.closing and request.transport and not request.transport.is_closing():
                 token=request.cookies.get('pm_session','')
                 if request.app['dashboard'].sessions.get(token) is not request['session'] or request['session']['expires']<=time.time():break
-                try:version,frame=await feed.next(version,5)
+                try:version,frame=await self.next_frame(name,feed,version,5)
                 except asyncio.TimeoutError:continue
+                # A plain video stream: the boxes are drawn on. With the AI HAT each frame is one the AI looked at;
+                # on the CPU the AI's latest look is drawn on the newer frames, like the dashboard's live view.
+                scored=feed.scored
+                if self.drawer and scored and time.time()-scored[2]<10:
+                    try:frame=await self.drawer(frame,scored[1])
+                    except Exception:pass
                 await asyncio.wait_for(response.write(b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: '+str(len(frame)).encode()+b'\r\n\r\n'+frame+b'\r\n'),5)
         except (ConnectionError,asyncio.TimeoutError):pass
         finally:await self.release(name,feed)

@@ -28,7 +28,11 @@ def validate_archive(path, plate):
         raise ValueError('Upload a sliced Bambu/Orca .3mf containing the selected plate, not an STL or unsliced project.')
 
 
-def options(plate=1, use_ams=False, mapping='', bed='textured_plate'):
+PRIORITIES = (1, 2, 3, 4, 5)
+DEFAULT_PRIORITY = 5   # reprint priority: how soon an AI-paused print is reprinted elsewhere (failureDetection/auto_reprint.py)
+
+
+def options(plate=1, use_ams=False, mapping='', bed='textured_plate', priority=DEFAULT_PRIORITY):
     plate = int(plate)
     if not 1 <= plate <= 100:
         raise ValueError('Plate must be between 1 and 100.')
@@ -45,7 +49,13 @@ def options(plate=1, use_ams=False, mapping='', bed='textured_plate'):
         raise ValueError('Provide an AMS mapping, for example 0 or 0,1.')
     if bed not in ('textured_plate', 'hot_plate', 'cool_plate', 'engineering_plate'):
         raise ValueError('Choose a supported bed type.')
-    return dict(plate=plate, use_ams=use_ams, ams_mapping=trays, bed=bed)
+    try:
+        priority = 0 if type(priority) is bool else int(DEFAULT_PRIORITY if priority in (None, '') else priority)
+    except (TypeError, ValueError):
+        priority = 0
+    if priority not in PRIORITIES:
+        raise ValueError('Priority must be 1 (most urgent) to 5.')
+    return dict(plate=plate, use_ams=use_ams, ams_mapping=trays, bed=bed, priority=priority)
 
 
 class Store:

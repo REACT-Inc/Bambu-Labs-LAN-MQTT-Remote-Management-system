@@ -48,7 +48,7 @@ Parameters marked `?` are optional. `name?` is a printer name, with autocomplete
 | `/printer` | `name?` | Status, temperatures and a camera snapshot | Snapshot depends on model/firmware LAN camera access |
 | `/filaments` | `name?` | AMS slots and external spool | |
 | `/queue` | `name?` | View a printer's shared queue | |
-| `/queueadd` | `name?` `file?` `remote?` `label?` `plate?` `use_ams?` `mapping?` `bed?` | Add a sliced `.3mf` upload, or a file already on the printer, to the queue | Only adds to the queue. Start it with `/queuestart` |
+| `/queueadd` | `name?` `file?` `remote?` `label?` `plate?` `use_ams?` `mapping?` `bed?` `priority?` | Add a sliced `.3mf` upload, or a file already on the printer, to the queue | Only adds to the queue. Start it with `/queuestart` |
 | `/file list` | `name?` `path?` | List printable `.3mf`/`.gcode` files on the printer | Read-only |
 | `/file system` | `name?` `path?` | List printer folders and files, with a downloadable listing | Read-only |
 | `/ftc` | | FTC Discord invite link | |

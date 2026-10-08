@@ -81,7 +81,7 @@ class ReprintTests(unittest.IsolatedAsyncioTestCase):
         self.reprints.flag('Mini 1',self.job)
         await self.reprints.tick();self.assertEqual(self.engine.started,[])        # not due yet
         self.assertTrue(self.reprints.state('Mini 1')['pending'])
-        self.clock.now+=12*HOUR
+        self.clock.now+=2.5*HOUR
         await self.reprints.tick()
         self.assertEqual(self.engine.controls,[('Mini 1','stop',AUTHOR)])         # the paused print is stopped
         self.assertEqual(self.store.get(self.job['id'])['status'],'failed')
@@ -99,7 +99,7 @@ class ReprintTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_waits_when_no_printer_is_free(self):
         self.beds={'Mini 2':'parts','Mini 3':'parts'}
-        self.reprints.flag('Mini 1',self.job);self.clock.now+=12*HOUR
+        self.reprints.flag('Mini 1',self.job);self.clock.now+=2.5*HOUR
         await self.reprints.tick();await self.reprints.tick()
         self.assertEqual(self.engine.started,[]);self.assertEqual(self.core.notify.await_count,1)   # told once, not every minute
         self.assertIn('parts on the bed',self.reprints.state('Mini 1')['note'])
@@ -117,7 +117,107 @@ class ReprintTests(unittest.IsolatedAsyncioTestCase):
     async def test_countdown_survives_a_restart(self):
         self.reprints.flag('Mini 1',self.job);self.make()
         self.assertTrue(self.reprints.state('Mini 1')['pending'])
-        self.assertEqual(self.reprints.due(self.job['id']),self.clock.now+12*HOUR)
+        self.assertEqual(self.reprints.due(self.job['id']),self.clock.now+2.5*HOUR)
+
+    async def test_priority_sets_how_long_a_paused_print_waits(self):
+        waits={}
+        for priority in (1,2,3,4,5):
+            job=self.store.add('Mini 1',f'P{priority}',self.asset,'',options(1,priority=priority),'t')
+            self.reprints.flag('Mini 1',job);waits[priority]=self.reprints.due(job['id'])-self.clock.now
+            self.reprints.pending.pop(job['id'])
+        self.assertEqual(waits,{1:5*60,2:HOUR,3:1.5*HOUR,4:2*HOUR,5:2.5*HOUR})
+        old=dict(self.job,options={k:v for k,v in self.job['options'].items() if k!='priority'})   # queued before priorities
+        self.reprints.flag('Mini 1',old);self.assertEqual(self.reprints.due(old['id'])-self.clock.now,2.5*HOUR)
+        capped=AutoReprint(self.core,self.engine,{'after_hours':0.5},clock=self.clock)   # after_hours is the most it waits
+        capped.flag('Mini 1',old);self.assertEqual(capped.due(old['id'])-self.clock.now,0.5*HOUR)
+        with self.assertRaisesRegex(ValueError,'Priority must be 1'):options(1,priority=6)
+        with self.assertRaisesRegex(ValueError,'Priority must be 1'):options(1,priority=True)
+        self.assertEqual(options(1,priority='')['priority'],5)
+
+    async def test_urgent_print_is_reprinted_after_five_minutes(self):
+        job=self.store.add('Mini 1','Urgent',self.asset,'',options(1,priority=1),'t');self.store.set_status(self.job['id'],'failed')
+        self.store.set_status(job['id'],'paused')
+        self.reprints.flag('Mini 1',job)
+        self.clock.now+=4*60;await self.reprints.tick();self.assertEqual(self.engine.started,[])
+        self.clock.now+=60;await self.reprints.tick()
+        self.assertEqual(self.store.get(self.engine.started[0][0])['label'],'Urgent')
+
+    async def test_mark_available_overrides_what_a_person_can_vouch_for(self):
+        self.beds={'Mini 2':'unknown','Mini 3':'parts'}
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertEqual([rows[n]['can_mark'] for n in ('Mini 2','Mini 3','H2D')],[True,True,False])   # never a different model
+        self.reprints.mark('Mini 3',True,'Ana')
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertTrue(rows['Mini 3']['ok']);self.assertTrue(rows['Mini 3']['marked']);self.assertEqual(rows['Mini 3']['bed'],'marked')
+        self.assertIn('Mini 3 (marked available)',self.reprints.state('Mini 1')['available'])
+        self.assertEqual([r['name'] for r in self.reprints.state('Mini 1')['printers'] if r['ok']],['Mini 3'])
+        # Things that would make the print fail are never overridden.
+        self.states['Mini 3']='RUNNING'
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertFalse(rows['Mini 3']['ok']);self.assertIn('running',rows['Mini 3']['reason']);self.states['Mini 3']='IDLE'
+        # Reprint on it, saying who vouched for it.
+        copy=await self.reprints.reprint('Mini 1','web administrator')
+        self.assertEqual(copy['printer'],'Mini 3');self.assertIn('Ana marked this printer available',self.core.notify.await_args.args[2])
+        # Kept across a restart; ends when that printer starts a print, or after 12 h.
+        self.make();self.assertTrue(self.reprints.marked('Mini 3'))
+        self.reprints.started('Mini 3');self.assertIsNone(self.reprints.marked('Mini 3'))
+        self.reprints.mark('Mini 2',True,'Ana');self.clock.now+=12*HOUR+1;self.assertIsNone(self.reprints.marked('Mini 2'))
+        self.assertIn('Marked available for reprints',[e['title'] for e in self.store.events()])
+        with self.assertRaisesRegex(ValueError,'Unknown printer'):self.reprints.mark('Nope',True,'Ana')
+
+    async def test_the_notification_names_who_marked_the_printer(self):
+        # The real queue ends a mark as soon as a print starts on that printer (its on_start_approved hook).
+        self.beds={'Mini 2':'unknown','Mini 3':'unknown'}
+        original=self.engine.start
+        async def start(job_id,confirmed,author,override_error=False):
+            await original(job_id,confirmed,author,override_error);self.reprints.started(self.store.get(job_id)['printer'])
+        self.engine.start=start
+        self.reprints.mark('Mini 2',True,'Ana')
+        await self.reprints.reprint('Mini 1','web administrator')
+        self.assertIn('Ana marked this printer available',self.core.notify.await_args.args[2])
+        self.assertIsNone(self.reprints.marked('Mini 2'))   # and the mark ended with that print
+
+    async def test_an_unknown_model_can_be_marked_and_is_reprinted_there(self):
+        configs={'Mini 1':{'model':'A1 mini','camera_type':'jpeg_tcp'},'Spare':{'camera_type':'jpeg_tcp'}}
+        self.core.names=lambda:list(configs);self.core.printer_config=configs.get;self.states['Spare']='IDLE'
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertEqual((rows['Spare']['reason'],rows['Spare']['can_mark']),('model unknown',True))
+        self.reprints.mark('Spare',True,'Ana')
+        copy=await self.reprints.reprint('Mini 1','web administrator')
+        self.assertEqual(copy['printer'],'Spare')   # not refused for the unknown model once someone vouched for it
+
+    async def test_nothing_is_stopped_when_the_copy_cannot_be_made(self):
+        # A job whose file is still on the failed printer: it's copied off at reprint time, and only then can it be read.
+        self.store.set_status(self.job['id'],'failed')
+        remote=self.store.add('Mini 1','Remote',None,'cache/remote.gcode.3mf',options(1),'t');self.store.set_status(remote['id'],'paused')
+        wrong=make_3mf(Path(self.tmp.name)/'uploads'/'wrong.3mf',model='Bambu Lab H2D')
+        with patch('job_transfer.fetch',return_value=str(wrong)):
+            with self.assertRaisesRegex(ValueError,'not the A1 mini'):await self.reprints.reprint('Mini 1','web administrator')
+        self.assertEqual(self.engine.controls,[])   # the paused print was not stopped
+        self.assertEqual(self.store.get(remote['id'])['status'],'paused');self.assertEqual(self.engine.started,[])
+        self.assertFalse(wrong.exists())            # the copied file is cleaned up
+
+    async def test_a_mark_ends_when_the_printer_starts_printing_anywhere(self):
+        self.beds={'Mini 2':'unknown','Mini 3':'unknown'};looked=[]
+        bed_state=self.reprints.bed_state
+        async def counting(name,refresh=False):looked.append(name);return await bed_state(name,refresh)
+        self.reprints.bed_state=counting
+        self.reprints.flag('Mini 1',self.job);await self.reprints.availability(self.store.get(self.job['id']))
+        looked.clear();self.reprints.mark('Mini 2',True,'Ana')
+        row=lambda:next(r for r in self.reprints.state('Mini 1')['printers'] if r['name']=='Mini 2')
+        self.assertTrue(row()['ok']);self.assertTrue(row()['marked']);self.assertEqual(looked,[])   # shown at once, no camera
+        self.states['Mini 2']='RUNNING'   # a print started from Bambu Studio or the printer's screen
+        await self.reprints.tick()
+        self.assertIsNone(self.reprints.marked('Mini 2'))
+        self.assertFalse(row()['ok']);self.assertIn('started a print',row()['reason'])
+        self.states['Mini 2']='FINISH'    # its part is on the bed now
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertFalse(rows['Mini 2']['ok'])
+
+    async def test_a_job_whose_file_is_gone_says_so(self):
+        Path(self.job['asset']).unlink()
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertEqual(rows['Mini 2']['reason'],"the job's file is no longer on the Pi")
 
     async def test_settings(self):
         self.assertEqual(ar.settings_for({'after_hours':-3,'bed_threshold':9})['after_hours'],0.0)
@@ -186,7 +286,7 @@ class MonitorTests(unittest.IsolatedAsyncioTestCase):
             await monitor.act('Mini 1','x.3mf',judge,'spaghetti')
             self.assertTrue(monitor.reprints.state('Mini 1')['pending'])
             text=core.notify.await_args.args[2]
-            self.assertIn('No other printer to reprint on',text);self.assertIn('within 12 h',text)
+            self.assertIn('No other printer to reprint on',text);self.assertIn('within 2.5 h (priority 5)',text)
             store.db.close()
 
 

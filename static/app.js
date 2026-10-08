@@ -78,6 +78,7 @@ function render(){if($('jobDialog').open)renderPrintNowOverride();renderStatus()
  $('stats').innerHTML=[['Printers online',p.filter(x=>x.connected).length+' / '+p.length],['Printing now',p.filter(x=>x.state==='RUNNING').length],['Waiting in queue',j.filter(x=>x.status==='queued').length],['Need attention',p.filter(x=>x.error||!x.connected).length+j.filter(x=>x.status==='needs_review').length]].map(([label,n],i)=>`<div class="stat"><small>${label}</small><strong class="${i===1?'green':''}">${n}</strong></div>`).join('');
  $('printers').innerHTML=p.map(printerCard).join('')||'<div class="empty">No printers configured.</div>'
  applyStyles($('printers'));
+ $('printers').querySelectorAll('.pc-cam img').forEach(img=>{if(img.complete)drawCardAi(img);else img.addEventListener('load',()=>drawCardAi(img),{once:true});});   // AI boxes on each still
  const names=p.map(x=>x.name);
  for(const id of ['jobPrinter','queueFilter']){
   const element=$(id),value=element.value;
@@ -100,7 +101,7 @@ function renderJobs(){
   if(j.status==='needs_review')buttons+=['finished','failed','cancelled'].map(o=>actionButton('resolve','Mark '+o,`${q} data-outcome="${o}"`)).join('');
   if(terminal.has(j.status))buttons+=actionButton('reprint','Queue again',q);
   if(terminal.has(j.status)&&state.printers.length>1)buttons+=actionButton('sendto','Print on another printer…',q);
-  return `<div class="job-row"><div class="job-info"><strong>${j.demo?'🧪 DEMO · ':''}${esc(j.label)}</strong><small>${esc(printerLabel(j.printer))} · Plate ${j.options.plate} · ${j.options.use_ams?'AMS '+esc(j.options.ams_mapping.join(', ')):'External spool'}</small><small>${esc(j.id)} · Added by ${esc(j.author)}</small>${j.note?`<div class="job-note">${esc(j.note)}</div>`:''}</div><span class="state ${statusClass(j.status)}">${esc(j.status.replaceAll('_',' '))}</span><div class="job-actions">${buttons}</div></div>`;};
+  return `<div class="job-row"><div class="job-info"><strong>${j.demo?'🧪 DEMO · ':''}${esc(j.label)}</strong><small>${esc(printerLabel(j.printer))} · Plate ${j.options.plate} · ${j.options.use_ams?'AMS '+esc(j.options.ams_mapping.join(', ')):'External spool'} · Priority ${j.options.priority||5}</small><small>${esc(j.id)} · Added by ${esc(j.author)}</small>${j.note?`<div class="job-note">${esc(j.note)}</div>`:''}</div><span class="state ${statusClass(j.status)}">${esc(j.status.replaceAll('_',' '))}</span><div class="job-actions">${buttons}</div></div>`;};
  $('jobs').innerHTML=jobs.filter(j=>!terminal.has(j.status)).map(row).join('')||'<div class="empty">The queue is clear. Add a print here or use /queueadd in Discord.</div>';
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
 }
@@ -131,7 +132,7 @@ function printerCard(x){
  actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':'')+(lt.busy?' pending':''));
  return `<article class="printer-card${x.connected?'':' offline'}" ${n} tabindex="0" role="button" aria-label="Open ${esc(x.display_name||x.name)}">
 <div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${printerClass(x)}" title="${esc(x.state||'')}">${esc(x.connected?(x.display_state||x.state):'OFFLINE')}</span></div>
-${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/${encodeURIComponent(x.name)}?t=${x.snapshot.time}" alt="${esc(x.display_name||x.name)} camera"><small class="pc-cam-time">📷 ${new Date(x.snapshot.time*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</small>`:`<small class="pc-cam-msg">${esc(x.snapshot?.error||'Waiting for the first snapshot…')}</small>`}</div>`:''}
+${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/${encodeURIComponent(x.name)}?t=${x.snapshot.time}" data-printer="${esc(x.name)}" alt="${esc(x.display_name||x.name)} camera"><canvas class="pc-ai" aria-hidden="true"></canvas><small class="pc-cam-time">📷 ${new Date(x.snapshot.time*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</small>`:`<small class="pc-cam-msg">${esc(x.snapshot?.error||'Waiting for the first snapshot…')}</small>`}</div>`:''}
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
@@ -194,7 +195,7 @@ async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUploa
   if(r.complete){$('jobAms').checked=true;$('jobMapping').value=r.mapping;}
   $('jobAmsHint').textContent=r.message+(r.rows.length?' '+r.rows.map(x=>`Filament ${x.filament} (${x.type||'?'}) → ${x.tray_label||'no matching slot'}`).join(' · '):'');}
  catch(e){$('jobAmsHint').textContent=e.message;}}
-function jobData(){const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value};
+function jobData(){const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value,priority:Number($('jobPriority').value)};
  if($('source').value==='upload'){if(!jobUpload)throw new Error($('jobFile').files[0]?'Wait for the file check to finish.':'Select a sliced .3mf file.');if(!jobPlate)throw new Error('Choose a plate.');data.asset=jobUpload.asset;data.plate=jobPlate;}
  else{data.remote=$('jobRemote').value;data.plate=Number($('jobPlate').value);}
  return data;}

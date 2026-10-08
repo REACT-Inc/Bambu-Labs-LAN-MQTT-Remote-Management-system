@@ -83,6 +83,8 @@ class Dashboard:
         self.failure = FailureMonitor(core, engine)
         core.failure_monitor = self.failure   # Discord /printer shows the AI watch line (#70)
         self.cameras.scorer = self.failure.live   # AI boxes on every live-view frame
+        self.cameras.drawer = self.failure.drawn   # ... drawn onto the frames of the raw live stream (/api/live)
+        self.snapshots.ai = self.failure.look   # ... and on every dashboard still
         self.app.on_startup.append(self.failure.start);self.app.on_shutdown.append(self.failure.stop)
         self.app.add_routes([
             web.get('/api/liveframe/{name}',self.cameras.frame_response),
@@ -166,12 +168,16 @@ class Dashboard:
 
     async def ai_reprint(self, request):
         """Automatic reprint (#67): now = reprint the AI-paused job elsewhere at once; cancel = stop the countdown;
-        check = which printers could take it (uses the cameras)."""
+        check = which printers could take it (uses the cameras); available = mark another printer available (override)."""
         name=request.match_info['name']
         if name not in self.core.names():raise ValueError('Unknown printer.')
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
-        action=(await request.json()).get('action')
+        data=await request.json();action=data.get('action')
         reprints=self.failure.reprints
+        if action=='available':   # "Mark available": someone looked at that printer (target) and vouches for it
+            if type(data.get('on')) is not bool:raise ValueError('Say whether to mark the printer available.')
+            reprints.mark(data.get('target'),data['on'],'web administrator')   # the lists shown update without a camera
+            return web.json_response(self.failure.state(name))
         if action=='now':
             copy=await reprints.reprint(name,'web administrator')
             return web.json_response({'ok':True,'job':copy['id'],'printer':copy['printer']})
@@ -433,7 +439,7 @@ class Dashboard:
     def add(self, data, author):
         printer=data.get('printer')
         if printer not in self.core.names(): raise ValueError('Unknown printer.')
-        opts=options(data.get('plate',1),data.get('use_ams',False),data.get('mapping',''),data.get('bed','textured_plate'))
+        opts=options(data.get('plate',1),data.get('use_ams',False),data.get('mapping',''),data.get('bed','textured_plate'),data.get('priority'))
         asset=data.get('asset');remote=data.get('remote','')
         if bool(asset)==bool(remote): raise ValueError('Choose an uploaded file OR a path on the printer.')
         path=None
@@ -549,6 +555,7 @@ class Dashboard:
         if name not in self.core.names(): raise ValueError('Unknown printer.')
         image=await self.core.snapshot(name)
         if not image: raise web.HTTPNotFound(text='Camera unavailable.')
+        image=await self.failure.annotated(name,image) if self.failure.enabled else image   # with the AI's boxes
         return web.Response(body=image,content_type='image/jpeg')
 
     async def settings(self,request):

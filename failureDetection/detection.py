@@ -41,8 +41,8 @@ import time
 from collections import deque
 from pathlib import Path
 
-from failureDetection import print_geometry
-from failureDetection.auto_reprint import AutoReprint
+from failureDetection import overlay_draw, print_geometry
+from failureDetection.auto_reprint import AutoReprint, wait_text
 from failureDetection.bed_model import BedAI, LEARN_DELAY
 from failureDetection.model_updates import ModelUpdates
 from failureDetection.training import TrainingPictures
@@ -54,6 +54,7 @@ DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], thres
                 geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
                 hold=None, focus=True, bed_ai={}, bed_model='')
 CAMERAS = 2   # camera pictures fetched at the same time
+ANNOTATE_WAIT = 15   # seconds the AI may take to box a picture before it's sent without boxes
 LIVE_CPU_GAP = 3   # seconds between live-view AI looks on the CPU (the AI HAT looks at every frame)
 START_DELAY = 5   # seconds after start-up before the AI helper is started
 START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
@@ -447,6 +448,14 @@ class Judge:
         return len(self.failing_times())
 
 
+async def shielded(coroutine):
+    """Run a question to the AI helper to the end even if the caller stops waiting: the caller is released at once,
+    and the answer is still read, so the helper's replies stay in step with the questions."""
+    task = asyncio.ensure_future(coroutine)
+    task.add_done_callback(lambda done: done.cancelled() or done.exception())   # nobody may be waiting any more
+    return await asyncio.shield(task)
+
+
 class HailoBackend:
     """Talks to hailo_worker.py running under the system Python: a .hef model runs on the AI HAT (hailo-all),
     a .onnx model on the CPU (python3-opencv). Both are Raspberry Pi OS packages, so the service venv needs neither."""
@@ -552,6 +561,12 @@ class HailoBackend:
                 log.debug('AI HAT helper: %s', text)
 
     async def score(self, jpeg, crops=None):
+        # Shielded: a caller that gives up (a timeout for a Discord picture, a closed live view) must not cut the
+        # helper off between a question and its answer, or the next caller (maybe a real failure check) would read
+        # that answer as its own.
+        return await shielded(self._score(jpeg, crops))
+
+    async def _score(self, jpeg, crops):
         async with self.lock:
             if self.process is None or self.process.returncode is not None:
                 if time.monotonic() < self.retry_at:
@@ -575,7 +590,10 @@ class HailoBackend:
             return float(reply.get('score') or 0), reply.get('detections') or []
 
     async def embed(self, jpeg, crops=None):
-        """Bed check fingerprints (bed_model.py): unit vectors for the picture and each crop."""
+        """Bed check fingerprints (bed_model.py): unit vectors for the picture and each crop. Shielded like score()."""
+        return await shielded(self._embed(jpeg, crops))
+
+    async def _embed(self, jpeg, crops):
         async with self.lock:
             if not self.bed_ready or self.process is None or self.process.returncode is not None:
                 raise RuntimeError(self.bed_error or 'The bed check model is not loaded.')
@@ -754,15 +772,16 @@ class FailureMonitor:
         state, _, _, connected = self.core.state_data(name)
         if state != 'RUNNING' or not connected:
             raise ValueError(f"Check AI now works while a print is running (the printer reports {state or 'unknown'}). "
-                             'Use Test AI now to see what the AI makes of the camera any time.')
+                             'Check AI now shows what the AI makes of the camera any time.')
         async with self.lock(name):
             result = await self.check(name, on_request=True)
         if not result:
             raise ValueError(self.status.get(name, {}).get('message') or 'The check could not run.')
         return result
 
-    async def check(self, name, on_request=False):
-        """One look at one printer. Returns what it found (or None when it couldn't look)."""
+    async def check(self, name, on_request=False, picture=None):
+        """One look at one printer. Returns what it found (or None when it couldn't look). picture: one already taken
+        for this request (Check AI now)."""
         state, _, data, connected = self.core.state_data(name)
         config = self.core.printer_config(name) or {}
         if (not self.watching(name) and not on_request) or config.get('camera_type') not in ('rtsp', 'jpeg_tcp'):
@@ -783,8 +802,7 @@ class FailureMonitor:
             judge = self.judges[name] = Judge(tuning, self.clock);judge.reset(job)
         judge.settings = tuning   # a sensitivity change applies to the evidence already collected
         self.focus.reset(name, job)
-        picture = None
-        if on_request and getattr(self.core, 'capture_still', None):   # a fresh picture, not a reused one
+        if picture is None and on_request and getattr(self.core, 'capture_still', None):   # a fresh picture, not a reused one
             try:
                 picture = await self.core.capture_still(name, 20)
             except Exception:
@@ -828,7 +846,8 @@ class FailureMonitor:
             labels = f'{labels}, {where}' if labels else where
         threshold = tuning['threshold']
         result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, hold=tuning['hold'], verdict=verdict, where=where,
-                      detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted)
+                      detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted,
+                      crops=crops, labels=sorted(tuning['labels']))
         if judge.acted:   # already reported (and maybe paused) for this print: keep that status, don't act again
             self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), **self.overlay(name, detections, tuning))
             return result
@@ -843,8 +862,11 @@ class FailureMonitor:
         return result
 
     async def test(self, name):
-        """"Test AI now": one check on a fresh camera picture at any time, printing or not. It doesn't count towards
-        the failure rules and never pauses anything; the picture is kept as a training picture."""
+        """"Check AI now" (one button): the AI checks a fresh camera picture now and shows it with its boxes.
+        - While a print is running, it's a real check: it counts towards the failure rules, and because a person asked
+          for a decision, a picture at or above the failure score acts straight away (pause or alert, as set).
+        - Otherwise it only shows what the AI sees: nothing is counted or paused.
+        The picture is kept as a training picture either way."""
         if not self.enabled:
             raise ValueError('AI failure detection is not enabled in config.json.')
         if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
@@ -859,6 +881,18 @@ class FailureMonitor:
         picture = picture or await self.core.snapshot(name, timeout=20)
         if not picture:
             raise ValueError('No camera picture right now. Check the camera, then try again.')
+        state, _, _, connected = self.core.state_data(name)
+        if state == 'RUNNING' and connected:   # printing: a real check on this picture, which acts if it looks failed
+            async with self.lock(name):
+                result = await self.check(name, on_request=True, picture=picture)
+            if result:
+                self.store_event(name, 'AI check on request', f"Score {result['score']:.2f} (threshold {result['threshold']:g})"
+                                 + (' • acted' if result['acted'] else ''))
+                return dict(score=result['raw'], judged=result['score'], threshold=result['threshold'], hold=result['hold'],
+                            failing=result['verdict'] == 'failure' or result['score'] >= result['threshold'],
+                            labels=result['labels'], detections=result['detections'], crops=result['crops'], where=result['where'],
+                            picture=base64.b64encode(picture).decode(), checked=self.clock(), printing=True,
+                            acted=result['acted'], already=result['already'], status=self.status.get(name, {}).get('status'))
         tuning = self.tuning(name)
         crops = self.crops(name, tuning)
         try:
@@ -883,20 +917,45 @@ class FailureMonitor:
             pass
         self._set(name, **self.overlay(name, detections, tuning))   # the camera view shows these boxes too
         self.store_event(name, 'AI test', f'Score {score:.2f} (threshold {threshold:g})' + (f' • {where}' if where else ''))
-        return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, failing=score_on_file >= threshold,
-                    labels=sorted(tuning['labels']), detections=detections, crops=crops, where=where,
-                    picture=base64.b64encode(picture).decode(), checked=self.clock())
+        return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, hold=tuning['hold'],
+                    failing=score_on_file >= threshold, labels=sorted(tuning['labels']), detections=detections, crops=crops,
+                    where=where, picture=base64.b64encode(picture).decode(), checked=self.clock(), printing=False, printer_state=state)
 
-    async def live(self, name, frame):
-        """The boxes for one live-view frame, printing or not: called for each new frame while someone watches the
-        printer live (live_camera.Cameras.score_frames). Display only: nothing is judged, saved or acted on.
-        With the AI HAT it keeps up with the camera (sync); on the CPU it looks at most every LIVE_CPU_GAP seconds."""
-        if not self.enabled or not self.watching(name):
+    async def look(self, name, picture):
+        """The boxes the AI finds in this picture, printing or not, for showing on it. Display only: nothing is
+        judged, saved or acted on. Every camera view uses this, so the boxes always belong to the picture shown."""
+        if not self.enabled or not self.watching(name) or not picture:
             return None
         tuning = self.tuning(name)
-        _, detections = await self.backend.score(frame, self.crops(name, tuning))
+        _, detections = await self.backend.score(picture, self.crops(name, tuning))
+        return self.overlay(name, detections, tuning)
+
+    async def live(self, name, frame):
+        """The boxes for one live-view frame (live_camera.Cameras.score_frames). With the AI HAT it keeps up with the
+        camera (sync); on the CPU it looks at most every LIVE_CPU_GAP seconds."""
+        overlay = await self.look(name, frame)
+        if overlay is None:
+            return None
         on_hat = getattr(self.backend, 'backend_name', '').startswith('AI HAT')
-        return dict(self.overlay(name, detections, tuning), sync=on_hat, gap=0 if on_hat else LIVE_CPU_GAP)
+        return dict(overlay, sync=on_hat, gap=0 if on_hat else LIVE_CPU_GAP)
+
+    async def drawn(self, picture, overlay):
+        """A picture with boxes the AI already found drawn on it."""
+        return await asyncio.to_thread(overlay_draw.draw, picture, overlay)
+
+    async def annotated(self, name, picture, overlay=None):
+        """The picture with the AI's boxes drawn on it, for pictures that leave as plain images (Discord, Take camera
+        snapshot). overlay: boxes the AI already found in this very picture (then it isn't looked at again). The
+        picture as it is when the AI is off, isn't watching this printer, or can't look in time."""
+        if not self.enabled or not self.watching(name) or not picture:
+            return picture
+        try:
+            if overlay is None:
+                overlay = await asyncio.wait_for(self.look(name, picture), ANNOTATE_WAIT)
+            return await asyncio.to_thread(overlay_draw.draw, picture, overlay) if overlay else picture
+        except Exception as exc:
+            log.info('AI boxes not drawn on a picture for %s (%s)', name, type(exc).__name__)
+            return picture
 
     def overlay(self, name, detections, tuning):
         """What the dashboard draws over the camera picture: the boxes the model found in the last checked frame
@@ -948,9 +1007,10 @@ class FailureMonitor:
                 available = self.reprints.summary(await self.reprints.availability(job))
             except Exception as exc:
                 available = f'Could not check the other printers ({type(exc).__name__}).'
-            hours = self.reprints.settings['after_hours']
-            hint += (f"\n{available}\nIf it isn't resumed or stopped within {hours:g} h, it will be reprinted on an available printer."
-                     " To do it now, use Reprint now in the dashboard.")
+            entry = self.reprints.pending.get(job['id']) or {}
+            wait = wait_text(self.reprints.wait(entry))
+            hint += (f"\n{available}\nIf it isn't resumed or stopped within {wait} (priority {entry.get('priority', 5)}), it will be "
+                     "reprinted on an available printer. To do it now, use Reprint now in the dashboard.")
         await self.core.notify(name, title, detail + hint, getattr(self.core, 'RED', 0xE74C3C), True)
 
     async def confirm_pause(self, name, wait=30):
@@ -1007,6 +1067,7 @@ class FailureMonitor:
         """A queue job is starting: the plate was just cleared, so its picture is an empty bed (the auto-reprint
         reference, and an "empty" example for the bed check AI). Not for a Swapmod swap print (the finished part is
         still on the bed) or an AI reprint (nobody looked)."""
+        self.reprints.started(job['printer'])   # its bed won't be empty afterwards: "Mark available" ends
         if (job.get('options') or {}).get('swap') or author == 'AI auto reprint':
             return
         if self.reprints.settings['enabled']:
