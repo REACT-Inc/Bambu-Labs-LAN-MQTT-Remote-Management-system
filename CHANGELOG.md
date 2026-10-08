@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.7.7)
+## 1.7.7-beta.1
+
+Built on 1.7.6-beta.1. Printers and the Discord bot are set up in the dashboard (Discord is now optional), AI boxes on every camera view, a reprint priority and **Mark available** for automatic reprints, and one **Check AI now** button.
 
 ### Added
 - **The dashboard is the primary way to set up and use the app; Discord is optional (#8).**
