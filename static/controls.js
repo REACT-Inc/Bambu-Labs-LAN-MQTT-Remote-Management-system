@@ -276,8 +276,11 @@ function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrin
  $('aiCalibrate').textContent=g.calibrated?'Recalibrate camera to bed…':'Calibrate camera to bed…';$('aiCalibrate').hidden=!g.enabled;
  renderBed(ai.bed||{});
  const rp=ai.reprint||{},showReprint=rp.enabled&&(rp.pending||ai.status==='paused');$('aiReprintBlock').hidden=!showReprint;
- if(showReprint){const left=rp.pending?Math.max(0,rp.due-Date.now()/1000):null,h=left===null?'':`${Math.floor(left/3600)} h ${Math.floor(left%3600/60)} min`;
-  $('aiReprint').textContent=(rp.pending?`If this paused print isn't resumed or stopped, it reprints on an available printer in ${h}. `:'')+(rp.note?rp.note+' ':'')+(rp.available||'Press Check available printers to see which printers could take it.');
+ if(showReprint){const left=rp.pending?Math.max(0,rp.due-Date.now()/1000):null,h=left===null?'':left<3600?`${Math.ceil(left/60)} min`:`${Math.floor(left/3600)} h ${Math.floor(left%3600/60)} min`;
+  $('aiReprint').textContent=(rp.pending?`If this paused print isn't resumed or stopped, it reprints on an available printer in ${h} (priority ${rp.priority||5}). `:'')+(rp.note?rp.note+' ':'')+(rp.available?'':'Press Check available printers to see which printers could take it.');
+  // Each other printer: available or why not, with "Mark available" for what a person can vouch for after looking.
+  $('aiReprintPrinters').innerHTML=(rp.printers||[]).map(r=>`<li><span class="state ${r.ok?'':r.can_mark?'warn':'bad'}">${r.ok?(r.marked?'Marked available':'Available'):'Unavailable'}</span> <b>${esc(r.display)}</b>${r.ok?'':` · ${esc(r.reason)}`}`+
+   (r.marked?` <button type="button" class="small-btn ghost" data-mark="${esc(r.name)}" data-on="0">Undo</button>`:r.can_mark?` <button type="button" class="small-btn" data-mark="${esc(r.name)}" data-on="1" title="You've looked at this printer: use it although this can't be confirmed">Mark available</button>`:'')+'</li>').join('');
   $('aiReprintCancel').hidden=!rp.pending;}
  const pace=ai.interval?` Checking every ${Math.round(ai.interval)} s while printing (${ai.interval_reason||'adaptive'}).`:'';
  const where=ai.backend?` Running on: ${ai.backend}${ai.active_model?' ('+ai.active_model+')':''}.${ai.backend_note?' ⚠️ '+ai.backend_note:''}`:'';
@@ -354,6 +357,10 @@ for(const [id,clear] of [['aiBedYes',true],['aiBedNo',false]])$(id).addEventList
 async function aiReprint(action,button){button.disabled=true;try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/reprint',{action});
  notice(action==='now'?`Reprinting on ${printerLabel(r.printer)}.`:action==='cancel'?'Automatic reprint cancelled.':'Checked the other printers.');await refresh();}catch(err){notice(err.message);}finally{button.disabled=false;}}
 $('aiReprintCheck').addEventListener('click',e=>aiReprint('check',e.target));
+$('aiReprintPrinters').addEventListener('click',async e=>{const b=e.target.closest('[data-mark]');if(!b)return;b.disabled=true;
+ try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/reprint',{action:'available',target:b.dataset.mark,on:b.dataset.on==='1'});
+  notice(b.dataset.on==='1'?`${printerLabel(b.dataset.mark)} is marked available for reprints until it starts printing (at most 12 h).`:`${printerLabel(b.dataset.mark)} is no longer marked available.`);await refresh();}
+ catch(err){notice(err.message);b.disabled=false;}});
 $('aiReprintCancel').addEventListener('click',e=>aiReprint('cancel',e.target));
 $('aiReprintNow').addEventListener('click',e=>confirmAction('Reprint on another printer now?',`The paused print on ${printerLabel(selectedPrinter)} will be stopped and recorded as failed, and the job started on an available printer of the same model whose camera shows an empty bed and whose loaded filament matches.`,
  'Stop this paused print and reprint the job on another printer.',()=>aiReprint('now',e.target)));

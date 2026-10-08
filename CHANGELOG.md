@@ -4,12 +4,17 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 
 ## Unreleased (1.7.7)
 
+### Added
+- **Mark a printer available for an automatic reprint.** The reprint section of an AI-paused print now lists every other printer with why it can't take the job. **Mark available** uses a printer you've looked at even when the app can't confirm it: bed not confirmed empty, unknown model, or filament that isn't an exact match. It never overrides a different model, an offline, printing or erroring printer, or one busy with another job. The mark ends as soon as that printer is seen printing (from here, Bambu Studio or its screen), or after 12 hours. The reprint notification says who marked the printer.
+- **Reprint priority (1–5)** when queueing a print (dashboard and `/queueadd`), shown on each queue job. It sets how long an AI-paused print waits before it's reprinted elsewhere: 1 = 5 minutes, 2 = 1 hour, 3 = 1.5 hours, 4 = 2 hours, 5 = 2.5 hours (the default).
+
 ### Changed
 - **AI boxes on every camera view.** Every camera picture now shows what the AI found in that very picture. See [AI boxes on the camera view](failureDetection/FAILURE_DETECTION.md#ai-boxes-on-the-camera-view).
   - **Dashboard:** the overview printer cards and the printer panel's still picture show the boxes the AI found in that still, printing or not. A new still is shown straight away and its boxes follow a moment later; a still never shows another picture's boxes. Live view already had them on every frame.
   - **Pictures sent as images:** Discord `/printer`, notifications with a picture (including AI failure alerts), **Take camera snapshot** and the raw live stream have the boxes drawn on. A picture the AI already looked at for the dashboard isn't looked at again, so `/printer` still answers quickly.
   - **Always plain:** the pictures the AI judges, the training pictures and the calibration picture.
   - **Display only:** these looks never pause or alert anything, and never hold up the real checks. If the AI can't look in time, the picture is still shown or sent, without boxes.
+- **Automatic reprints wait at most 2.5 hours** instead of 12. `after_hours` in config.json is now the longest wait, 2.5 by default.
 
 ## 1.7.6-beta.1
 

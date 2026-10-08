@@ -267,13 +267,30 @@ The helper limits OpenCV to 2 threads, so the dashboard, MQTT and cameras stay r
 When the AI **pauses** a failing queue print, the job can carry on somewhere else:
 
 1. **The pause notification** says which printers could take it, for example *"Available for a reprint: Mini 2 (bed checked empty)"*, or why none can.
-2. **Countdown:** if nobody resumes or stops the paused print within **12 hours**, the app reprints the job on an available printer:
+2. **Countdown:** if nobody resumes or stops the paused print in time, the app reprints the job on an available printer. How long it waits is the job's **reprint priority**, chosen in **Queue a print** (or `/queueadd priority:`):
+
+   | Priority | Waits |
+   |---|---|
+   | 1 (urgent) | 5 minutes |
+   | 2 | 1 hour |
+   | 3 | 1.5 hours |
+   | 4 | 2 hours |
+   | 5 (default) | 2.5 hours |
+
+   When it's reprinted, the app:
    - it stops the paused print, so the printer doesn't sit paused and heated;
    - records the job as failed;
    - starts a copy on the chosen printer;
    - says so in Discord and Activity.
 3. **Reprint now:** open the printer → **More → AI failure watch → Reprint now…** does the same at once. **Cancel automatic reprint** stops the countdown, and **Check available printers** looks again.
 4. **No printer free when it's time:** it keeps waiting, tries again every minute, and tells you once why.
+
+**Mark available:** the reprint section lists every other printer, available or why not. If you've looked at a printer and know it's fine, press **Mark available** next to it, and it's used although the app can't confirm it. This works for:
+- a bed that isn't confirmed empty (or that the camera thinks has parts on it);
+- a printer model the app doesn't know;
+- filament that isn't an exact match: the closest loaded filaments are used, as long as every filament the plate needs is loaded.
+
+It never overrides what would make the print fail: a different printer model, a printer that's offline, printing or reporting an error, or one busy with another queue job. The mark ends as soon as that printer is seen printing (whether the print was started here, from Bambu Studio or on the printer's screen), or after 12 hours. **Undo** removes it sooner. Marking is instant: the list updates without looking at any camera, and the reprint itself checks everything again. Before the paused print is stopped, the app also checks that the copy can really be made, so a reprint that can't happen never leaves a stopped print behind. Marks are saved on the Pi and recorded in Activity, and the reprint notification says who marked the printer.
 
 **What makes a printer available:**
 - it's the **model the file was sliced for**;
@@ -288,13 +305,13 @@ When the AI **pauses** a failing queue print, the job can carry on somewhere els
 The countdown is saved in `/var/lib/3d-printer-management/ai-reprints.json`, so it survives restarts. It's only for prints the AI paused (`"action": "pause"`) and for queue jobs; a print started from Bambu Studio has no file on the Pi to reprint. Settings (optional), under `failure_detection`:
 
 ```json
-"auto_reprint": {"enabled": true, "after_hours": 12, "stop_original": true, "bed_threshold": 0.005}
+"auto_reprint": {"enabled": true, "after_hours": 2.5, "stop_original": true, "bed_threshold": 0.005}
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Offer and run automatic reprints. |
-| `after_hours` | `12` | How long a paused print waits before it's reprinted elsewhere. |
+| `after_hours` | `2.5` | The longest a paused print waits before it's reprinted elsewhere. Each job's reprint priority sets its wait, up to this. |
 | `stop_original` | `true` | Stop the paused print when reprinting. |
 | `bed_threshold` | `0.005` | Share of the bed that may differ from the empty-bed picture and still count as empty. |
 

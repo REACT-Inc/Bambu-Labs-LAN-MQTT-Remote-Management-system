@@ -85,9 +85,13 @@ def install(core, store, engine, dashboard):
     @app_commands.guild_only()
     @app_commands.describe(name='Printer name, partial name, or leave blank to choose',
         file='A sliced Bambu/Orca .3mf file',remote='Alternative: path on printer, e.g. cache/model.gcode.3mf',
-        mapping='AMS slot mapping, e.g. 0 or 0,1; required if use_ams is true')
+        mapping='AMS slot mapping, e.g. 0 or 0,1; required if use_ams is true',
+        priority='If the AI pauses this print: reprint elsewhere after 1 = 5 min, 2 = 1 h, 3 = 1.5 h, 4 = 2 h, 5 = 2.5 h (default)')
+    @app_commands.choices(priority=[app_commands.Choice(name=f'{n} • {w}',value=n) for n,w in
+        ((1,'urgent: reprint after 5 min'),(2,'1 h'),(3,'1.5 h'),(4,'2 h'),(5,'2.5 h'))])
     async def queueadd(interaction:discord.Interaction,name:str=None,file:discord.Attachment=None,
-                       remote:str=None,label:str=None,plate:int=1,use_ams:bool=False,mapping:str='',bed:str='textured_plate'):
+                       remote:str=None,label:str=None,plate:int=1,use_ams:bool=False,mapping:str='',bed:str='textured_plate',
+                       priority:int=5):
         if bool(file)==bool(remote):
             await interaction.response.send_message('Provide either a sliced file attachment OR its existing path on the printer.',ephemeral=core.ephemeral(interaction));return
         await interaction.response.defer(ephemeral=core.ephemeral(interaction))
@@ -103,7 +107,7 @@ def install(core, store, engine, dashboard):
             except BaseException:
                 path.unlink(missing_ok=True);raise
         data=dict(asset=asset,remote=remote or '',label=label or (file.filename if file else Path(remote).name),
-                  plate=plate,use_ams=use_ams,mapping=mapping,bed=bed)
+                  plate=plate,use_ams=use_ams,mapping=mapping,bed=bed,priority=priority)
         async def add(click,printer):
             try:
                 job=dashboard.add(dict(data,printer=printer),core.who(interaction))
