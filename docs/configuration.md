@@ -1,9 +1,14 @@
 # Configuration
 
-All settings live in two places:
+Most things are set up in the dashboard, so you rarely need to edit a file:
 
-- **`/etc/3d-printer-management/config.json`:** the private configuration. You edit this by hand, then restart the service. It holds the Discord token, servers, printers, network and features.
-- **The dashboard's Settings page** (stored in `/var/lib/3d-printer-management/`): channel IDs, approved users, printer display names, team settings, GitHub and problem-report destinations. These apply immediately, with no restart.
+- **The dashboard's Settings page** (stored in `/var/lib/3d-printer-management/`):
+  - **Printers:** add, edit and remove printers (**Settings & help → Printers**).
+  - **Discord (optional):** the bot token and server IDs, channel IDs, approved users and command permissions.
+  - **Everything else:** printer display names, other alerts, team settings, GitHub and problem-report destinations.
+
+  Printers and the Discord connection apply after a restart, with **Restart now** in the dashboard; everything else applies immediately.
+- **`/etc/3d-printer-management/config.json`:** the private configuration, edited by hand, then restart the service. It holds the network settings (`listen`, `port`), features such as AI failure detection, and anything you prefer to keep in a file. Printers and Discord settings in `config.json` take precedence over the dashboard's: they're shown in the dashboard but can only be changed in the file.
 
 - [Editing config.json](#editing-configjson)
 - [config.json reference](#configjson-reference)
@@ -35,11 +40,11 @@ sudo python3 -m json.tool /etc/3d-printer-management/config.json >/dev/null && e
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `discord_token` | string | `""` | Discord bot token. Empty = dashboard-only mode (no Discord). |
-| `guild_ids` | list of numbers | `[]` | Discord servers the bot answers in. Commands anywhere else are refused. |
+| `discord_token` | string | `""` | Discord bot token. Usually set in the dashboard instead (**Settings → Discord (optional)**). Empty here and there = no Discord. |
+| `guild_ids` | list of numbers | `[]` | Discord servers the bot answers in. Commands anywhere else are refused. Usually set in the dashboard instead. |
 | `admin_user_ids` | list of numbers | `[]` | Discord user IDs allowed to run admin commands without being server administrators. Overridden by **Settings → Approved user IDs** once saved there. |
-| `printers` | list | `[]` | Printers to manage. See [Printer entries](#printer-entries). |
-| `demo` | boolean | `false` | `true` = don't connect to printers; simulate them. Demo mode is also on when `printers` is empty. |
+| `printers` | list | `[]` | Printers to manage, in addition to the ones added in the dashboard. See [Printer entries](#printer-entries). |
+| `demo` | boolean | `false` | `true` = don't connect to printers; simulate them. Demo printers are also shown while no printers are set up (here or in the dashboard). |
 | `example_data` | object | two demo printers | Demo mode only: fake telemetry per printer name, in the same shape as a Bambu MQTT `print` report. |
 | `listen` | list of IPs | `["127.0.0.1", "<chosen IP>"]` | Addresses the dashboard listens on. Set by the installer. |
 | `port` | number | `8080` | Dashboard port |
@@ -65,6 +70,8 @@ Example:
 ```
 
 ## Printer entries
+
+The easiest way is **Settings & help → Printers** in the dashboard: it asks for the same details and works out the model and camera type from the serial number. Printers added there are saved in `/var/lib/3d-printer-management/printers.json`. Printers can also be listed in `config.json` with these keys:
 
 | Key | Required | Meaning |
 |---|---|---|
@@ -121,6 +128,8 @@ The app uses each printer's model for its temperature limits, chamber heating, f
 | ├ `meshcentral.json` | MeshCentral URL, token and allowed commands. See [LAPTOPS.md](../laptopManagement_Intergration/LAPTOPS.md). |
 | ├ `github-updates.json` | GitHub release settings and token (mode 600) |
 | ├ `issue-reports.json` | Problem-report destination and token (mode 600) |
+| ├ `printers.json` | Printers added in the dashboard, with their access codes (mode 600) |
+| ├ `discord.json` | The Discord bot token and server IDs set in the dashboard (mode 600) |
 | ├ `logs/management.log` | Service log (rotates at 2 MB, 5 old files kept) |
 | └ `updates/` | Update ZIPs waiting for the updater |
 | `/var/lib/pm-updater/` | Updater status, journal and root-only backups |

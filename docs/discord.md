@@ -1,6 +1,6 @@
 # Discord bot
 
-The bot runs inside the same service as the dashboard and uses the same printers, queues and history. If `discord_token` is empty or Discord is down, the dashboard keeps working.
+Discord is optional: everything is done in the [web dashboard](dashboard.md), and the bot adds slash commands and notifications in your server on top of it. It runs inside the same service and uses the same printers, queues and history. Without a bot, or while Discord is down, the dashboard keeps working.
 
 - [Setup](#setup)
 - [Who can use what](#who-can-use-what)
@@ -12,7 +12,7 @@ The bot runs inside the same service as the dashboard and uses the same printers
 ## Setup
 
 1. **Create the bot:** create a bot in the [Discord Developer Portal](https://discord.com/developers/applications). Invite it with the `bot` and `applications.commands` scopes.
-2. **Configure it:** put the token in `discord_token` and your server ID(s) in `guild_ids` in [`config.json`](configuration.md), then restart the service. Slash commands sync when the bot connects, which can take a minute to show up.
+2. **Connect it in the dashboard:** **Settings & help → Discord (optional) → Connect a Discord bot**. Paste the bot token and your server ID (right-click the server → **Copy Server ID**; turn on Developer Mode under Discord's **Advanced** settings first), then press **Save Discord connection** and **Restart now**. Slash commands sync when the bot connects, which can take a minute to show up. (`discord_token` and `guild_ids` in [`config.json`](configuration.md) still work, and take precedence.)
 3. **Set the channels:** in the channel for automatic updates, run `/setnotificationchannel`. In the channel where people should use printer commands, run `/setcommandschannel`: replies are public there and private everywhere else (see [Reply visibility](#reply-visibility)). Both can also be set in dashboard **Settings**.
 4. **Grant these permissions to the bot:**
 
@@ -26,7 +26,7 @@ The bot runs inside the same service as the dashboard and uses the same printers
 
 ## Who can use what
 
-- **Allowed servers:** commands only work in servers listed in `guild_ids`, never in DMs.
+- **Allowed servers:** commands only work in the servers set in the dashboard (or `guild_ids`), never in DMs.
 - **Admin:** a member with Discord's **Administrator** permission in that server, **or** a user ID in the approved list (dashboard **Settings → Approved user IDs**, or `admin_user_ids` in `config.json`).
 - **Everyone, with confirmation and logging:** printer actions (pause, resume, stop, reprint, lights, speed, fans) and the queue (start, force start, manage) are open to every member. Each asks for confirmation and is recorded in the Activity feed with who ran it.
 - **Changing who can use a command:** admins can set each command to **Everyone**, **Allowed roles + admins**, **Admins only** or **Off** in the dashboard under **Settings → Discord command permissions**. Commands that reboot the Pi, run laptop commands, send DMs or change channels can only be admins-only or off. The full list with default levels is in [Commands and permissions](commands.md).

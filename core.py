@@ -6,11 +6,12 @@ CONFIG_PATH = Path(os.environ.get('PM_CONFIG', '/etc/3d-printer-management/confi
 CONFIG = json.loads(CONFIG_PATH.read_text())
 DATA_DIR = Path(os.environ.get('PM_DATA', '/var/lib/3d-printer-management'))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DISCORD_BOT_TOKEN = CONFIG.get('discord_token', '')
-ALLOWED_GUILD_IDS = set(CONFIG.get('guild_ids', []))
+import printer_setup   # printers and the optional Discord bot can also be set up in the dashboard (#8)
+DISCORD_BOT_TOKEN, ALLOWED_GUILD_IDS = printer_setup.discord_settings(CONFIG, DATA_DIR)
 SETTINGS_USER_IDS = set(CONFIG.get('admin_user_ids', []))
 SETTINGS_FILE = str(DATA_DIR / 'settings.json')
-PRINTERS = CONFIG.get('printers', [])
+PRINTERS = printer_setup.merged_printers(CONFIG, DATA_DIR)
+restart_requested = False   # set by the dashboard's Restart now: main.py then exits so systemd starts it again
 EXAMPLE_DATA = CONFIG.get('example_data') or {
     p['name']: {'state':'IDLE','error':0,'connected':True,'mc_percent':0,
                 'ams':{'ams':[{'id':'0','humidity':'4','temp':'24.5',**({'info':'101'} if 'h2d' in (p.get('model') or p['name']).lower() else {}),'tray':[

@@ -26,6 +26,7 @@ from queueing import MAX_UPLOAD, options, validate_archive
 import diagnostics
 from issue_reports import IssueReports
 from status_center import StatusCenter
+from printer_setup import Setup
 from Updater.web_updates import BUSY as UPDATE_BUSY
 
 
@@ -66,6 +67,7 @@ class Dashboard:
         self.updater = WebUpdates(self)
         self.github_updater = GitHubUpdates(self)
         self.issue_reports = IssueReports(core, store, self.app)
+        self.setup = Setup(core, store, self.app)   # printers and the optional Discord bot, set up here (#8)
         try:self.release=json.loads((Path(__file__).parent/'release.json').read_text()).get('id','')
         except (OSError,ValueError):self.release=''
         self.app.on_shutdown.append(self.cameras.close)
@@ -368,7 +370,8 @@ class Dashboard:
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
-            discord=self.core.bot.is_ready(), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
+            discord=self.core.bot.is_ready(), discord_configured=bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
+            setup_needed=self.core.EXAMPLE_MODE and not getattr(self.core,'CONFIG',{}).get('demo'), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
             settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)],
                       # Discord IDs are sent as text: they are larger than JavaScript numbers can hold exactly.
                       'alert_ping_users':[str(x) for x in self.core.settings.get('alert_ping_users') or []]},

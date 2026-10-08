@@ -23,7 +23,7 @@ This guide installs 3D Printer Management as a systemd service on a Raspberry Pi
 | Network to printers | The Pi must reach each printer on the LAN: MQTT over TLS on **8883**, FTPS on **990** (plus its data connection), and the camera port (**6000** for A1-family JPEG cameras, **322** for RTSP cameras such as the H2D) |
 | Printer settings | LAN mode / developer mode as required by your firmware, and each printer's **IP address, serial number and access code** |
 | Internet (during install) | To download OS packages and Python packages from PyPI |
-| Discord (optional) | A bot token and the IDs of the servers (guilds) it may be used in. Without a token the dashboard still works. |
+| Discord (optional) | Not needed: everything is done in the dashboard. To add the bot later, you need a bot token and your server ID, entered in the dashboard. |
 
 The installer installs `python3` (with `venv`), `ffmpeg` and `sudo` using the system's package manager.
 
@@ -65,7 +65,7 @@ The dashboard uses plain HTTP on port 8080, protected by a password. Use Tailsca
 ## Install
 
 1. **Download and extract** the release ZIP (`3d-printer-management.zip`) on the Pi. It extracts to a `printer-management` folder.
-2. **If you're migrating** from the original bot, make sure its source is at `/tmp/printer_discord_bot.py`, or pass `--old <path>`. See [Migrating](#migrating-from-the-original-discord-bot).
+2. **Only if you're migrating** from the original Discord bot: make sure its source is at `/tmp/printer_discord_bot.py`, or pass `--old <path>`. See [Migrating](#migrating-from-the-original-discord-bot). A new installation needs nothing else: printers and the optional Discord bot are set up in the dashboard afterwards.
 3. **Run the installer:**
    ```bash
    cd printer-management
@@ -80,18 +80,20 @@ The dashboard uses plain HTTP on port 8080, protected by a password. Use Tailsca
    | `--demo` | Create a demo configuration with no real printers. See [Demo mode](#demo-mode). |
    | `--enable-reboot` | Allow the Pi to be rebooted from Discord or the dashboard. See [below](#optional-allow-rebooting-the-pi-from-discord-or-the-dashboard). |
 
-4. **Wait for the health check.** The installer validates the configuration and Discord command definitions, starts the service, and waits up to 15 seconds for the dashboard to answer. If it doesn't, it restores the previous installation and shows the last 30 log lines.
+4. **Wait for the health check.** The installer validates the configuration and the command definitions, starts the service, and waits up to 15 seconds for the dashboard to answer. If it doesn't, it restores the previous installation and shows the last 30 log lines.
 5. **Save the password.** The installer prints the dashboard address(es) and, on a first install, an **initial dashboard password**.
 
 ## First login
 
 1. **Sign in:** open the printed address, for example `http://100.x.y.z:8080`, from a device that can reach it, and sign in with the initial password.
 2. **Change the password:** go to **Settings & help → Dashboard access** and set a new password (at least 12 characters). This signs out every session.
-3. **Set up Discord** (**Settings & help**):
-   - **Channels:** set the notification and commands channels, or run `/setnotificationchannel` and `/setcommandschannel` in Discord.
-   - **Approved user IDs:** add the Discord user IDs of people who may run admin commands without being server administrators.
-4. **Check demo mode:** if the configuration was imported with `demo: true`, check the printer entries in `/etc/3d-printer-management/config.json`, then set `demo` to `false` and restart. See [Configuration](configuration.md).
+3. **Add your printers:** a new installation shows a **Welcome** banner and demo printers until you add your own. Press **Add a printer** (or go to **Settings & help → Printers**) and enter each printer's name, IP address, serial number and access code. The model and camera type are worked out from the serial number. Then press **Restart now**: the dashboard is back after about 15 seconds, connected to your printers.
+   - **Where to find the details:** on the printer, **Settings → Network** shows the IP address and the LAN access code, and **Settings → Device** shows the serial number. LAN mode (or developer mode) must be on, depending on your firmware.
+   - **Give each printer a fixed address** (a DHCP reservation in your router), so it keeps the same IP.
+4. **Optional, Discord:** to also use the Discord bot, open **Settings & help → Discord (optional) → Connect a Discord bot**, then set the channels and approved users there. See [Discord bot](discord.md#setup).
 5. **Test one printer first:** queue a small sliced file on one cleared printer before relying on the queue.
+
+If the configuration was imported from the old bot with `demo: true`, check the printer entries in `/etc/3d-printer-management/config.json`, then set `demo` to `false` and restart. See [Configuration](configuration.md).
 
 ## Migrating from the original Discord bot
 
@@ -121,7 +123,7 @@ sudo systemctl enable --now printer-discord-bot
 
 ## Demo mode
 
-Demo mode runs the dashboard and Discord bot without connecting to any printer. Use it to try the system out or to test changes.
+Demo mode runs the dashboard (and the Discord bot, if set up) without connecting to any printer. Use it to try the system out or to test changes.
 
 - **Fresh demo install:** run `sudo bash install.sh --demo` (Tailscale or `PM_LISTEN_IP` is still required).
 - **Demo printers:** with no printers configured, two demo printers appear. You can supply your own demo data with `example_data` in `config.json`.
@@ -129,7 +131,7 @@ Demo mode runs the dashboard and Discord bot without connecting to any printer. 
 - **Demo controls:** printer controls only update the simulated data.
 - **Going live:** demo jobs are tagged and can't be started after you switch to live mode. Remove them and queue new live jobs.
 
-Demo mode is on when `"demo": true` is set, **or** when no printers are configured.
+Demo mode is on when `"demo": true` is set, **or** while no printers are set up (in the dashboard or `config.json`). A new installation therefore starts with demo printers and a **Welcome** banner until you add your first printer.
 
 ## Optional: allow rebooting the Pi from Discord or the dashboard
 
