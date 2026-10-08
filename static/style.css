@@ -250,3 +250,4 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 @media(max-width:720px){.status-panel{top:62px;left:16px}}
 @media(prefers-reduced-motion:reduce){.status-dot.busy{animation:none}}
 .pc-ai{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.reprint-printers{list-style:none;padding:0;margin:8px 0 12px}.reprint-printers li{padding:6px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.6}.reprint-printers button{margin-left:6px}

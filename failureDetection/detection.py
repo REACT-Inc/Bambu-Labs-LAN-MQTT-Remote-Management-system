@@ -42,7 +42,7 @@ from collections import deque
 from pathlib import Path
 
 from failureDetection import overlay_draw, print_geometry
-from failureDetection.auto_reprint import AutoReprint
+from failureDetection.auto_reprint import AutoReprint, wait_text
 from failureDetection.bed_model import BedAI, LEARN_DELAY
 from failureDetection.model_updates import ModelUpdates
 from failureDetection.training import TrainingPictures
@@ -991,9 +991,10 @@ class FailureMonitor:
                 available = self.reprints.summary(await self.reprints.availability(job))
             except Exception as exc:
                 available = f'Could not check the other printers ({type(exc).__name__}).'
-            hours = self.reprints.settings['after_hours']
-            hint += (f"\n{available}\nIf it isn't resumed or stopped within {hours:g} h, it will be reprinted on an available printer."
-                     " To do it now, use Reprint now in the dashboard.")
+            entry = self.reprints.pending.get(job['id']) or {}
+            wait = wait_text(self.reprints.wait(entry))
+            hint += (f"\n{available}\nIf it isn't resumed or stopped within {wait} (priority {entry.get('priority', 5)}), it will be "
+                     "reprinted on an available printer. To do it now, use Reprint now in the dashboard.")
         await self.core.notify(name, title, detail + hint, getattr(self.core, 'RED', 0xE74C3C), True)
 
     async def confirm_pause(self, name, wait=30):
@@ -1050,6 +1051,7 @@ class FailureMonitor:
         """A queue job is starting: the plate was just cleared, so its picture is an empty bed (the auto-reprint
         reference, and an "empty" example for the bed check AI). Not for a Swapmod swap print (the finished part is
         still on the bed) or an AI reprint (nobody looked)."""
+        self.reprints.started(job['printer'])   # its bed won't be empty afterwards: "Mark available" ends
         if (job.get('options') or {}).get('swap') or author == 'AI auto reprint':
             return
         if self.reprints.settings['enabled']:

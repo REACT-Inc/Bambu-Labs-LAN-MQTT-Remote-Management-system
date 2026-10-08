@@ -32,6 +32,7 @@ What you can't queue:
 | File source | Upload a sliced `.3mf` (up to 256 MiB), or a path already on the printer |
 | Plate | **Upload:** pick a plate card (see below). **Path on the printer:** type the plate number, 1–100. |
 | Bed type | Textured PEI, Smooth/high temperature, Cool plate, or Engineering plate |
+| Reprint priority | 1–5: if the AI pauses this print as failed, how long it waits before it's reprinted on another printer. 1 = 5 minutes (urgent), 2 = 1 hour, 3 = 1.5 hours, 4 = 2 hours, 5 = 2.5 hours (default). See [Automatic reprint](../failureDetection/FAILURE_DETECTION.md#automatic-reprint-on-another-printer). |
 | Use AMS / AMS mapping | Off = external spool. On = a comma-separated list with one entry per filament in the project: the AMS tray (`0` = AMS 1 slot 1, `1` = AMS 1 slot 2, … `4` = AMS 2 slot 1) or `-1` for a filament this plate doesn't use. For uploads it's filled in for you (see below). |
 
 **What happens when you pick a file (dashboard):**

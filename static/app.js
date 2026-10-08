@@ -100,7 +100,7 @@ function renderJobs(){
   if(j.status==='needs_review')buttons+=['finished','failed','cancelled'].map(o=>actionButton('resolve','Mark '+o,`${q} data-outcome="${o}"`)).join('');
   if(terminal.has(j.status))buttons+=actionButton('reprint','Queue again',q);
   if(terminal.has(j.status)&&state.printers.length>1)buttons+=actionButton('sendto','Print on another printer…',q);
-  return `<div class="job-row"><div class="job-info"><strong>${j.demo?'🧪 DEMO · ':''}${esc(j.label)}</strong><small>${esc(printerLabel(j.printer))} · Plate ${j.options.plate} · ${j.options.use_ams?'AMS '+esc(j.options.ams_mapping.join(', ')):'External spool'}</small><small>${esc(j.id)} · Added by ${esc(j.author)}</small>${j.note?`<div class="job-note">${esc(j.note)}</div>`:''}</div><span class="state ${statusClass(j.status)}">${esc(j.status.replaceAll('_',' '))}</span><div class="job-actions">${buttons}</div></div>`;};
+  return `<div class="job-row"><div class="job-info"><strong>${j.demo?'🧪 DEMO · ':''}${esc(j.label)}</strong><small>${esc(printerLabel(j.printer))} · Plate ${j.options.plate} · ${j.options.use_ams?'AMS '+esc(j.options.ams_mapping.join(', ')):'External spool'} · Priority ${j.options.priority||5}</small><small>${esc(j.id)} · Added by ${esc(j.author)}</small>${j.note?`<div class="job-note">${esc(j.note)}</div>`:''}</div><span class="state ${statusClass(j.status)}">${esc(j.status.replaceAll('_',' '))}</span><div class="job-actions">${buttons}</div></div>`;};
  $('jobs').innerHTML=jobs.filter(j=>!terminal.has(j.status)).map(row).join('')||'<div class="empty">The queue is clear. Add a print here or use /queueadd in Discord.</div>';
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
 }
@@ -194,7 +194,7 @@ async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUploa
   if(r.complete){$('jobAms').checked=true;$('jobMapping').value=r.mapping;}
   $('jobAmsHint').textContent=r.message+(r.rows.length?' '+r.rows.map(x=>`Filament ${x.filament} (${x.type||'?'}) → ${x.tray_label||'no matching slot'}`).join(' · '):'');}
  catch(e){$('jobAmsHint').textContent=e.message;}}
-function jobData(){const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value};
+function jobData(){const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value,priority:Number($('jobPriority').value)};
  if($('source').value==='upload'){if(!jobUpload)throw new Error($('jobFile').files[0]?'Wait for the file check to finish.':'Select a sliced .3mf file.');if(!jobPlate)throw new Error('Choose a plate.');data.asset=jobUpload.asset;data.plate=jobPlate;}
  else{data.remote=$('jobRemote').value;data.plate=Number($('jobPlate').value);}
  return data;}
