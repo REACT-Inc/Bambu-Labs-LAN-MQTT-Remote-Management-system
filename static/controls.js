@@ -32,31 +32,38 @@ function showCamera(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
 // AI boxes over the camera view, like Test AI now: what the model found in the frame it checked last.
 let aiOverlayOn=true;try{aiOverlayOn=localStorage.getItem('aiOverlay')!=='off';}catch{}
 $('aiOverlayOn').checked=aiOverlayOn;
-$('aiOverlayOn').addEventListener('change',e=>{aiOverlayOn=e.target.checked;try{localStorage.setItem('aiOverlay',aiOverlayOn?'on':'off');}catch{}drawAiOverlay();});
+$('aiOverlayOn').addEventListener('change',e=>{aiOverlayOn=e.target.checked;try{localStorage.setItem('aiOverlay',aiOverlayOn?'on':'off');}catch{}drawAiOverlay();document.querySelectorAll('.pc-cam img').forEach(drawCardAi);});
 function shownImage(){const live=$('liveImage'),still=$('stillImage');return !live.hidden&&live.naturalWidth?live:!still.hidden&&still.naturalWidth?still:null;}
-function drawAiOverlay(){const c=$('aiOverlay'),g=c.getContext('2d'),status=devPrinter()?.ai,img=shownImage();
- c.width=c.clientWidth;c.height=c.clientHeight;g.clearRect(0,0,c.width,c.height);
- // Live view: the boxes the AI found in this very frame (or, on the CPU, its latest look); a still: the last check.
- const live=img&&img.id==='liveImage'&&liveAi&&Date.now()-liveAi.received<10000?liveAi:null,ai=live?{...status,...live}:status;
- const fresh=live||ai?.boxes_at&&Date.now()/1000-ai.boxes_at<Math.max(20,3*(ai.interval||5));
- $('aiOverlayToggle').hidden=!(status?.enabled&&status.watching&&img);
- if(!aiOverlayOn||!img||!fresh)return;
- // The picture is letterboxed inside the frame (object-fit: contain): map 0-1 picture fractions onto it.
- const scale=Math.min(c.width/img.naturalWidth,c.height/img.naturalHeight),w=img.naturalWidth*scale,h=img.naturalHeight*scale,ox=(c.width-w)/2,oy=(c.height-h)/2;
- const rect=([x0,y0,x1,y1])=>[ox+x0*w,oy+y0*h,(x1-x0)*w,(y1-y0)*h];
- g.setLineDash([6,5]);g.strokeStyle='rgba(255,255,255,.45)';g.lineWidth=1;g.font='11px sans-serif';g.fillStyle='rgba(255,255,255,.7)';g.textBaseline='top';
- (ai.zoom||[]).forEach(z=>{const [x,y,bw,bh]=rect(z);g.strokeRect(x,y,bw,bh);g.fillText('🔍 AI zoom',x+4,y+4);});
- g.setLineDash([]);g.font='bold 13px sans-serif';g.textBaseline='bottom';
+// paintAi: the boxes (0-1 picture fractions) over a picture shown with object-fit contain (panel) or cover (cards).
+function paintAi(c,img,ai,note,fit='contain',small=false){const g=c.getContext('2d');c.width=c.clientWidth;c.height=c.clientHeight;g.clearRect(0,0,c.width,c.height);
+ if(!ai||!img?.naturalWidth)return;
+ const scale=(fit==='cover'?Math.max:Math.min)(c.width/img.naturalWidth,c.height/img.naturalHeight),w=img.naturalWidth*scale,h=img.naturalHeight*scale,ox=(c.width-w)/2,oy=(c.height-h)/2;
+ const rect=([x0,y0,x1,y1])=>[ox+x0*w,oy+y0*h,(x1-x0)*w,(y1-y0)*h],top=Math.max(0,oy),bottom=Math.min(c.height,oy+h),right=Math.min(c.width,ox+w);
+ const label=small?11:13,bar=small?15:18;
+ if(!small){g.setLineDash([6,5]);g.strokeStyle='rgba(255,255,255,.45)';g.lineWidth=1;g.font='11px sans-serif';g.fillStyle='rgba(255,255,255,.7)';g.textBaseline='top';
+  (ai.zoom||[]).forEach(z=>{const [x,y,bw,bh]=rect(z);g.strokeRect(x,y,bw,bh);g.fillText('🔍 AI zoom',x+4,y+4);});g.setLineDash([]);}
+ g.font=`bold ${label}px sans-serif`;g.textBaseline='bottom';
  (ai.boxes||[]).forEach(d=>{const strong=d.counts&&d.score>=ai.threshold,maybe=d.counts&&d.score>=ai.hold;
   const color=strong?'#ff5c52':maybe?'#f3d684':d.counts?'rgba(243,214,132,.6)':'#8dc6ff';const [x,y,bw,bh]=rect(d.box);
   g.strokeStyle=color;g.lineWidth=strong?3:2;g.strokeRect(x,y,bw,bh);
-  const text=`${d.label} ${Math.round(d.score*100)}%`,tw=g.measureText(text).width+8,ty=Math.max(oy+18,y);
-  g.fillStyle=color;g.fillRect(x,ty-18,tw,18);g.fillStyle='#111';g.fillText(text,x+4,ty-3);});
- const age=Math.round(Date.now()/1000-ai.boxes_at);g.font='11px sans-serif';g.textBaseline='bottom';
- const note=`AI ${live?(live.same?'live':'live · last look'):`${age}s ago`}${ai.boxes?.length?'':' · nothing found'}`;const nw=g.measureText(note).width+10;
- g.fillStyle='rgba(0,0,0,.55)';g.fillRect(ox+w-nw-6,oy+h-22,nw,18);g.fillStyle='#fff';g.fillText(note,ox+w-nw-1,oy+h-8);}
+  const text=`${d.label} ${Math.round(d.score*100)}%`,tw=g.measureText(text).width+8,ty=Math.max(top+bar,y);
+  g.fillStyle=color;g.fillRect(x,ty-bar,tw,bar);g.fillStyle='#111';g.fillText(text,x+4,ty-3);});
+ if(!note)return;g.font='11px sans-serif';g.textBaseline='bottom';
+ const text=`${note}${ai.boxes?.length?'':' · nothing found'}`,nw=g.measureText(text).width+10,nx=small?Math.max(0,ox)+6:right-nw-6;
+ g.fillStyle='rgba(0,0,0,.55)';g.fillRect(nx,bottom-22,nw,18);g.fillStyle='#fff';g.fillText(text,nx+5,bottom-8);}
+// The printer panel's camera: live, every frame with its own boxes (on the CPU, the AI's latest look); a still, the
+// boxes the AI found in that still. Never boxes from another picture.
+function drawAiOverlay(){const c=$('aiOverlay'),p=devPrinter(),status=p?.ai,img=shownImage();
+ $('aiOverlayToggle').hidden=!(status?.enabled&&status.watching&&img);
+ let ai=null,note='';
+ if(img?.id==='liveImage'&&liveAi&&Date.now()-liveAi.received<10000){ai=liveAi;note=liveAi.same?'AI live':'AI live · last look';}
+ else if(img?.id==='stillImage'&&p?.snapshot?.ai){ai=p.snapshot.ai;note='AI · this picture';}
+ paintAi(c,img,aiOverlayOn?ai:null,note);}
+// The overview cards' stills: the boxes the AI found in each still (cropped to the card like the picture).
+function drawCardAi(img){const p=state?.printers.find(x=>x.name===img.dataset.printer),c=img.parentElement.querySelector('.pc-ai');
+ if(c)paintAi(c,img,aiOverlayOn?p?.snapshot?.ai:null,'AI','cover',true);}
 ['liveImage','stillImage'].forEach(id=>$(id).addEventListener('load',drawAiOverlay));
-window.addEventListener('resize',()=>{if($('detailDialog').open)drawAiOverlay();});
+window.addEventListener('resize',()=>{if($('detailDialog').open)drawAiOverlay();document.querySelectorAll('.pc-cam img').forEach(drawCardAi);});
 setInterval(()=>{if($('detailDialog').open&&state)drawAiOverlay();},1000);
 $('startLive').onclick=()=>{$('stillImage').hidden=true;startLiveView();};
 $('stopLive').onclick=()=>{stopLive();showCamera();};

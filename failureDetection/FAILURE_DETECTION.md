@@ -142,7 +142,7 @@ Even 50–100 labelled pictures from your own cameras usually make a big differe
 
 ## AI boxes on the camera view
 
-A printer's camera view shows what the AI found, with the same colours as **Test AI now**:
+Every camera picture you see shows what the AI found in that picture, with the same colours as **Test AI now**:
 
 - **Red:** a failure at or above the failure score.
 - **Yellow:** a failure at or above the keep-counting score.
@@ -154,9 +154,30 @@ A printer's camera view shows what the AI found, with the same colours as **Test
 - **Display only:** these looks are never judged, saved or acted on. Failures are still judged by the regular checks (every 5 s with the AI HAT), so watching live doesn't make the AI pause sooner or more often.
 - **Load:** it only runs for printers someone is watching live, and stops with the live view.
 
-**Still picture:** the boxes from the AI's last regular check. The corner label says how many seconds ago that was. Boxes older than 20 s (or three check intervals) aren't shown.
+**Where the boxes are shown:**
 
-Untick **AI boxes** under the picture to hide them; the choice is remembered in this browser.
+| View | Boxes |
+|---|---|
+| Printer panel, live view | Every frame, with that frame's own boxes (above). |
+| Printer panel, still picture | The boxes the AI found in that still (**AI · this picture**). |
+| Overview printer cards | The boxes the AI found in each card's still. |
+| More → **Take camera snapshot** | Drawn onto the picture. |
+| Discord `/printer` and notifications with a picture (including AI failure alerts) | Drawn onto the picture. |
+| The raw live stream (`/api/live/<printer>`) | Drawn onto every frame: with the AI HAT, each frame is one the AI looked at; on the CPU, its latest look. |
+| **Test AI now** | Its own detailed boxes and list. |
+
+- **Every still gets its own boxes.** The dashboard's stills (one printer at a time, while the dashboard is open) are each looked at by the AI, printing or not. A new still is shown straight away and its boxes appear a moment later, once the AI has looked at it.
+- **Boxes always belong to the picture shown.** A still the AI couldn't look at is shown without boxes, never with another picture's.
+- **No double work:** a picture the dashboard already had the AI look at (the latest still, or a live-view frame) goes to Discord with those boxes, without asking the AI again, so `/printer` still answers quickly.
+- **Display only:** like the live view, these looks are never judged, saved or acted on. They also never get in the way of the real checks: if a picture for display waits too long (15 s) it's shown or sent without boxes, and the AI still finishes that look before answering the next check.
+- **Always plain:**
+  - the pictures the AI itself judges;
+  - the training pictures;
+  - the calibration picture, where you click the bed's corners.
+- **Off:**
+  - when AI failure detection is off;
+  - when watching is turned off for that printer;
+  - in the dashboard only, untick **AI boxes** under the panel's picture. This hides them on the cards too, and is remembered in this browser.
 
 ## Comparing with the print file
 

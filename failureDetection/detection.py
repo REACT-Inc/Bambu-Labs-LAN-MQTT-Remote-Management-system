@@ -41,7 +41,7 @@ import time
 from collections import deque
 from pathlib import Path
 
-from failureDetection import print_geometry
+from failureDetection import overlay_draw, print_geometry
 from failureDetection.auto_reprint import AutoReprint
 from failureDetection.bed_model import BedAI, LEARN_DELAY
 from failureDetection.model_updates import ModelUpdates
@@ -54,6 +54,7 @@ DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], thres
                 geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
                 hold=None, focus=True, bed_ai={}, bed_model='')
 CAMERAS = 2   # camera pictures fetched at the same time
+ANNOTATE_WAIT = 15   # seconds the AI may take to box a picture before it's sent without boxes
 LIVE_CPU_GAP = 3   # seconds between live-view AI looks on the CPU (the AI HAT looks at every frame)
 START_DELAY = 5   # seconds after start-up before the AI helper is started
 START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
@@ -447,6 +448,14 @@ class Judge:
         return len(self.failing_times())
 
 
+async def shielded(coroutine):
+    """Run a question to the AI helper to the end even if the caller stops waiting: the caller is released at once,
+    and the answer is still read, so the helper's replies stay in step with the questions."""
+    task = asyncio.ensure_future(coroutine)
+    task.add_done_callback(lambda done: done.cancelled() or done.exception())   # nobody may be waiting any more
+    return await asyncio.shield(task)
+
+
 class HailoBackend:
     """Talks to hailo_worker.py running under the system Python: a .hef model runs on the AI HAT (hailo-all),
     a .onnx model on the CPU (python3-opencv). Both are Raspberry Pi OS packages, so the service venv needs neither."""
@@ -552,6 +561,12 @@ class HailoBackend:
                 log.debug('AI HAT helper: %s', text)
 
     async def score(self, jpeg, crops=None):
+        # Shielded: a caller that gives up (a timeout for a Discord picture, a closed live view) must not cut the
+        # helper off between a question and its answer, or the next caller (maybe a real failure check) would read
+        # that answer as its own.
+        return await shielded(self._score(jpeg, crops))
+
+    async def _score(self, jpeg, crops):
         async with self.lock:
             if self.process is None or self.process.returncode is not None:
                 if time.monotonic() < self.retry_at:
@@ -575,7 +590,10 @@ class HailoBackend:
             return float(reply.get('score') or 0), reply.get('detections') or []
 
     async def embed(self, jpeg, crops=None):
-        """Bed check fingerprints (bed_model.py): unit vectors for the picture and each crop."""
+        """Bed check fingerprints (bed_model.py): unit vectors for the picture and each crop. Shielded like score()."""
+        return await shielded(self._embed(jpeg, crops))
+
+    async def _embed(self, jpeg, crops):
         async with self.lock:
             if not self.bed_ready or self.process is None or self.process.returncode is not None:
                 raise RuntimeError(self.bed_error or 'The bed check model is not loaded.')
@@ -887,16 +905,41 @@ class FailureMonitor:
                     labels=sorted(tuning['labels']), detections=detections, crops=crops, where=where,
                     picture=base64.b64encode(picture).decode(), checked=self.clock())
 
-    async def live(self, name, frame):
-        """The boxes for one live-view frame, printing or not: called for each new frame while someone watches the
-        printer live (live_camera.Cameras.score_frames). Display only: nothing is judged, saved or acted on.
-        With the AI HAT it keeps up with the camera (sync); on the CPU it looks at most every LIVE_CPU_GAP seconds."""
-        if not self.enabled or not self.watching(name):
+    async def look(self, name, picture):
+        """The boxes the AI finds in this picture, printing or not, for showing on it. Display only: nothing is
+        judged, saved or acted on. Every camera view uses this, so the boxes always belong to the picture shown."""
+        if not self.enabled or not self.watching(name) or not picture:
             return None
         tuning = self.tuning(name)
-        _, detections = await self.backend.score(frame, self.crops(name, tuning))
+        _, detections = await self.backend.score(picture, self.crops(name, tuning))
+        return self.overlay(name, detections, tuning)
+
+    async def live(self, name, frame):
+        """The boxes for one live-view frame (live_camera.Cameras.score_frames). With the AI HAT it keeps up with the
+        camera (sync); on the CPU it looks at most every LIVE_CPU_GAP seconds."""
+        overlay = await self.look(name, frame)
+        if overlay is None:
+            return None
         on_hat = getattr(self.backend, 'backend_name', '').startswith('AI HAT')
-        return dict(self.overlay(name, detections, tuning), sync=on_hat, gap=0 if on_hat else LIVE_CPU_GAP)
+        return dict(overlay, sync=on_hat, gap=0 if on_hat else LIVE_CPU_GAP)
+
+    async def drawn(self, picture, overlay):
+        """A picture with boxes the AI already found drawn on it."""
+        return await asyncio.to_thread(overlay_draw.draw, picture, overlay)
+
+    async def annotated(self, name, picture, overlay=None):
+        """The picture with the AI's boxes drawn on it, for pictures that leave as plain images (Discord, Take camera
+        snapshot). overlay: boxes the AI already found in this very picture (then it isn't looked at again). The
+        picture as it is when the AI is off, isn't watching this printer, or can't look in time."""
+        if not self.enabled or not self.watching(name) or not picture:
+            return picture
+        try:
+            if overlay is None:
+                overlay = await asyncio.wait_for(self.look(name, picture), ANNOTATE_WAIT)
+            return await asyncio.to_thread(overlay_draw.draw, picture, overlay) if overlay else picture
+        except Exception as exc:
+            log.info('AI boxes not drawn on a picture for %s (%s)', name, type(exc).__name__)
+            return picture
 
     def overlay(self, name, detections, tuning):
         """What the dashboard draws over the camera picture: the boxes the model found in the last checked frame

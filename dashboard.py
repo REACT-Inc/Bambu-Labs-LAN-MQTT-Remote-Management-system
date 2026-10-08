@@ -81,6 +81,8 @@ class Dashboard:
         self.failure = FailureMonitor(core, engine)
         core.failure_monitor = self.failure   # Discord /printer shows the AI watch line (#70)
         self.cameras.scorer = self.failure.live   # AI boxes on every live-view frame
+        self.cameras.drawer = self.failure.drawn   # ... drawn onto the frames of the raw live stream (/api/live)
+        self.snapshots.ai = self.failure.look   # ... and on every dashboard still
         self.app.on_startup.append(self.failure.start);self.app.on_shutdown.append(self.failure.stop)
         self.app.add_routes([
             web.get('/api/liveframe/{name}',self.cameras.frame_response),
@@ -546,6 +548,7 @@ class Dashboard:
         if name not in self.core.names(): raise ValueError('Unknown printer.')
         image=await self.core.snapshot(name)
         if not image: raise web.HTTPNotFound(text='Camera unavailable.')
+        image=await self.failure.annotated(name,image) if self.failure.enabled else image   # with the AI's boxes
         return web.Response(body=image,content_type='image/jpeg')
 
     async def settings(self,request):
