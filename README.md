@@ -319,3 +319,8 @@ H2D uploads now enable the BambuTools client’s TLS unwrap option to close the 
 Reference implementation inspected: https://github.com/BambuTools/bambulabs\_api/blob/main/bambulabs\_api/ftp\_client.py
 These changes were tested with local HTTP and mocked printer transports, not on a physical H2D/A1 or the user’s browser.
 
+
+## Printer status bar
+
+See [PRINTER_STATUS.md](PRINTER_STATUS.md) for the authenticated summary endpoint,
+local status-file client, and standalone YASB widget configuration.
