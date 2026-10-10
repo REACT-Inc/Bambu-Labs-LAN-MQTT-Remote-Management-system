@@ -22,6 +22,8 @@ uploads/
 updates/
 backups/
 dist/
+desktop/build/
+*.exe
 venv/
 .venv/
 __pycache__/

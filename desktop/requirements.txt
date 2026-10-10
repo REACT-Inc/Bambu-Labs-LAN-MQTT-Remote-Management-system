@@ -1,0 +1,5 @@
+# The desktop app (desktop/desktop_app.py). From source: pip install -r desktop/requirements.txt
+pywebview==6.2.1
+pythonnet==3.1.0; sys_platform == "win32"
+pystray==0.19.5
+pillow==12.3.0

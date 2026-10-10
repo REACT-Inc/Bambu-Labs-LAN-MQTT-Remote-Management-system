@@ -1,0 +1,60 @@
+name: Desktop app
+# Builds the desktop app for Windows laptops (desktop/) into one .exe and tests it end to end against a demo Pi:
+# connect, sign in, the tray's printers and notifications, closing to the tray, staying signed in.
+# The release workflow calls this to attach the .exe to each release.
+on:
+  pull_request:
+    paths: ['desktop/**', 'dashboard.py', 'status_center.py', 'static/**', '.github/workflows/desktop.yml']
+  push:
+    branches: [main, 'beta-v*']
+    paths: ['desktop/**', 'dashboard.py', 'status_center.py', 'static/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: 'The version the app shows, for example v1.7.8-beta.1'
+        type: string
+        default: dev
+permissions:
+  contents: read
+jobs:
+  windows:
+    name: Build and test the .exe (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the build tools
+        run: python -m pip install -r desktop/requirements-build.txt
+      - name: Build the .exe
+        env:
+          VERSION: ${{ inputs.version || 'dev' }}
+        run: python desktop/build.py "$env:VERSION"
+      - name: Microsoft Edge WebView2 Runtime (laptops have it; install it here if the runner doesn't)
+        shell: pwsh
+        run: |
+          $id = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $keys = "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$id", "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$id"
+          $found = $keys | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if ($found) { "WebView2 Runtime $((Get-ItemProperty $found).pv)" }
+          else {
+            Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile webview2-setup.exe
+            Start-Process .\webview2-setup.exe -ArgumentList '/silent', '/install' -Wait
+          }
+      - name: Install the demo Pi's requirements
+        run: python -m pip install -r requirements.txt
+      - name: Test the .exe against a demo Pi
+        run: python desktop/ci/smoke_test.py dist/3d-printer-management-desktop.exe --out desktop-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-app
+          path: dist/3d-printer-management-desktop.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-app-test
+          path: desktop-test/

@@ -1,0 +1,4 @@
+# Building the .exe (desktop/build.py), on Windows.
+-r requirements.txt
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.7
