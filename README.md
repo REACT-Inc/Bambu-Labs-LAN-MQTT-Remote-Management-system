@@ -1,5 +1,8 @@
 # 3D Printer Management
 
+For live dashboard inspection and printer controls from Codex or Claude, see
+[LIVE_ACCESS.md](LIVE_ACCESS.md) for the MCP server and command-line client.
+
 A Raspberry Pi 4/5 application with a local web dashboard and a Discord interface sharing the same printer connections, job queues, files, and history. This is a self-hosted Python application, not a cloud-hosted website.
 
 ## Updates from the dashboard
