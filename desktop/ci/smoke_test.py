@@ -116,7 +116,8 @@ class Test:
     # ---- helpers ----
 
     def launch(self, *args):
-        return subprocess.Popen(shlex.split(self.app, posix=not WINDOWS) + list(args), env=self.env)
+        command = [os.path.abspath(self.app)] if os.path.isfile(self.app) else shlex.split(self.app, posix=not WINDOWS)
+        return subprocess.Popen(command + list(args), env=self.env)
 
     def log_text(self):
         try:

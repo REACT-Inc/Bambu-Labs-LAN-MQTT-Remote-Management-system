@@ -6,7 +6,7 @@ on:
   pull_request:
     paths: ['desktop/**', 'dashboard.py', 'status_center.py', 'static/**', '.github/workflows/desktop.yml']
   push:
-    branches: [main, 'beta-v*']
+    branches: [main, 'beta-v[0-9]+.[0-9]+.[0-9]+']   # the beta branches themselves, not feature branches off them
     paths: ['desktop/**', 'dashboard.py', 'status_center.py', 'static/**', '.github/workflows/desktop.yml']
   workflow_dispatch:
   workflow_call:
