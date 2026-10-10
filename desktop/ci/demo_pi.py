@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +42,10 @@ def main():
     (folder / 'config.json').write_text(json.dumps(dict(demo=True, printers=[], discord_token='', listen=['127.0.0.1'],
                                                         port=args.port)))
     os.environ.update(PM_CONFIG=str(folder / 'config.json'), PM_DATA=str(folder / 'data'))
+    try:
+        import pwd  # noqa: F401
+    except ImportError:   # Windows: the Pi's AI set-up code imports it (Linux only), and the demo never uses it
+        sys.modules['pwd'] = types.ModuleType('pwd')
     sys.path.insert(0, str(ROOT))
     import core
     from dashboard import Dashboard, atomic_json, password_hash

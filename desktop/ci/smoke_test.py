@@ -190,6 +190,8 @@ class Test:
         self.pi = subprocess.Popen([sys.executable, str(HERE / 'demo_pi.py'), '--port', str(self.port), '--password', PASSWORD])
         end = time.monotonic() + 90
         while time.monotonic() < end:
+            if self.pi.poll() is not None:
+                raise AssertionError(f'The demo Pi stopped (exit code {self.pi.returncode}); its error is above.')
             try:
                 async with self.http.get(f'http://127.0.0.1:{self.port}/health') as response:
                     if (await response.json()).get('application') == '3d-printer-management':
