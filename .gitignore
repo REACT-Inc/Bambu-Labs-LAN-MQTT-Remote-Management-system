@@ -4,6 +4,8 @@
 config.json
 settings.json
 auth.json
+*password*.txt
+printer-camera*.jpg
 meshcentral.json
 github-updates.json
 release.json

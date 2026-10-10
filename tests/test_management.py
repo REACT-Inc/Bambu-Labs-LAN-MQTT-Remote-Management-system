@@ -174,6 +174,30 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,200)
         self.assertEqual(self.store.get(job['id'])['status'],'staging')
 
+    async def test_live_client_status_camera_and_control(self):
+        from dashboard_client import DashboardClient, ClientError
+        password=Path(self.tmp.name)/'password.txt';password.write_text('test-password-123')
+        client=DashboardClient(str(self.client.make_url('/')),password)
+        await asyncio.to_thread(client.login)
+        try:
+            result=await asyncio.to_thread(client.state)
+            self.assertTrue(result['demo'])
+            self.assertEqual(result['printers'][0]['name'],'A')
+            self.assertNotIn('settings',result)
+            async def snapshot(name):return b'\xff\xd8synthetic\xff\xd9'
+            self.core.snapshot=snapshot
+            image=await asyncio.to_thread(client.snapshot,'A')
+            self.assertEqual(image,b'\xff\xd8synthetic\xff\xd9')
+            self.core.EXAMPLE_DATA={'A':{}}
+            result=await asyncio.to_thread(client.control,'A','move',1,'X',True,True)
+            self.assertTrue(result['ok'])
+            self.assertIn('Demo',result['message'])
+            with self.assertRaises(ClientError):
+                await asyncio.to_thread(client.control,'A','move',1,'X',True,True)
+        finally:
+            await asyncio.to_thread(client.logout)
+        self.assertFalse(self.dashboard.sessions)
+
     async def test_auth_required(self):self.assertEqual((await self.client.get('/api/state')).status,401)
     async def test_cross_origin_login_blocked(self):
         r=await self.client.post('/api/login',json={'password':'test-password-123'},headers={'X-PM':'1','Origin':'https://attacker.example'})
