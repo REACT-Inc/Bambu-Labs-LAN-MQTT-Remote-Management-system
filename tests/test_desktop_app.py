@@ -499,6 +499,9 @@ class FakeWindow:
     def restore(self):
         self.calls.append('restore')
 
+    def maximize(self):
+        self.calls.append('maximize')
+
 
 @needs_desktop
 class WindowAndTrayTests(unittest.TestCase):
@@ -608,6 +611,19 @@ class WindowAndTrayTests(unittest.TestCase):
         with patch.object(pi_client, 'summary', side_effect=pi_client.TooOld('Update the Pi to version 1.7.8')):
             self.app.poll()
         self.assertEqual(self.app.problem, 'Update the Pi to version 1.7.8')
+
+    def test_showing_the_window_puts_it_back_as_it_was(self):
+        self.app.show()
+        self.app.minimized = True
+        self.app.show()
+        self.app.maximized = True
+        self.app.show()
+        self.assertEqual(self.app.window.calls, ['show', 'show', 'restore', 'show', 'maximize'])
+
+    def test_a_web_view_that_is_not_ready_yet(self):
+        self.app.window.get_cookies = MagicMock(side_effect=RuntimeError('Main window failed to start'))
+        self.app.session = 'kept'
+        self.assertEqual(self.app.window_session('http://192.168.1.50:8080'), 'kept')
 
     def test_no_pi_yet(self):
         self.assertEqual(self.app.poll(), self.module.NOT_SIGNED_IN_EVERY)

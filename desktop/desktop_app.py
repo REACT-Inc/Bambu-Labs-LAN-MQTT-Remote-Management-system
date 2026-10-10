@@ -47,7 +47,7 @@ class DesktopApp:
     def __init__(self, settings, startup, start_hidden=False):
         self.settings, self.startup, self.start_hidden = settings, startup, start_hidden
         self.window = self.tray = None
-        self.tray_ok = self.quitting = self.minimized = False
+        self.tray_ok = self.quitting = self.minimized = self.maximized = False
         self.stop, self.wake = threading.Event(), threading.Event()
         self.auto_connect = True   # connect straight away when the app starts; not after "Change Pi address"
         self.summary, self.problem, self.level, self.headline, self.menu = None, 'Starting…', None, '', None
@@ -64,8 +64,8 @@ class DesktopApp:
         self.window.expose(self.start, self.connect, self.find)
         self.window.events.closing += self.on_closing
         self.window.events.minimized += lambda: setattr(self, 'minimized', True)
-        self.window.events.restored += lambda: setattr(self, 'minimized', False)
-        self.window.events.maximized += lambda: setattr(self, 'minimized', False)
+        self.window.events.restored += lambda: (setattr(self, 'minimized', False), setattr(self, 'maximized', False))
+        self.window.events.maximized += lambda: (setattr(self, 'minimized', False), setattr(self, 'maximized', True))
 
     @staticmethod
     def connect_page():
@@ -104,8 +104,8 @@ class DesktopApp:
 
     def show(self, *_):
         self.window.show()
-        if self.minimized:
-            self.window.restore()
+        if self.minimized:   # back to how it was before it was minimised
+            self.window.maximize() if self.maximized else self.window.restore()
 
     def change_address(self, *_):
         self.auto_connect = False
@@ -231,11 +231,10 @@ class DesktopApp:
                     if name == pi_client.SESSION_COOKIE and morsel['domain'].lstrip('.').strip('[]').lower() == host.strip('[]'):
                         self.session = morsel.value
                         return self.session
-        except Exception:
+            if str(self.window.get_current_url() or '').lower().startswith(('http:', 'https:')):
+                self.session = ''   # the dashboard is showing, so there really is no sign-in
+        except Exception:   # the web view isn't ready yet
             log.debug('Cookies not readable yet', exc_info=True)
-        url = str(self.window.get_current_url() or '')
-        if url.lower().startswith(('http:', 'https:')):
-            self.session = ''   # the dashboard is showing, so there really is no sign-in
         return self.session
 
     def poll(self):
