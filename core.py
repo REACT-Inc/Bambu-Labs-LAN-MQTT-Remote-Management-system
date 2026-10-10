@@ -6,11 +6,12 @@ CONFIG_PATH = Path(os.environ.get('PM_CONFIG', '/etc/3d-printer-management/confi
 CONFIG = json.loads(CONFIG_PATH.read_text())
 DATA_DIR = Path(os.environ.get('PM_DATA', '/var/lib/3d-printer-management'))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DISCORD_BOT_TOKEN = CONFIG.get('discord_token', '')
-ALLOWED_GUILD_IDS = set(CONFIG.get('guild_ids', []))
+import printer_setup   # printers and the optional Discord bot can also be set up in the dashboard (#8)
+DISCORD_BOT_TOKEN, ALLOWED_GUILD_IDS = printer_setup.discord_settings(CONFIG, DATA_DIR)
 SETTINGS_USER_IDS = set(CONFIG.get('admin_user_ids', []))
 SETTINGS_FILE = str(DATA_DIR / 'settings.json')
-PRINTERS = CONFIG.get('printers', [])
+PRINTERS = printer_setup.merged_printers(CONFIG, DATA_DIR)
+restart_requested = False   # set by the dashboard's Restart now: main.py then exits so systemd starts it again
 EXAMPLE_DATA = CONFIG.get('example_data') or {
     p['name']: {'state':'IDLE','error':0,'connected':True,'mc_percent':0,
                 'ams':{'ams':[{'id':'0','humidity':'4','temp':'24.5',**({'info':'101'} if 'h2d' in (p.get('model') or p['name']).lower() else {}),'tray':[
@@ -69,6 +70,7 @@ event_listener = None
 failure_monitor = None   # set by the dashboard (failureDetection, #70)
 notification_view = None   # (printer, title) -> buttons for a notification, set by clear_errors_discord (#34)
 alert_targets = None   # other alert destinations (alert_targets.py, #9), set by the dashboard
+status_center = None   # the dashboard's top-left status icon and its notifications (status_center.py)
 
 
 def load_settings():
@@ -86,6 +88,25 @@ public_channels = {}
 from printer_errors import describe as describe_error, errors as decode_errors
 import filament_sides
 from diagnostics import log_error
+
+# What the printer's raw state means for people. Bambu printers keep reporting FINISH or FAILED (FAILED also after a
+# cancelled print) until the next print starts, while they sit idle and ready, so those read as Ready.
+STATE_NAMES = {'RUNNING': 'Printing', 'PAUSE': 'Paused', 'PREPARE': 'Preparing', 'SLICING': 'Preparing', 'IDLE': 'Ready',
+               'FINISH': 'Ready', 'FAILED': 'Ready', 'UNKNOWN': 'Waiting for a report', 'INIT': 'Starting up'}
+LAST_PRINT = {'FINISH': 'last print finished', 'FAILED': 'last print failed or was cancelled'}
+
+
+def display_state(state, error=0, connected=True):
+    if not connected:
+        return 'Offline'
+    if error:
+        return 'Error'
+    return STATE_NAMES.get(str(state), str(state or 'Unknown').title())
+
+
+def last_print_note(state, error=0):
+    return '' if error else LAST_PRINT.get(str(state), '')
+
 
 def printer_error_text(name, error, data=None):
     printer = printer_config(name) or {}
@@ -278,7 +299,7 @@ def default_level(root):
 
 
 def command_level(root):
-    """Effective permission level for a top-level command name (e.g. 'plateswap' for /plateswap check)."""
+    """Effective permission level for a top-level command name (e.g. 'plateswap' for /plateswap now)."""
     level = (settings.get('command_permissions') or {}).get(root, default_level(root))
     if level not in LEVELS:
         level = default_level(root)
@@ -522,6 +543,26 @@ async def capture_still(name, timeout=25):
     return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
 
 
+def known_overlay(name, picture):
+    """The AI's boxes for a picture the dashboard already had the AI look at (its latest still, or a live-view
+    frame), so it isn't looked at twice. None when the AI hasn't looked at this very picture."""
+    rotation = globals().get('snapshot_rotation')
+    overlay = rotation.overlay_for(name, picture) if hasattr(rotation, 'overlay_for') else None
+    if overlay is None:
+        scored = getattr(getattr(globals().get('live_cameras'), 'feeds', {}).get(name), 'scored', None)
+        if scored and scored[3] is picture:
+            overlay = scored[1]
+    return overlay
+
+
+async def ai_picture(name, picture):
+    """A camera picture with the AI's boxes drawn on it, for pictures sent out as images (Discord). The AI itself
+    always gets plain pictures: only pictures for people go through here."""
+    if not picture or not failure_monitor or not getattr(failure_monitor, 'enabled', False):
+        return picture
+    return await failure_monitor.annotated(name, picture, known_overlay(name, picture))
+
+
 def recent_picture(name, max_age=60):
     """A picture that's already on hand: a frame from an open live view, or the dashboard's latest still."""
     feed = getattr(globals().get('live_cameras'), 'feeds', {}).get(name)
@@ -589,7 +630,8 @@ def printer_reply(embed, picture):
 
 def printer_embed(name):
     state, error, data, connected = state_data(name)
-    embed = card('🖨️ ' + display_name(name), f"{'🟢 Connected' if connected else '🔴 Offline / reconnecting'} • **{safe(state)}**",
+    note = last_print_note(state, error)
+    embed = card('🖨️ ' + display_name(name), f"{'🟢 Connected' if connected else '🔴 Offline / reconnecting'} • **{display_state(state, error, connected)}**" + (f' ({note})' if note else ''),
                  RED if error or not connected else STATE_COLORS.get(state, GRAY))
     field(embed, 'File', safe(data.get('subtask_name', 'No file reported')), False)
     field(embed, 'Progress', progress(data.get('mc_percent')), False)
@@ -701,6 +743,36 @@ def publish_action(name, action, filename=None):
     result = client.publish(f"device/{printer_config(name)['serial']}/request", json.dumps({'print': data}), qos=1)
     if result.rc != mqtt.MQTT_ERR_SUCCESS:
         raise RuntimeError('MQTT could not queue the command. Check the printer connection.')
+    request_report(name)
+
+
+REPORT_GAP = 10       # seconds: at most one full-report request per printer (frequent ones make P1/A1 stutter)
+REPORT_DELAY = 1.5    # seconds after a command, so the report already shows its effect
+report_requested = {}
+report_lock = threading.Lock()
+
+
+def request_report(name, delay=REPORT_DELAY):
+    """Ask the printer for a full status report shortly after a command (#60). Bambu printers send everything only
+    when asked ("pushall"); otherwise an idle A1/P1 can take a long time to report the change, and the dashboard keeps
+    showing "waiting for the printer". Rate-limited per printer. Returns True when a request was scheduled."""
+    if EXAMPLE_MODE or name not in names():
+        return False
+    with report_lock:
+        now = time.monotonic()
+        if now - report_requested.get(name, -REPORT_GAP) < REPORT_GAP:
+            return False
+        report_requested[name] = now
+
+    def send():
+        client = clients.get(name)
+        if client and client.is_connected():
+            client.publish(f"device/{printer_config(name)['serial']}/request",
+                           json.dumps({'pushing': {'sequence_id': str(time.time_ns() % 1000000000), 'command': 'pushall'}}))
+    timer = threading.Timer(delay, send)
+    timer.daemon = True
+    timer.start()
+    return True
 
 
 def publish_light(name, on):
@@ -718,6 +790,7 @@ def publish_light(name, on):
     result = client.publish(f"device/{printer_config(name)['serial']}/request", json.dumps(payload), qos=1)
     if result.rc != mqtt.MQTT_ERR_SUCCESS:
         raise RuntimeError('MQTT could not queue the light command.')
+    request_report(name)
 
 
 async def send_action(interaction, name, action, filename=None):
@@ -764,13 +837,13 @@ async def run_action(interaction, action, name):
             await interaction.response.defer(ephemeral=ephemeral(interaction))
         # Reply with the status straight away; the camera picture is added when it arrives (#44, #54).
         embed = printer_embed(name)
-        picture = recent_picture(name) if not EXAMPLE_MODE else None
+        picture = await ai_picture(name, recent_picture(name)) if not EXAMPLE_MODE else None
         if picture or EXAMPLE_MODE:
             await interaction.followup.send(**printer_reply(embed, picture), ephemeral=ephemeral(interaction))
             return
         field(embed, 'Camera', '📷 Getting a picture…', False)
         message = await interaction.followup.send(embed=embed, ephemeral=ephemeral(interaction), wait=True)
-        picture = await snapshot(name, timeout=20)
+        picture = await ai_picture(name, await snapshot(name, timeout=20))
         embed.remove_field(len(embed.fields) - 1)
         reply = printer_reply(embed, picture)
         try:
@@ -824,7 +897,7 @@ async def status_command(interaction: discord.Interaction):
     lines = [f'**Uptime:** {uptime // 3600}h {(uptime % 3600) // 60}m', f'**Connected:** {online}/{len(available)}', '']
     for name in available:
         state, error, data, connected = state_data(name)
-        line = f"{'🟢' if connected else '🔴'} **{safe(name)}** — {safe(state)}"
+        line = f"{'🟢' if connected else '🔴'} **{safe(name)}** — {display_state(state, error, connected)}"
         if state == 'RUNNING':
             line += f" • {data.get('mc_percent', '?')}%"
         if error:
@@ -864,7 +937,7 @@ def help_embed(admin=False):
         ('📊 Printers & files', {'status','printer','filaments','file','help','adminhelp'}, 'Printer status, camera snapshots, filament and stored files.'),
         ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move','home'}, 'Pause/resume/cancel, lights, temperatures, speed, fan, homing and axis jogging.'),
         ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'View, add, start and manage jobs. Starts and changes ask for confirmation and are logged.'),
-        ('🔄 Swapmod', {'plateswap'}, 'Configure equipped printers, approve Swaplist batches and check the starting setup.'),
+        ('🔄 Swapmod', {'plateswap'}, 'Turn Swapmod on or off, and swap the plate now with the swap print.'),
         ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),
         ('🗓️ Team & reminders', {'ftc','website','management','rememberthis','remember','forget','remindme','reminders','cancelreminder','attending','notattending','attendance','meeting','assign'}, 'Assign meeting-report writers.' if admin else 'Team links, shared notes, reminders and meeting attendance.'),
         ('💻 Laptops & server', {'laptops','laptop','server','reboot'}, 'MeshCentral laptops and commands, Pi status and reboot.'),
@@ -933,6 +1006,8 @@ async def notify(name, title, description, color, camera=False):
         event_listener(name, title, description)
     if alert_targets:   # Home Assistant, ntfy, webhooks (#9): also without the Discord bot
         alert_targets.dispatch(name, title, description, color)
+    if status_center:   # the dashboard's notifications, also without Discord
+        status_center.note(name, title, description, color)
     channel_id = settings.get('notification_channel_id')
     if not channel_id or not bot.is_ready():
         return
@@ -941,7 +1016,7 @@ async def notify(name, title, description, color, camera=False):
         if getattr(getattr(channel, 'guild', None), 'id', None) not in ALLOWED_GUILD_IDS:
             return
         embed = card(title, f'**{safe(name)}**\n{description}', color)
-        picture = await snapshot(name) if camera else None
+        picture = await ai_picture(name, await snapshot(name)) if camera else None
         kwargs = dict(embed=embed)
         if picture:
             embed.set_image(url='attachment://printer.jpg')
@@ -951,9 +1026,23 @@ async def notify(name, title, description, color, camera=False):
         view = notification_view(name, title) if notification_view else None   # e.g. Clear error (#34)
         if view:
             kwargs['view'] = view
-        await channel.send(**kwargs)
+        content, mentions = ping_for(title)   # important alerts ping people (@here by default)
+        await channel.send(content=content, allowed_mentions=mentions, **kwargs)
     except Exception:
         log.exception('Notification failed for %s', name)
+
+
+PING_TITLES = ('🤖', '🛑 Printer error')   # AI failure alerts and printer errors ping people
+
+
+def ping_for(title):
+    """(message text, allowed mentions) for an important alert: the people chosen in the dashboard (settings
+    "alert_ping_users", Discord user IDs). Nobody by default, and never @here / @everyone or roles."""
+    users = [int(u) for u in settings.get('alert_ping_users') or [] if str(u).isdigit()]
+    if not str(title).startswith(PING_TITLES) or not users:
+        return None, discord.AllowedMentions.none()
+    return ' '.join(f'<@{u}>' for u in users), discord.AllowedMentions(everyone=False, roles=False,
+                                                                     users=[discord.Object(u) for u in users])
 
 
 def queue_notification(*args):

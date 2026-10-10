@@ -1,4 +1,5 @@
-"""Import literal settings from the existing bot without executing it."""
+"""Create the configuration on first install: a new, dashboard-first installation (printers and the optional Discord bot
+are then set up in the dashboard, #8), or settings imported from the original Discord bot without executing it."""
 import argparse
 import ast
 import json
@@ -26,13 +27,13 @@ def migrate(old_file, config_path, data_dir, listen, demo=False, enable_reboot=F
                             if target.id=='PRINTERS' and value:nonempty_printers=value
             if not all(k in values for k in ('DISCORD_BOT_TOKEN','ALLOWED_GUILD_IDS','PRINTERS')):
                 raise ValueError('Existing bot is missing token, server IDs or printer settings.')
-        elif not demo:
-            raise ValueError('Existing bot not found. Use --demo for a new dashboard-only demo installation.')
         token=values.get('DISCORD_BOT_TOKEN','')
         if token.startswith('REPLACE_'):token=''
+        # A new installation (no old bot) starts empty: printers and Discord are added in the dashboard. Until the
+        # first printer is added the dashboard shows demo printers; demo is only switched on with --demo.
         config=dict(discord_token=token,guild_ids=list(values.get('ALLOWED_GUILD_IDS',[])),
             admin_user_ids=list(values.get('SETTINGS_USER_IDS',[])),printers=nonempty_printers or values.get('PRINTERS',[]),
-            demo=demo or not values.get('PRINTERS'),listen=list(dict.fromkeys(['127.0.0.1',listen])),port=8080)
+            demo=demo or (bool(values) and not values.get('PRINTERS')),listen=list(dict.fromkeys(['127.0.0.1',listen])),port=8080)
         if len({p['name'].casefold() for p in config['printers']})!=len(config['printers']):
             raise ValueError('Each printer needs a unique name.')
         if not config['demo']:
@@ -43,7 +44,10 @@ def migrate(old_file, config_path, data_dir, listen, demo=False, enable_reboot=F
         settings_source=Path(values.get('SETTINGS_FILE','/tmp/bot_settings.json'))
         if settings_source.exists() and not (data_dir/'settings.json').exists():
             atomic_json(data_dir/'settings.json',json.loads(settings_source.read_text()))
-        print('Imported existing configuration.' if values else 'Created a dashboard-only demo configuration.')
+        if values:print('Imported the existing Discord bot configuration.')
+        elif demo:print('Created a demo configuration.')
+        else:print('Created a new configuration. Sign in to the dashboard and add your printers under Settings & help → Printers. '
+                   'Discord is optional: connect a bot there too if you want one.')
         if config['demo']:print('DEMO MODE is enabled. Real printer controls are disabled until demo is false in config.json.')
     else:
         print('Existing management configuration preserved.')

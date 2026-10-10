@@ -41,8 +41,9 @@ import time
 from collections import deque
 from pathlib import Path
 
-from failureDetection import print_geometry
-from failureDetection.auto_reprint import AutoReprint
+from failureDetection import overlay_draw, print_geometry
+from failureDetection.auto_reprint import AutoReprint, wait_text
+from failureDetection.bed_model import BedAI, LEARN_DELAY
 from failureDetection.model_updates import ModelUpdates
 from failureDetection.training import TrainingPictures
 
@@ -51,8 +52,10 @@ WORKER = Path(__file__).with_name('hailo_worker.py')
 DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval='auto', window=10,
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
                 geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
-                hold=None, focus=True)
+                hold=None, focus=True, bed_ai={}, bed_model='')
 CAMERAS = 2   # camera pictures fetched at the same time
+ANNOTATE_WAIT = 15   # seconds the AI may take to box a picture before it's sent without boxes
+LIVE_CPU_GAP = 3   # seconds between live-view AI looks on the CPU (the AI HAT looks at every frame)
 START_DELAY = 5   # seconds after start-up before the AI helper is started
 START_INTERVAL = 30   # where the adaptive interval starts, and what old frame-count settings are measured in
 GEOMETRY_DEFAULTS = dict(enabled=True, on_part_weight=0.5, margin_mm=5.0)
@@ -445,6 +448,14 @@ class Judge:
         return len(self.failing_times())
 
 
+async def shielded(coroutine):
+    """Run a question to the AI helper to the end even if the caller stops waiting: the caller is released at once,
+    and the answer is still read, so the helper's replies stay in step with the questions."""
+    task = asyncio.ensure_future(coroutine)
+    task.add_done_callback(lambda done: done.cancelled() or done.exception())   # nobody may be waiting any more
+    return await asyncio.shield(task)
+
+
 class HailoBackend:
     """Talks to hailo_worker.py running under the system Python: a .hef model runs on the AI HAT (hailo-all),
     a .onnx model on the CPU (python3-opencv). Both are Raspberry Pi OS packages, so the service venv needs neither."""
@@ -453,6 +464,8 @@ class HailoBackend:
         self.settings, self.process, self.lock, self.error, self.retry_at = settings, None, asyncio.Lock(), '', 0
         self.stderr, self.drain = deque(maxlen=20), None
         self.active, self.backend_name, self.note = '', '', ''   # model in use, where it runs, why (fallback)
+        self.bed_ready, self.bed_error = False, ''   # the bed check model (bed_model.py), loaded in the same helper
+        self.device = {}   # what the helper reported: {'hailort': '4.20.0', 'chip': 'hailo8'}
 
     def fallback(self):
         """The CPU model to use when the AI HAT model won't start: failure_detection.fallback_model, else a .onnx
@@ -467,7 +480,16 @@ class HailoBackend:
         s = self.settings
         primary = s['model']
         try:
-            ready = await self._spawn(primary)
+            try:
+                ready = await self._spawn(primary)
+            except Exception as exc:
+                if not (s.get('bed_model') and primary.lower().endswith('.hef')):
+                    raise
+                # Never let the bed check model take failure detection down with it: start without it.
+                await self.close()
+                log.warning('AI helper did not start with the bed check model (%s); starting without it', exc)
+                ready = await self._spawn(primary, bed=False)
+                self.bed_error = f'The bed check model stopped the AI helper from starting: {str(exc)[:200]}'
             self.note = ''
         except Exception as exc:
             backup = self.fallback()
@@ -482,14 +504,16 @@ class HailoBackend:
         self.backend_name = 'AI HAT (Hailo-8)' if ready.get('backend') == 'hailo' else 'CPU'
         log.info('AI model ready: %s on %s%s', Path(self.active).name, self.backend_name, ' (fallback)' if self.note else '')
 
-    async def _spawn(self, model):
+    async def _spawn(self, model, bed=True):
         s = self.settings
         if not Path(model).is_file():
             raise RuntimeError(f"Model file not found: {model or '(set failure_detection.model)'}")
         # HailoRT writes hailort.log into its working folder; the app folder is read-only for the service.
         logs = Path(tempfile.gettempdir())
+        bed = (s.get('bed_model') or '') if bed and model.lower().endswith('.hef') else ''   # the bed model needs the AI HAT
         self.process = await asyncio.create_subprocess_exec(
             s['python'], str(WORKER), model, json.dumps(s['classes']), json.dumps(s['labels']), str(s['input_size']),
+            *([bed] if bed else []),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, limit=1024 * 1024,
             cwd=str(logs), env={**os.environ, 'HAILORT_LOGGER_PATH': str(logs)})
         self.stderr = deque(maxlen=20)
@@ -500,7 +524,10 @@ class HailoBackend:
                 await asyncio.wait_for(asyncio.shield(self.drain), 5)
             error = self.stderr[-1] if self.stderr else line.decode(errors='replace')[:200] or 'it exited'
             raise RuntimeError('AI helper did not start: ' + error + self.hint(error))
-        return dict(json.loads(line), model=model)
+        ready = json.loads(line)
+        self.bed_ready, self.bed_error = bool(ready.get('bed')), ready.get('bed_error', '') if bed else ''
+        self.device = {k: ready[k] for k in ('hailort', 'chip') if ready.get(k)}
+        return dict(ready, model=model)
 
     async def warm(self):
         """Start the helper now (at service start) instead of on the first check, so the log says straight away
@@ -534,6 +561,12 @@ class HailoBackend:
                 log.debug('AI HAT helper: %s', text)
 
     async def score(self, jpeg, crops=None):
+        # Shielded: a caller that gives up (a timeout for a Discord picture, a closed live view) must not cut the
+        # helper off between a question and its answer, or the next caller (maybe a real failure check) would read
+        # that answer as its own.
+        return await shielded(self._score(jpeg, crops))
+
+    async def _score(self, jpeg, crops):
         async with self.lock:
             if self.process is None or self.process.returncode is not None:
                 if time.monotonic() < self.retry_at:
@@ -555,6 +588,32 @@ class HailoBackend:
             if 'error' in reply:
                 raise RuntimeError(reply['error'])
             return float(reply.get('score') or 0), reply.get('detections') or []
+
+    async def embed(self, jpeg, crops=None):
+        """Bed check fingerprints (bed_model.py): unit vectors for the picture and each crop. Shielded like score()."""
+        return await shielded(self._embed(jpeg, crops))
+
+    async def _embed(self, jpeg, crops):
+        async with self.lock:
+            if not self.bed_ready or self.process is None or self.process.returncode is not None:
+                raise RuntimeError(self.bed_error or 'The bed check model is not loaded.')
+            try:
+                self.process.stdin.write((json.dumps({'embed': base64.b64encode(jpeg).decode(), 'crops': crops or []}) + '\n').encode())
+                await self.process.stdin.drain()
+                reply = json.loads(await asyncio.wait_for(self.process.stdout.readline(), 30))
+            except Exception as exc:
+                await self.close()
+                raise RuntimeError(f'AI helper stopped ({type(exc).__name__})') from exc
+            if 'error' in reply:
+                raise RuntimeError(reply['error'])
+            return reply['vectors']
+
+    async def restart(self):
+        """Load the models again (a bed check model was just downloaded): the next check starts the helper."""
+        async with self.lock:
+            await self.close()
+            self.retry_at = 0
+        await self.warm()
 
     async def close(self):
         if self.process and self.process.returncode is None:
@@ -585,6 +644,7 @@ class FailureMonitor:
         self.models = ModelUpdates(core, self, clock=clock)
         self.training = TrainingPictures(core, self.settings['collect'], clock=clock)
         self.focus = Focus(clock)
+        self.bed = self.reprints.bed_ai = BedAI(core, self, clock=clock)   # is the bed empty? (bed_model.py)
         if self.settings['enabled']:
             self.models.apply_saved()   # a model an automatic update switched to last time
 
@@ -605,8 +665,41 @@ class FailureMonitor:
         self.store_event(name, 'AI failure watch ' + ('on' if on else 'off'), 'Changed in the dashboard.')
 
     def tuning(self, name):
-        """This printer's settings with its dashboard sensitivity applied."""
-        return tuned(self.settings, (self.core.settings.get('ai_tuning') or {}).get(name))
+        """This printer's settings with its dashboard sensitivity applied, and the failure classes chosen in the
+        dashboard (settings.json "ai_labels", for all printers) instead of config.json's "labels"."""
+        result = tuned(self.settings, (self.core.settings.get('ai_tuning') or {}).get(name))
+        chosen = [c for c in (self.core.settings.get('ai_labels') or []) if c in self.failure_classes()]
+        if chosen:
+            result['labels'] = chosen
+        return result
+
+    @property
+    def action(self):
+        """'pause' or 'notify': the dashboard's choice (settings.json "ai_action", all printers), else config.json's."""
+        chosen = self.core.settings.get('ai_action')
+        return chosen if chosen in ('pause', 'notify') else self.settings['action']
+
+    def set_action(self, action):
+        if action not in ('pause', 'notify'):
+            raise ValueError('Choose pause or notify.')
+        self.core.save_settings({**self.core.settings, 'ai_action': action})
+        self.store_event('AI', 'AI action changed', 'A detected failure now ' + ('pauses the print and alerts.' if action == 'pause' else 'only alerts (never pauses).'))
+
+    def failure_classes(self):
+        """Classes that can count as a failure (not a "print" / "bed" area class)."""
+        return [c for c in self.settings['classes'] if c.lower() not in AREA_CLASSES]
+
+    def set_labels(self, labels):
+        if not isinstance(labels, list) or not labels or not all(isinstance(c, str) and c in self.failure_classes() for c in labels):
+            raise ValueError('Choose at least one of: ' + ', '.join(self.failure_classes()) + '.')
+        self.core.save_settings({**self.core.settings, 'ai_labels': [c for c in self.failure_classes() if c in labels]})
+        self.store_event('AI', 'AI failure classes changed', 'Counts as a failure: ' + ', '.join(labels) + '.')
+
+    @staticmethod
+    def judged(score, detections, tuning):
+        """The frame's score for the classes that count as a failure (the helper may have been started with others)."""
+        boxed = [d.get('score', 0) for d in detections if d.get('label') in tuning['labels']]
+        return max(boxed, default=0.0) if detections else score
 
     def set_tuning(self, name, data):
         """Dashboard sensitivity: {'preset': 'sensitive'}, or custom values (threshold, hold, min_minutes,
@@ -646,6 +739,7 @@ class FailureMonitor:
         t = self.tuning(name)
         values = lambda v: {k: v[k] for k in ('threshold', 'hold', 'min_minutes', 'needed_share')}
         return dict(preset=t['preset'], preset_name=PRESET_NAMES[t['preset']], focus=t['focus'], window_minutes=t['window_minutes'],
+                    classes=self.failure_classes(), labels=t['labels'],
                     **values(t), presets={k: values(tuned(self.settings, {'preset': k})) for k in PRESETS},
                     nms_floor=0.25 if str(self.settings['model']).lower().endswith('.hef') else 0)
 
@@ -657,11 +751,11 @@ class FailureMonitor:
     def state(self, name):
         if not self.enabled:
             return dict(enabled=False, status='off')
-        base = dict(enabled=True, watching=self.watching(name), action=self.settings['action'], status='idle', message='')
+        base = dict(enabled=True, watching=self.watching(name), action=self.action, status='idle', message='')
         return {**base, **self.status.get(name, {}), 'geometry': self.geometry.state(name), 'reprint': self.reprints.state(name),
                 'model': Path(self.settings['model']).name, 'model_update': self.models.message,
                 'interval': round(self.throttle.current, 1), 'interval_reason': self.throttle.reason,
-                'tuning': self.tuning_state(name), 'focus': self.focus.describe(name),
+                'tuning': self.tuning_state(name), 'focus': self.focus.describe(name), 'bed': self.bed.state(name),
                 **(self.backend.describe() if hasattr(self.backend, 'describe') else {})}
 
     def _set(self, name, **values):
@@ -678,15 +772,16 @@ class FailureMonitor:
         state, _, _, connected = self.core.state_data(name)
         if state != 'RUNNING' or not connected:
             raise ValueError(f"Check AI now works while a print is running (the printer reports {state or 'unknown'}). "
-                             'Use Test AI now to see what the AI makes of the camera any time.')
+                             'Check AI now shows what the AI makes of the camera any time.')
         async with self.lock(name):
             result = await self.check(name, on_request=True)
         if not result:
             raise ValueError(self.status.get(name, {}).get('message') or 'The check could not run.')
         return result
 
-    async def check(self, name, on_request=False):
-        """One look at one printer. Returns what it found (or None when it couldn't look)."""
+    async def check(self, name, on_request=False, picture=None):
+        """One look at one printer. Returns what it found (or None when it couldn't look). picture: one already taken
+        for this request (Check AI now)."""
         state, _, data, connected = self.core.state_data(name)
         config = self.core.printer_config(name) or {}
         if (not self.watching(name) and not on_request) or config.get('camera_type') not in ('rtsp', 'jpeg_tcp'):
@@ -700,14 +795,14 @@ class FailureMonitor:
             return
         if state != 'RUNNING' or not connected:
             self.judges.pop(name, None)
-            self._set(name, status='idle', message='Watches while the printer is printing.', score=None, failing=0, frames=0, job='');return
+            self._set(name, status='idle', message='Watches while the printer is printing.', score=None, failing=0, frames=0, job='')
+            return
         tuning = self.tuning(name)
         if judge is None or judge.job != job:
             judge = self.judges[name] = Judge(tuning, self.clock);judge.reset(job)
         judge.settings = tuning   # a sensitivity change applies to the evidence already collected
         self.focus.reset(name, job)
-        picture = None
-        if on_request and getattr(self.core, 'capture_still', None):   # a fresh picture, not a reused one
+        if picture is None and on_request and getattr(self.core, 'capture_still', None):   # a fresh picture, not a reused one
             try:
                 picture = await self.core.capture_still(name, 20)
             except Exception:
@@ -724,6 +819,7 @@ class FailureMonitor:
             score, detections = await self.backend.score(picture, crops)
         except Exception as exc:
             self._set(name, status='unavailable', message=str(exc)[:300]);return
+        score = self.judged(score, detections, tuning)
         self.focus.update(name, detections, tuning['labels'])
         try:
             layer = int(data.get('layer_num') or 0)
@@ -750,7 +846,8 @@ class FailureMonitor:
             labels = f'{labels}, {where}' if labels else where
         threshold = tuning['threshold']
         result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, hold=tuning['hold'], verdict=verdict, where=where,
-                      detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted)
+                      detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted,
+                      crops=crops, labels=sorted(tuning['labels']))
         if judge.acted:   # already reported (and maybe paused) for this print: keep that status, don't act again
             self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), **self.overlay(name, detections, tuning))
             return result
@@ -765,8 +862,11 @@ class FailureMonitor:
         return result
 
     async def test(self, name):
-        """"Test AI now": one check on a fresh camera picture at any time, printing or not. It doesn't count towards
-        the failure rules and never pauses anything; the picture is kept as a training picture."""
+        """"Check AI now" (one button): the AI checks a fresh camera picture now and shows it with its boxes.
+        - While a print is running, it's a real check: it counts towards the failure rules, and because a person asked
+          for a decision, a picture at or above the failure score acts straight away (pause or alert, as set).
+        - Otherwise it only shows what the AI sees: nothing is counted or paused.
+        The picture is kept as a training picture either way."""
         if not self.enabled:
             raise ValueError('AI failure detection is not enabled in config.json.')
         if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
@@ -781,12 +881,25 @@ class FailureMonitor:
         picture = picture or await self.core.snapshot(name, timeout=20)
         if not picture:
             raise ValueError('No camera picture right now. Check the camera, then try again.')
+        state, _, _, connected = self.core.state_data(name)
+        if state == 'RUNNING' and connected:   # printing: a real check on this picture, which acts if it looks failed
+            async with self.lock(name):
+                result = await self.check(name, on_request=True, picture=picture)
+            if result:
+                self.store_event(name, 'AI check on request', f"Score {result['score']:.2f} (threshold {result['threshold']:g})"
+                                 + (' • acted' if result['acted'] else ''))
+                return dict(score=result['raw'], judged=result['score'], threshold=result['threshold'], hold=result['hold'],
+                            failing=result['verdict'] == 'failure' or result['score'] >= result['threshold'],
+                            labels=result['labels'], detections=result['detections'], crops=result['crops'], where=result['where'],
+                            picture=base64.b64encode(picture).decode(), checked=self.clock(), printing=True,
+                            acted=result['acted'], already=result['already'], status=self.status.get(name, {}).get('status'))
         tuning = self.tuning(name)
         crops = self.crops(name, tuning)
         try:
             score, detections = await self.backend.score(picture, crops)
         except Exception as exc:
             raise ValueError(f'The AI could not check the picture: {str(exc)[:300]}') from exc
+        score = self.judged(score, detections, tuning)
         self.focus.update(name, detections, tuning['labels'])
         state, _, data, _ = self.core.state_data(name)
         where = ''
@@ -804,9 +917,45 @@ class FailureMonitor:
             pass
         self._set(name, **self.overlay(name, detections, tuning))   # the camera view shows these boxes too
         self.store_event(name, 'AI test', f'Score {score:.2f} (threshold {threshold:g})' + (f' • {where}' if where else ''))
-        return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, failing=score_on_file >= threshold,
-                    labels=sorted(self.settings['labels']), detections=detections, crops=crops, where=where,
-                    picture=base64.b64encode(picture).decode(), checked=self.clock())
+        return dict(score=round(score, 3), judged=round(score_on_file, 3), threshold=threshold, hold=tuning['hold'],
+                    failing=score_on_file >= threshold, labels=sorted(tuning['labels']), detections=detections, crops=crops,
+                    where=where, picture=base64.b64encode(picture).decode(), checked=self.clock(), printing=False, printer_state=state)
+
+    async def look(self, name, picture):
+        """The boxes the AI finds in this picture, printing or not, for showing on it. Display only: nothing is
+        judged, saved or acted on. Every camera view uses this, so the boxes always belong to the picture shown."""
+        if not self.enabled or not self.watching(name) or not picture:
+            return None
+        tuning = self.tuning(name)
+        _, detections = await self.backend.score(picture, self.crops(name, tuning))
+        return self.overlay(name, detections, tuning)
+
+    async def live(self, name, frame):
+        """The boxes for one live-view frame (live_camera.Cameras.score_frames). With the AI HAT it keeps up with the
+        camera (sync); on the CPU it looks at most every LIVE_CPU_GAP seconds."""
+        overlay = await self.look(name, frame)
+        if overlay is None:
+            return None
+        on_hat = getattr(self.backend, 'backend_name', '').startswith('AI HAT')
+        return dict(overlay, sync=on_hat, gap=0 if on_hat else LIVE_CPU_GAP)
+
+    async def drawn(self, picture, overlay):
+        """A picture with boxes the AI already found drawn on it."""
+        return await asyncio.to_thread(overlay_draw.draw, picture, overlay)
+
+    async def annotated(self, name, picture, overlay=None):
+        """The picture with the AI's boxes drawn on it, for pictures that leave as plain images (Discord, Take camera
+        snapshot). overlay: boxes the AI already found in this very picture (then it isn't looked at again). The
+        picture as it is when the AI is off, isn't watching this printer, or can't look in time."""
+        if not self.enabled or not self.watching(name) or not picture:
+            return picture
+        try:
+            if overlay is None:
+                overlay = await asyncio.wait_for(self.look(name, picture), ANNOTATE_WAIT)
+            return await asyncio.to_thread(overlay_draw.draw, picture, overlay) if overlay else picture
+        except Exception as exc:
+            log.info('AI boxes not drawn on a picture for %s (%s)', name, type(exc).__name__)
+            return picture
 
     def overlay(self, name, detections, tuning):
         """What the dashboard draws over the camera picture: the boxes the model found in the last checked frame
@@ -835,7 +984,7 @@ class FailureMonitor:
             detail = (f"{judge.failing()} of the last {len(judge.frames)} camera frames over {minutes:.0f} min look like a failed print"
                       + (f' ({labels})' if labels else '') + f" • {job or 'current print'}")
         paused = False
-        if self.settings['action'] == 'pause':
+        if self.action == 'pause':
             state = self.core.state_data(name)[0]
             if state != 'RUNNING':
                 detail += f' • Not paused: the printer reports {state or "unknown"}'
@@ -858,9 +1007,10 @@ class FailureMonitor:
                 available = self.reprints.summary(await self.reprints.availability(job))
             except Exception as exc:
                 available = f'Could not check the other printers ({type(exc).__name__}).'
-            hours = self.reprints.settings['after_hours']
-            hint += (f"\n{available}\nIf it isn't resumed or stopped within {hours:g} h, it will be reprinted on an available printer."
-                     " To do it now, use Reprint now in the dashboard.")
+            entry = self.reprints.pending.get(job['id']) or {}
+            wait = wait_text(self.reprints.wait(entry))
+            hint += (f"\n{available}\nIf it isn't resumed or stopped within {wait} (priority {entry.get('priority', 5)}), it will be "
+                     "reprinted on an available printer. To do it now, use Reprint now in the dashboard.")
         await self.core.notify(name, title, detail + hint, getattr(self.core, 'RED', 0xE74C3C), True)
 
     async def confirm_pause(self, name, wait=30):
@@ -896,6 +1046,7 @@ class FailureMonitor:
                         log.error('Failure detection error for %s', name, exc_info=result)
                 await self.reprints.tick()
                 await self.models.check()   # once a day: a newer model from the ai-model release
+                await self.bed.tick()   # the bed check AI: downloaded and kept matching HailoRT, in the background
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -907,9 +1058,31 @@ class FailureMonitor:
 
     async def start(self, app=None):
         if self.enabled and not getattr(self.core, 'EXAMPLE_MODE', False):
-            if self.reprints.settings['enabled']:
-                self.engine.on_start_approved = self.reprints.capture_reference
+            self.engine.on_start_approved = self.start_approved
+            self.engine.on_job_end = self.job_ended
+            self.engine.bed_check = self.bed_gate
             self.task = asyncio.create_task(self.begin())
+
+    async def start_approved(self, job, author=''):
+        """A queue job is starting: the plate was just cleared, so its picture is an empty bed (the auto-reprint
+        reference, and an "empty" example for the bed check AI). Not for a Swapmod swap print (the finished part is
+        still on the bed) or an AI reprint (nobody looked)."""
+        self.reprints.started(job['printer'])   # its bed won't be empty afterwards: "Mark available" ends
+        if (job.get('options') or {}).get('swap') or author == 'AI auto reprint':
+            return
+        if self.reprints.settings['enabled']:
+            await self.reprints.capture_reference(job, author)
+        await self.bed.learn(job['printer'], 'empty', 'print started')
+
+    async def job_ended(self, name, job, state):
+        """A queue job finished: its part is on the bed, which teaches the bed check AI what "not clear" looks like."""
+        if state == 'FINISH' and not (job.get('options') or {}).get('swap'):
+            await self.bed.learn(name, 'parts', 'print finished', delay=LEARN_DELAY,
+                                 still=lambda: self.core.state_data(name)[0] == 'FINISH')
+
+    async def bed_gate(self, name):
+        """Before Swapmod starts the next job: what the bed check AI makes of the bed ('unknown' when it can't tell)."""
+        return await self.bed.check(name)
 
     async def begin(self, delay=START_DELAY):
         """Load the model (logging where it runs), then watch. Waits a few seconds first, so the AI helper is never
@@ -924,5 +1097,6 @@ class FailureMonitor:
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
+        await self.bed.stop()
         if self.backend and hasattr(self.backend, 'close'):
             await self.backend.close()

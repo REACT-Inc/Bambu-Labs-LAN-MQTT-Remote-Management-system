@@ -48,7 +48,7 @@ Parameters marked `?` are optional. `name?` is a printer name, with autocomplete
 | `/printer` | `name?` | Status, temperatures and a camera snapshot | Snapshot depends on model/firmware LAN camera access |
 | `/filaments` | `name?` | AMS slots and external spool | |
 | `/queue` | `name?` | View a printer's shared queue | |
-| `/queueadd` | `name?` `file?` `remote?` `label?` `plate?` `use_ams?` `mapping?` `bed?` | Add a sliced `.3mf` upload, or a file already on the printer, to the queue | Only adds to the queue. Start it with `/queuestart` |
+| `/queueadd` | `name?` `file?` `remote?` `label?` `plate?` `use_ams?` `mapping?` `bed?` `priority?` | Add a sliced `.3mf` upload, or a file already on the printer, to the queue | Only adds to the queue. Start it with `/queuestart` |
 | `/file list` | `name?` `path?` | List printable `.3mf`/`.gcode` files on the printer | Read-only |
 | `/file system` | `name?` `path?` | List printer folders and files, with a downloadable listing | Read-only |
 | `/ftc` | | FTC Discord invite link | |
@@ -99,9 +99,8 @@ Every command in this table shows a confirmation card first. Only the person who
 
 | Command | Parameters | What it does | Notes / limits |
 |---|---|---|---|
-| `/plateswap configure` | `name` `enabled` `model?` `spares?` | Enable/disable an installed Swapmod kit and set its magazine plate count | |
-| `/plateswap approve` | `job_id` `plates` | Approve a Swaplist batch and its total plate count | |
-| `/plateswap check` | `name` | Confirm the starting setup before a batch | Records the check. Sends no movement |
+| `/plateswap set` | `name` `enabled` | Turn Swapmod on or off for an A1 / A1 mini | The swap print file is chosen in the dashboard |
+| `/plateswap now` | `name` | Swap the plate now by running the swap print | |
 
 ### Server administration
 

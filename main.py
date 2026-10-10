@@ -18,6 +18,7 @@ from swapMod.plate_swap_discord import install as install_plate_swap
 from team import Team
 from discord_Intergration.team_discord import install as install_team
 from loop_watchdog import LoopWatchdog
+import printer_setup
 
 
 def exit_soon(seconds=15):
@@ -127,5 +128,12 @@ async def main():
         store.db.close()
 
 
+def exit_code():
+    """0 after a normal stop. After the dashboard's Restart now (printer or Discord settings changed), a non-zero
+    code, so systemd's Restart=on-failure starts the app again (printer_setup.py)."""
+    return printer_setup.RESTART_EXIT if core.restart_requested else 0
+
+
 if __name__=='__main__':
     asyncio.run(main())
+    raise SystemExit(exit_code())

@@ -28,7 +28,11 @@ def validate_archive(path, plate):
         raise ValueError('Upload a sliced Bambu/Orca .3mf containing the selected plate, not an STL or unsliced project.')
 
 
-def options(plate=1, use_ams=False, mapping='', bed='textured_plate'):
+PRIORITIES = (1, 2, 3, 4, 5)
+DEFAULT_PRIORITY = 5   # reprint priority: how soon an AI-paused print is reprinted elsewhere (failureDetection/auto_reprint.py)
+
+
+def options(plate=1, use_ams=False, mapping='', bed='textured_plate', priority=DEFAULT_PRIORITY):
     plate = int(plate)
     if not 1 <= plate <= 100:
         raise ValueError('Plate must be between 1 and 100.')
@@ -45,7 +49,13 @@ def options(plate=1, use_ams=False, mapping='', bed='textured_plate'):
         raise ValueError('Provide an AMS mapping, for example 0 or 0,1.')
     if bed not in ('textured_plate', 'hot_plate', 'cool_plate', 'engineering_plate'):
         raise ValueError('Choose a supported bed type.')
-    return dict(plate=plate, use_ams=use_ams, ams_mapping=trays, bed=bed)
+    try:
+        priority = 0 if type(priority) is bool else int(DEFAULT_PRIORITY if priority in (None, '') else priority)
+    except (TypeError, ValueError):
+        priority = 0
+    if priority not in PRIORITIES:
+        raise ValueError('Priority must be 1 (most urgent) to 5.')
+    return dict(plate=plate, use_ams=use_ams, ams_mapping=trays, bed=bed, priority=priority)
 
 
 class Store:
@@ -275,12 +285,11 @@ class Engine:
         state, error, data, connected = self.core.state_data(printer)
         if not connected or (not self.core.EXAMPLE_MODE and time.time() - self.core.last_seen.get(printer, 0) > 90):
             raise ValueError('Printer is offline or telemetry is stale. Wait for a fresh report.')
-        allowed = ('IDLE', 'FINISH', 'FAILED') if override_error else ('IDLE', 'FINISH')
-        alerts = getattr(self, 'alerts', None)   # FAILED with its error cleared from the dashboard/Discord (#34)
-        if state == 'FAILED' and alerts and alerts.ready_after_clear(printer, state, error, data):
-            allowed = allowed + ('FAILED',)
+        # FINISH and FAILED are what Bambu printers keep reporting after a print (FAILED also after a cancelled one) while
+        # they sit idle and ready, so both count as ready. A reported error code still blocks (Clear error, or start anyway).
+        allowed = ('IDLE', 'FINISH', 'FAILED')
         if state not in allowed:
-            raise ValueError(f'Printer reports {state}. Stop any current print and wait for an idle/finished/failed report.')
+            raise ValueError(f'Printer reports {state}. Stop any current print and wait until it is ready.')
         if error and not override_error:
             raise ValueError(f'Printer reports error {error}. Inspect the printer, then use Clear error, or start anyway if appropriate.')
 
@@ -360,9 +369,15 @@ class Engine:
             self.store.set_status(job['id'], 'paused', 'Printer paused; queue is held.')
         elif state in ('FINISH','FAILED') and job['seen_running']:
             self.store.set_status(job['id'], 'finished' if state=='FINISH' else 'failed')
-            self.plate_swap.invalidate(printer)
-            message = '. Swaplist batch ended. Check the magazine and starting setup with /plateswap check before starting another batch.' if self.plate_swap.state(printer)['enabled'] else '. Clear the plate before starting the next job.'
-            await self.core.notify(printer, '📋 Queue updated', job['label']+' • '+state.lower()+message, self.core.GREEN if state=='FINISH' else self.core.RED)
+            hook = getattr(self, 'on_job_end', None)   # AI: a finished print's part teaches the bed check (bed_model.py)
+            if hook:
+                self.spawn(hook(printer, job, state))
+            swapping = self.plate_swap.state(printer)['ready']
+            if not job['options'].get('swap'):
+                message = '. Swapping the plate…' if swapping and state=='FINISH' else '' if swapping else '. Clear the plate before starting the next job.'
+                await self.core.notify(printer, '📋 Queue updated', job['label']+' • '+state.lower()+message, self.core.GREEN if state=='FINISH' else self.core.RED)
+            if swapping:   # Swapmod: swap the plate after a finished print, then start the next job (swapMod/plate_swap.py)
+                self.spawn(self.plate_swap.after(self, printer, job, state))
         elif state == 'IDLE' and job['seen_running']:
             self.store.set_status(job['id'], 'needs_review', 'Print became idle without a confirmed outcome.')
 

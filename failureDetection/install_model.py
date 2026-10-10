@@ -383,9 +383,9 @@ def backup_file(path, folder, stamp):
 
 
 def trigger_labels(classes, old_labels):
-    """Which classes pause/notify: the old choice where it still fits, else spaghetti and warping, else all."""
+    """Which classes pause/notify: the old choice where it still fits, else spaghetti, stringing and warping, else all."""
     kept = [label for label in (old_labels or []) if label in classes]
-    return kept or [c for c in classes if c in ('spaghetti', 'warping')] or list(classes)
+    return kept or [c for c in classes if c in ('spaghetti', 'stringing', 'warping')] or list(classes)
 
 
 def new_section(section, model, classes, size):

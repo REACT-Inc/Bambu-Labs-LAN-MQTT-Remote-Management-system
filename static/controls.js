@@ -1,6 +1,6 @@
 'use strict';
-let livePrinter=null,liveRequest=null,liveTimer=null,liveUrl=null,liveGeneration=0;
-function stopLive(){liveGeneration++;livePrinter=null;clearTimeout(liveTimer);if(liveRequest)liveRequest.abort();liveRequest=null;if(liveUrl)URL.revokeObjectURL(liveUrl);liveUrl=null;$('liveImage').removeAttribute('src');$('liveImage').hidden=true;$('liveStatus').textContent='Live view stopped.';$('startLive').disabled=false;}
+let livePrinter=null,liveRequest=null,liveTimer=null,liveUrl=null,liveGeneration=0,liveAi=null;   // liveAi: the AI's boxes for the live frame shown
+function stopLive(){liveGeneration++;livePrinter=null;liveAi=null;clearTimeout(liveTimer);if(liveRequest)liveRequest.abort();liveRequest=null;if(liveUrl)URL.revokeObjectURL(liveUrl);liveUrl=null;$('liveImage').removeAttribute('src');$('liveImage').hidden=true;$('liveStatus').textContent='Live view stopped.';$('startLive').disabled=false;}
 async function fetchLiveFrame(generation,version=0,feed=''){
  if(generation!==liveGeneration||!livePrinter)return;
  const controller=new AbortController();liveRequest=controller;
@@ -9,12 +9,13 @@ async function fetchLiveFrame(generation,version=0,feed=''){
   const response=await fetch('/api/liveframe/'+encodeURIComponent(livePrinter)+'?after='+version+'&feed='+encodeURIComponent(feed),{signal:controller.signal,cache:'no-store'});
   if(!response.ok){let reason='Camera request failed ('+response.status+').';try{reason=(await response.json()).error||reason;}catch{}if(response.status===401){stopLive();showLogin();return;}throw new Error(reason);}
   const blob=await response.blob();if(generation!==liveGeneration)return;
+  try{const ai=response.headers.get('X-AI');liveAi=ai?{...JSON.parse(ai),received:Date.now()}:null;}catch{liveAi=null;}
   const next=URL.createObjectURL(blob),old=liveUrl;liveUrl=next;$('liveImage').src=next;$('liveImage').hidden=false;if(old)URL.revokeObjectURL(old);
   $('liveStatus').textContent='Live frames · '+new Date().toLocaleTimeString();
   version=Number(response.headers.get('X-Camera-Version'))||0;feed=response.headers.get('X-Camera-Feed')||'';
  }catch(e){if(generation!==liveGeneration)return;$('liveImage').hidden=true;$('liveStatus').textContent=(e.name==='AbortError'?'Camera request timed out.':e.message)+' Retrying…';}
  finally{clearTimeout(timeout);if(liveRequest===controller)liveRequest=null;}
- if(generation===liveGeneration)liveTimer=setTimeout(()=>fetchLiveFrame(generation,version,feed),750);
+ if(generation===liveGeneration)liveTimer=setTimeout(()=>fetchLiveFrame(generation,version,feed),100);   // the server waits for the next frame
 }
 function startLiveView(){stopLive();livePrinter=selectedPrinter;$('liveStatus').textContent='Connecting to printer camera…';$('startLive').disabled=true;fetchLiveFrame(liveGeneration);}
 // The panel shows the latest still snapshot straight away; ▶ starts live view only when asked (#40).
@@ -25,35 +26,44 @@ function renderStill(p){const still=$('stillImage'),snap=p?.snapshot||{};
 function showCamera(){const p=devPrinter();$('startLive').hidden=!p?.has_camera;
  const snap=p?.snapshot||{};
  $('cameraHint').textContent=!p?.has_camera?(state?.demo?'No camera in demo mode.':(p?.limits?.camera_type?`No camera configured. For this ${p.limits.model} add "camera_type": "${p.limits.camera_type}" to its entry in config.json.`:'No camera configured for this printer (camera_type in config.json).'))
-  :snap.error&&!snap.time?snap.error:'Live view: about one frame per second. Nothing is recorded.';
+  :snap.error&&!snap.time?snap.error:'Live view: every new camera frame, with the AI\'s boxes on each one. Nothing is recorded.';
  if(!livePrinter)$('liveStatus').textContent=!p?.has_camera?'No camera.':snap.time?'Snapshot from '+new Date(snap.time*1000).toLocaleTimeString()+' · ▶ for live view':(snap.error||'Waiting for the first snapshot…');
  renderStill(p);}
-// AI boxes over the camera view, like Test AI now: what the model found in the frame it checked last.
+// AI boxes over the camera view, like Check AI now: what the model found in the frame it checked last.
 let aiOverlayOn=true;try{aiOverlayOn=localStorage.getItem('aiOverlay')!=='off';}catch{}
 $('aiOverlayOn').checked=aiOverlayOn;
-$('aiOverlayOn').addEventListener('change',e=>{aiOverlayOn=e.target.checked;try{localStorage.setItem('aiOverlay',aiOverlayOn?'on':'off');}catch{}drawAiOverlay();});
+$('aiOverlayOn').addEventListener('change',e=>{aiOverlayOn=e.target.checked;try{localStorage.setItem('aiOverlay',aiOverlayOn?'on':'off');}catch{}drawAiOverlay();document.querySelectorAll('.pc-cam img').forEach(drawCardAi);});
 function shownImage(){const live=$('liveImage'),still=$('stillImage');return !live.hidden&&live.naturalWidth?live:!still.hidden&&still.naturalWidth?still:null;}
-function drawAiOverlay(){const c=$('aiOverlay'),g=c.getContext('2d'),ai=devPrinter()?.ai,img=shownImage();
- c.width=c.clientWidth;c.height=c.clientHeight;g.clearRect(0,0,c.width,c.height);
- const fresh=ai?.boxes_at&&Date.now()/1000-ai.boxes_at<Math.max(20,3*(ai.interval||5));
- $('aiOverlayToggle').hidden=!(ai?.enabled&&ai.watching&&img);
- if(!aiOverlayOn||!img||!fresh)return;
- // The picture is letterboxed inside the frame (object-fit: contain): map 0-1 picture fractions onto it.
- const scale=Math.min(c.width/img.naturalWidth,c.height/img.naturalHeight),w=img.naturalWidth*scale,h=img.naturalHeight*scale,ox=(c.width-w)/2,oy=(c.height-h)/2;
- const rect=([x0,y0,x1,y1])=>[ox+x0*w,oy+y0*h,(x1-x0)*w,(y1-y0)*h];
- g.setLineDash([6,5]);g.strokeStyle='rgba(255,255,255,.45)';g.lineWidth=1;g.font='11px sans-serif';g.fillStyle='rgba(255,255,255,.7)';g.textBaseline='top';
- (ai.zoom||[]).forEach(z=>{const [x,y,bw,bh]=rect(z);g.strokeRect(x,y,bw,bh);g.fillText('🔍 AI zoom',x+4,y+4);});
- g.setLineDash([]);g.font='bold 13px sans-serif';g.textBaseline='bottom';
+// paintAi: the boxes (0-1 picture fractions) over a picture shown with object-fit contain (panel) or cover (cards).
+function paintAi(c,img,ai,note,fit='contain',small=false){const g=c.getContext('2d');c.width=c.clientWidth;c.height=c.clientHeight;g.clearRect(0,0,c.width,c.height);
+ if(!ai||!img?.naturalWidth)return;
+ const scale=(fit==='cover'?Math.max:Math.min)(c.width/img.naturalWidth,c.height/img.naturalHeight),w=img.naturalWidth*scale,h=img.naturalHeight*scale,ox=(c.width-w)/2,oy=(c.height-h)/2;
+ const rect=([x0,y0,x1,y1])=>[ox+x0*w,oy+y0*h,(x1-x0)*w,(y1-y0)*h],top=Math.max(0,oy),bottom=Math.min(c.height,oy+h),right=Math.min(c.width,ox+w);
+ const label=small?11:13,bar=small?15:18;
+ if(!small){g.setLineDash([6,5]);g.strokeStyle='rgba(255,255,255,.45)';g.lineWidth=1;g.font='11px sans-serif';g.fillStyle='rgba(255,255,255,.7)';g.textBaseline='top';
+  (ai.zoom||[]).forEach(z=>{const [x,y,bw,bh]=rect(z);g.strokeRect(x,y,bw,bh);g.fillText('🔍 AI zoom',x+4,y+4);});g.setLineDash([]);}
+ g.font=`bold ${label}px sans-serif`;g.textBaseline='bottom';
  (ai.boxes||[]).forEach(d=>{const strong=d.counts&&d.score>=ai.threshold,maybe=d.counts&&d.score>=ai.hold;
   const color=strong?'#ff5c52':maybe?'#f3d684':d.counts?'rgba(243,214,132,.6)':'#8dc6ff';const [x,y,bw,bh]=rect(d.box);
   g.strokeStyle=color;g.lineWidth=strong?3:2;g.strokeRect(x,y,bw,bh);
-  const text=`${d.label} ${Math.round(d.score*100)}%`,tw=g.measureText(text).width+8,ty=Math.max(oy+18,y);
-  g.fillStyle=color;g.fillRect(x,ty-18,tw,18);g.fillStyle='#111';g.fillText(text,x+4,ty-3);});
- const age=Math.round(Date.now()/1000-ai.boxes_at);g.font='11px sans-serif';g.textBaseline='bottom';
- const note=`AI ${age}s ago${ai.boxes?.length?'':' · nothing found'}`;const nw=g.measureText(note).width+10;
- g.fillStyle='rgba(0,0,0,.55)';g.fillRect(ox+w-nw-6,oy+h-22,nw,18);g.fillStyle='#fff';g.fillText(note,ox+w-nw-1,oy+h-8);}
+  const text=`${d.label} ${Math.round(d.score*100)}%`,tw=g.measureText(text).width+8,ty=Math.max(top+bar,y);
+  g.fillStyle=color;g.fillRect(x,ty-bar,tw,bar);g.fillStyle='#111';g.fillText(text,x+4,ty-3);});
+ if(!note)return;g.font='11px sans-serif';g.textBaseline='bottom';
+ const text=`${note}${ai.boxes?.length?'':' · nothing found'}`,nw=g.measureText(text).width+10,nx=small?Math.max(0,ox)+6:right-nw-6;
+ g.fillStyle='rgba(0,0,0,.55)';g.fillRect(nx,bottom-22,nw,18);g.fillStyle='#fff';g.fillText(text,nx+5,bottom-8);}
+// The printer panel's camera: live, every frame with its own boxes (on the CPU, the AI's latest look); a still, the
+// boxes the AI found in that still. Never boxes from another picture.
+function drawAiOverlay(){const c=$('aiOverlay'),p=devPrinter(),status=p?.ai,img=shownImage();
+ $('aiOverlayToggle').hidden=!(status?.enabled&&status.watching&&img);
+ let ai=null,note='';
+ if(img?.id==='liveImage'&&liveAi&&Date.now()-liveAi.received<10000){ai=liveAi;note=liveAi.same?'AI live':'AI live · last look';}
+ else if(img?.id==='stillImage'&&p?.snapshot?.ai){ai=p.snapshot.ai;note='AI · this picture';}
+ paintAi(c,img,aiOverlayOn?ai:null,note);}
+// The overview cards' stills: the boxes the AI found in each still (cropped to the card like the picture).
+function drawCardAi(img){const p=state?.printers.find(x=>x.name===img.dataset.printer),c=img.parentElement.querySelector('.pc-ai');
+ if(c)paintAi(c,img,aiOverlayOn?p?.snapshot?.ai:null,'AI','cover',true);}
 ['liveImage','stillImage'].forEach(id=>$(id).addEventListener('load',drawAiOverlay));
-window.addEventListener('resize',()=>{if($('detailDialog').open)drawAiOverlay();});
+window.addEventListener('resize',()=>{if($('detailDialog').open)drawAiOverlay();document.querySelectorAll('.pc-cam img').forEach(drawCardAi);});
 setInterval(()=>{if($('detailDialog').open&&state)drawAiOverlay();},1000);
 $('startLive').onclick=()=>{$('stillImage').hidden=true;startLiveView();};
 $('stopLive').onclick=()=>{stopLive();showCamera();};
@@ -71,7 +81,7 @@ function num(v){const n=Number(v);return v===null||v===undefined||v===''||!Numbe
 function fmtTemp(v){const n=num(v);return n===null?'—':Math.round(n)+'°';}
 // Newer firmware (bit 38 of the hex "fun" flags) only jogs in fixed 1 / 10 mm steps.
 function axisCtrl(d){try{return ((BigInt('0x'+(d.fun||'0'))>>38n)&1n)===1n;}catch{return false;}}
-async function control(kind,body,label){const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/'+kind,body);notice(r.message||label||'Submitted.');return r;}
+async function control(kind,body,label){const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/'+kind,body);notice(r.message||label||'Submitted.');pollSoon();return r;}
 // Everyday controls apply straight away; the server still checks limits. Only Pause and Stop ask first.
 async function sendControl(kind,value){try{return await control(kind,{value,confirmed:true});}catch(e){notice(e.message);throw e;}finally{refresh();}}
 
@@ -141,7 +151,7 @@ function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringi
   box.innerHTML=steps.xy.map(s=>`<button type="button" data-step="${s}">${s} mm</button>`).join('');}
  box.querySelectorAll('button').forEach(b=>b.classList.toggle('active',Number(b.dataset.step)===jogStep));
  const zStep=steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1];if(Date.now()>=jogReadyAt)$('jogCenter').textContent=jogStep+' mm';$('jogZStep').textContent='Z '+zStep+' mm';
- const idle=['IDLE','FINISH'].includes(p.state)&&p.connected&&!p.error,armed=$('jogArm').checked;
+ const idle=['IDLE','FINISH','FAILED'].includes(p.state)&&p.connected&&!p.error,armed=true;   // no "unlock" box any more
  const cooling=Date.now()<jogReadyAt,notHomed=unhomed(p.data||{});
  document.querySelectorAll('#jogPad button,#jogZ button').forEach(b=>b.disabled=!armed||!idle||jogBusy||cooling||notHomed.includes(b.dataset.axis));
  // Homing doesn't need the "already homed" checkbox, only an idle printer.
@@ -149,19 +159,18 @@ function renderJog(p){const steps=jogSteps(p),box=$('jogSteps'),key=JSON.stringi
  if(Date.now()<jogNote.until)$('jogStatus').textContent=jogNote.text;
  else if(!idle)$('jogStatus').textContent='Movement is only available while the printer is idle, connected and error-free.';
  else if(notHomed.length)$('jogStatus').textContent=`The printer reports ${notHomed.join(', ')} not homed, so it would ignore those moves. Press Home first.`;
- else if(!armed)$('jogStatus').textContent='Tick the box above to unlock the movement buttons. Directions follow printer coordinates.';}
+ else $('jogStatus').textContent='Directions follow printer coordinates.';}
 $('jogSteps').addEventListener('click',e=>{const b=e.target.closest('[data-step]');if(!b)return;jogStep=Number(b.dataset.step);renderJog(devPrinter());});
-$('jogArm').onchange=()=>{clearTimeout(jogArmTimer);if($('jogArm').checked){jogArmTimer=setTimeout(()=>{$('jogArm').checked=false;renderJog(devPrinter());},5*60*1000);$('jogStatus').textContent='Unlocked for 5 minutes or until this panel closes.';}renderJog(devPrinter());};
 async function jog(axis,dir,button){button?.classList.add('pending');try{await jogMove(axis,dir);}finally{button?.classList.remove('pending');}}
 async function jogMove(axis,dir){const p=devPrinter(),steps=jogSteps(p),step=axis==='Z'?(steps.z.includes(jogStep)?jogStep:steps.z[steps.z.length-1]):jogStep,value=dir*step;
  jogBusy=true;renderJog(p);$('jogStatus').textContent=`Moving ${axis} ${value>0?'+':''}${value} mm…`;
- try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/move',{value,axis,confirmed:true,homed:true});$('jogStatus').textContent=r.message;
+ try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/move',{value,axis,confirmed:true,homed:true});pollSoon();$('jogStatus').textContent=r.message;
   // The server allows one move every 3 seconds; wait it out instead of showing an error.
   jogReadyAt=Date.now()+3100;const tick=()=>{const left=Math.ceil((jogReadyAt-Date.now())/1000);if(left>0){$('jogCenter').textContent=left+' s';setTimeout(tick,250);}else renderJog(devPrinter());};tick();}
  catch(e){$('jogStatus').textContent=e.message;}finally{jogBusy=false;renderJog(devPrinter());}}
 document.querySelectorAll('#jogPad [data-axis],#jogZ [data-axis]').forEach(b=>b.onclick=()=>jog(b.dataset.axis,Number(b.dataset.dir),b));
 $('jogHome').onclick=async()=>{const b=$('jogHome');b.classList.add('pending');jogBusy=true;jogNote={text:'Homing X, Y and Z…',until:Date.now()+30000};renderJog(devPrinter());
- try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/home',{confirmed:true});jogNote={text:r.message+' Wait for homing to finish before moving.',until:Date.now()+15000};
+ try{const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/home',{confirmed:true});pollSoon();jogNote={text:r.message+' Wait for homing to finish before moving.',until:Date.now()+15000};
   jogReadyAt=Date.now()+3100;setTimeout(()=>renderJog(devPrinter()),3200);}
  catch(e){jogNote={text:e.message,until:Date.now()+15000};}finally{jogBusy=false;b.classList.remove('pending');renderJog(devPrinter());}};
 
@@ -228,7 +237,7 @@ $('nozzleForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,diame
 function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},progress=Math.max(0,Math.min(100,num(d.mc_percent)||0)),active=['RUNNING','PAUSE','PREPARE'].includes(p.state);
  $('detailTitle').textContent=p.display_name||p.name;$('detailModel').textContent=((p.limits||{}).chamber?'H2D · ':'')+(p.connected?'ONLINE':'OFFLINE');
  $('detailSeen').textContent=p.last_seen?'Last report '+new Date(p.last_seen*1000).toLocaleTimeString():'No report yet';
- const st=$('detailState');st.textContent=p.connected?p.state:'OFFLINE';st.className='state '+statusClass(p.state,p.connected);
+ const st=$('detailState');st.textContent=printerStateText(p);st.title='Printer reports '+(p.state||'nothing yet');st.className='state '+printerClass(p);
  $('detailFile').textContent=active?(d.subtask_name||'Unknown file'):(p.connected?'Ready for the next job':'Printer offline');
  $('detailFileLabel').textContent=active?(p.state==='PAUSE'?'PAUSED':'NOW PRINTING'):(p.state==='FINISH'?'FINISHED':'STATUS');
  document.querySelector('#detailDialog .now-card').classList.toggle('idle',!active);
@@ -246,24 +255,32 @@ document.querySelector('#detailDialog .now-actions').addEventListener('click',as
  if(action==='light'){await toggleLight(name);return;}
  if(action==='resume'){try{await printAction(name,'resume');}catch(err){notice(err.message);}return;}
  const target=action;
- b.disabled=true;try{await api('printers/'+encodeURIComponent(name)+'/'+target,{});notice('Command submitted. Waiting for printer telemetry.');await refresh();}catch(err){notice(err.message);}finally{b.disabled=false;}});
+ b.disabled=true;try{await api('printers/'+encodeURIComponent(name)+'/'+target,{});notice('Command submitted. Waiting for printer telemetry.');await refresh();pollSoon();}catch(err){notice(err.message);}finally{b.disabled=false;}});
 $('devFiles').onclick=()=>downloadFileListing(selectedPrinter,$('devFiles'));
-$('detailDialog').addEventListener('close',()=>{$('jogArm').checked=false;clearTimeout(jogArmTimer);editingTile=null;$('tempTiles').dataset.printer='';});
+$('detailDialog').addEventListener('close',()=>{editingTile=null;$('tempTiles').dataset.printer='';});
 // The play button shows whenever live view isn't running, however it stopped.
 setInterval(()=>{$('cameraPlaceholder').hidden=!!livePrinter;$('stopLive').hidden=!livePrinter;},300);
 
-function loadSwapSettings(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap||{};$('swapEnabled').checked=!!cfg.enabled;$('swapModel').value=cfg.model||'A1 mini';$('swapSpares').value=cfg.spares||0;renderSwapStatus();renderAiStatus();}
-// Swapmod is only offered for A-series printers (A1 / A1 mini) (#17).
-function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;$('swapStatus').textContent=cfg?.enabled?`${cfg.model} kit enabled · ${cfg.spares} estimated magazine plates · ${cfg.verified?'Starting setup checked':'Starting setup check needed'}`:'Disabled for this printer — manual queue workflow.';}
+function loadSwapSettings(){renderSwapStatus();renderAiStatus();}
+// Swapmod (A1 / A1 mini): on/off and the swap print file; it swaps after each finished print and starts the next job.
+function renderSwapStatus(){const cfg=state?.printers.find(p=>p.name===selectedPrinter)?.plate_swap;$('swapBlock').hidden=!cfg?.available;if(!cfg?.available)return;
+ if(document.activeElement!==$('swapEnabled'))$('swapEnabled').checked=!!cfg.enabled;
+ $('swapStatus').textContent=!cfg.file?'Choose the swap print file to use Swapmod.':cfg.enabled?`On: after each finished print it runs “${cfg.file}” (plate ${cfg.plate}), then starts the next queued job.`:`Off. Swap print: “${cfg.file}” (plate ${cfg.plate}).`;
+ $('swapNow').disabled=!cfg.file;}
 function renderAiStatus(){const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai;$('aiBlock').hidden=!ai?.enabled;if(!ai?.enabled)return;if(aiTestFor&&aiTestFor!==selectedPrinter){$('aiTestResult').hidden=true;aiTestFor='';}loadTraining(false);
  if(document.activeElement!==$('aiWatch'))$('aiWatch').checked=!!ai.watching;
- $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (it never pauses on its own; set "action": "pause" to allow that)';
+ $('aiActionNote').textContent=ai.action==='pause'?', and the print is paused':' (alert only: tick "Pause the print when a failure is found" below to pause too)';
+ if(document.activeElement!==$('aiPauseOn'))$('aiPauseOn').checked=ai.action==='pause';
  const label={idle:'Waiting for a print',watching:'Watching',suspect:'Suspect frames',failure:'Possible failure reported',paused:'Paused this print',unavailable:'AI unavailable'}[ai.status]||ai.status;
  const g=ai.geometry||{};$('aiGeometry').textContent=!g.enabled?'Print-file comparison is off.':(g.calibrated?'📐 Camera calibrated to the bed. ':'📐 Not calibrated: calibrate the camera to compare detections with the print file. ')+(g.message||'');
  $('aiCalibrate').textContent=g.calibrated?'Recalibrate camera to bed…':'Calibrate camera to bed…';$('aiCalibrate').hidden=!g.enabled;
+ renderBed(ai.bed||{});
  const rp=ai.reprint||{},showReprint=rp.enabled&&(rp.pending||ai.status==='paused');$('aiReprintBlock').hidden=!showReprint;
- if(showReprint){const left=rp.pending?Math.max(0,rp.due-Date.now()/1000):null,h=left===null?'':`${Math.floor(left/3600)} h ${Math.floor(left%3600/60)} min`;
-  $('aiReprint').textContent=(rp.pending?`If this paused print isn't resumed or stopped, it reprints on an available printer in ${h}. `:'')+(rp.note?rp.note+' ':'')+(rp.available||'Press Check available printers to see which printers could take it.');
+ if(showReprint){const left=rp.pending?Math.max(0,rp.due-Date.now()/1000):null,h=left===null?'':left<3600?`${Math.ceil(left/60)} min`:`${Math.floor(left/3600)} h ${Math.floor(left%3600/60)} min`;
+  $('aiReprint').textContent=(rp.pending?`If this paused print isn't resumed or stopped, it reprints on an available printer in ${h} (priority ${rp.priority||5}). `:'')+(rp.note?rp.note+' ':'')+(rp.available?'':'Press Check available printers to see which printers could take it.');
+  // Each other printer: available or why not, with "Mark available" for what a person can vouch for after looking.
+  $('aiReprintPrinters').innerHTML=(rp.printers||[]).map(r=>`<li><span class="state ${r.ok?'':r.can_mark?'warn':'bad'}">${r.ok?(r.marked?'Marked available':'Available'):'Unavailable'}</span> <b>${esc(r.display)}</b>${r.ok?'':` · ${esc(r.reason)}`}`+
+   (r.marked?` <button type="button" class="small-btn ghost" data-mark="${esc(r.name)}" data-on="0">Undo</button>`:r.can_mark?` <button type="button" class="small-btn" data-mark="${esc(r.name)}" data-on="1" title="You've looked at this printer: use it although this can't be confirmed">Mark available</button>`:'')+'</li>').join('');
   $('aiReprintCancel').hidden=!rp.pending;}
  const pace=ai.interval?` Checking every ${Math.round(ai.interval)} s while printing (${ai.interval_reason||'adaptive'}).`:'';
  const where=ai.backend?` Running on: ${ai.backend}${ai.active_model?' ('+ai.active_model+')':''}.${ai.backend_note?' ⚠️ '+ai.backend_note:''}`:'';
@@ -283,7 +300,15 @@ function explainAiTuning(t){const v=aiTuningValues();if(!v.threshold){$('aiTunin
 function renderAiTuning(ai){const t=ai.tuning;$('aiTuningForm').hidden=!t;if(!t)return;
  if(aiTuningFor!==selectedPrinter){aiTuningDirty=false;aiTuningFor=selectedPrinter;}
  if(aiTuningDirty||$('aiTuningForm').contains(document.activeElement))return;
- $('aiPreset').value=t.preset;fillAiTuning(t);$('aiFocus').checked=!!t.focus;explainAiTuning(t);}
+ $('aiPreset').value=t.preset;fillAiTuning(t);$('aiFocus').checked=!!t.focus;explainAiTuning(t);renderAiLabels(t);}
+$('aiPauseOn').addEventListener('change',async e=>{const on=e.target.checked;
+ try{await api('ai-labels',{action:on?'pause':'notify'});notice(on?'A detected failure now pauses the print (all printers).':'A detected failure now only alerts (all printers).');await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
+// Which classes count as a failure, for every printer; a click applies straight away.
+function renderAiLabels(t){const box=$('aiLabelBoxes'),classes=t.classes||[],key=JSON.stringify([classes,t.labels]);$('aiLabels').hidden=classes.length<2;
+ if(box.dataset.key===key||$('aiLabels').contains(document.activeElement))return;box.dataset.key=key;
+ box.innerHTML=classes.map(c=>`<label class="checkbox"><input type="checkbox" value="${esc(c)}"${(t.labels||[]).includes(c)?' checked':''}> ${esc(c)}</label>`).join(' ');}
+$('aiLabelBoxes').addEventListener('change',async()=>{const labels=[...document.querySelectorAll('#aiLabelBoxes input:checked')].map(i=>i.value);
+ try{await api('ai-labels',{labels});notice('Counts as a failure: '+labels.join(', ')+'.');$('aiLabelBoxes').dataset.key='';await refresh();}catch(err){notice(err.message);$('aiLabelBoxes').dataset.key='';renderAiTuning(state?.printers.find(p=>p.name===selectedPrinter)?.ai||{});}});
 function currentTuning(){return state?.printers.find(p=>p.name===selectedPrinter)?.ai?.tuning||{};}
 $('aiPreset').addEventListener('change',()=>{aiTuningDirty=true;const t=currentTuning(),v=(t.presets||{})[$('aiPreset').value];if(v)fillAiTuning(v);explainAiTuning(t);});
 ['aiThreshold','aiHold','aiMinutes','aiShare'].forEach(id=>$(id).addEventListener('input',()=>{aiTuningDirty=true;$('aiPreset').value='custom';explainAiTuning(currentTuning());}));
@@ -293,7 +318,7 @@ $('aiTuningForm').addEventListener('submit',async e=>{e.preventDefault();const p
  try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/tuning',data);aiTuningDirty=false;notice(`AI sensitivity saved for ${printerLabel(selectedPrinter)}.`);await refresh();}catch(err){notice(err.message);}});
 // The printer's current errors and health alerts, each with Clear, plus Clear all (#34).
 function renderAlerts(p){const list=p.alerts||[],box=$('detailAlerts');box.hidden=!list.length;if(!list.length){box.innerHTML='';return;}
- const html=`<ul>${list.map(a=>`<li><span><strong>${a.kind==='error'?'Error':'Health alert'} ${esc(a.code)}</strong> ${esc(a.message)} <a href="${esc(a.url)}" target="_blank" rel="noopener">Help</a></span><button type="button" class="ghost small-btn" data-clear-alert="${esc(a.id)}">${a.kind==='error'?'Clear':'Dismiss'}</button></li>`).join('')}</ul>`+
+ const html=`<ul>${list.map(a=>`<li><span><strong>${a.kind==='error'?'Error '+esc(a.code):a.kind==='failed'?'Print failed':'Health alert '+esc(a.code)}</strong> ${esc(a.message)}${a.url?` <a href="${esc(a.url)}" target="_blank" rel="noopener">Help</a>`:''}</span><button type="button" class="ghost small-btn" data-clear-alert="${esc(a.id)}">${a.kind==='hms'?'Dismiss':'Clear'}</button></li>`).join('')}</ul>`+
   (list.length>1?'<button type="button" class="ghost small-btn" data-clear-alert="all">Clear all</button>':'');
  if(box.dataset.html!==html){box.dataset.html=html;box.innerHTML=html;}}
 $('detailAlerts').addEventListener('click',e=>{const b=e.target.closest('[data-clear-alert]');if(!b)return;const id=b.dataset.clearAlert;confirmClearAlerts(selectedPrinter,id==='all'?'all':[id]);});
@@ -316,9 +341,26 @@ $('calUndo').addEventListener('click',()=>{calCorners.pop();drawCalibration();})
 window.addEventListener('resize',()=>{if($('calibrateDialog').open)drawCalibration();});
 $('calibrateForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/calibration',{corners:calCorners});closeDialog($('calibrateDialog'));notice('Camera calibration saved.');await refresh();}catch(err){$('calStep').textContent=err.message;}});
 $('calClear').addEventListener('click',async()=>{try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/calibration',{clear:true});closeDialog($('calibrateDialog'));notice('Camera calibration removed.');await refresh();}catch(err){$('calStep').textContent=err.message;}});
+// Bed check (failureDetection/bed_model.py): the bed check AI, or the picture comparison while it's still learning.
+function renderBed(bed){const c=bed.counts||{empty:0,parts:0},n=bed.needed||3;
+ $('aiBed').textContent=(bed.ready?(c.empty>=n&&c.parts>=n?`The bed check AI knows this bed (${c.empty} empty and ${c.parts} with parts seen).`
+  :`The bed check AI is learning this bed: ${c.empty} of ${n} empty and ${c.parts} of ${n} with parts seen. It learns when you start a print and when one finishes.`)
+  :(bed.message||'The bed check AI is not set up (it needs the AI HAT).')+' Until then the picture comparison checks the bed.');}
+$('aiBedCheck').addEventListener('click',async e=>{const b=e.target;b.disabled=true;$('aiBedResult').textContent='Looking at the bed…';
+ try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/bed',{action:'check'});
+  const word={clear:'✅ Looks clear',parts:'⚠️ Does not look clear',unknown:'❔ Not sure'}[r.state]||r.state;
+  $('aiBedResult').textContent=`${word}: ${r.detail}.`+(r.can_answer?' Is that right? Your answer teaches the AI.':'');
+  $('aiBedAnswer').hidden=!r.can_answer;}catch(err){$('aiBedResult').textContent=err.message;}finally{b.disabled=false;}});
+for(const [id,clear] of [['aiBedYes',true],['aiBedNo',false]])$(id).addEventListener('click',async()=>{
+ try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/bed',{action:'answer',clear});$('aiBedAnswer').hidden=true;
+  $('aiBedResult').textContent=clear?'Thanks: remembered as an empty bed.':'Thanks: remembered as a bed with parts on it.';await refresh();}catch(err){$('aiBedResult').textContent=err.message;}});
 async function aiReprint(action,button){button.disabled=true;try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/reprint',{action});
  notice(action==='now'?`Reprinting on ${printerLabel(r.printer)}.`:action==='cancel'?'Automatic reprint cancelled.':'Checked the other printers.');await refresh();}catch(err){notice(err.message);}finally{button.disabled=false;}}
 $('aiReprintCheck').addEventListener('click',e=>aiReprint('check',e.target));
+$('aiReprintPrinters').addEventListener('click',async e=>{const b=e.target.closest('[data-mark]');if(!b)return;b.disabled=true;
+ try{await api('ai/'+encodeURIComponent(selectedPrinter)+'/reprint',{action:'available',target:b.dataset.mark,on:b.dataset.on==='1'});
+  notice(b.dataset.on==='1'?`${printerLabel(b.dataset.mark)} is marked available for reprints until it starts printing (at most 12 h).`:`${printerLabel(b.dataset.mark)} is no longer marked available.`);await refresh();}
+ catch(err){notice(err.message);b.disabled=false;}});
 $('aiReprintCancel').addEventListener('click',e=>aiReprint('cancel',e.target));
 $('aiReprintNow').addEventListener('click',e=>confirmAction('Reprint on another printer now?',`The paused print on ${printerLabel(selectedPrinter)} will be stopped and recorded as failed, and the job started on an available printer of the same model whose camera shows an empty bed and whose loaded filament matches.`,
  'Stop this paused print and reprint the job on another printer.',()=>aiReprint('now',e.target)));
@@ -328,47 +370,39 @@ async function loadTraining(force){if(!force&&Date.now()-trainingLoaded<30000)re
  try{const t=await api('ai-training',undefined,'GET');$('aiTraining').textContent=t.enabled?`${t.count} pictures collected (${t.mb} MB): a still every ${t.every_minutes} min while printing, plus every frame the AI found suspicious.`+(t.problem?' ⚠️ '+t.problem:' Download them, label the failures in Roboflow and retrain for a model that knows these cameras.'):'Collecting training pictures is turned off.';
   $('aiTrainingDownload').hidden=!t.count;$('aiTrainingClear').hidden=!t.count;}catch(e){$('aiTrainingBlock').hidden=true;}}
 $('aiTrainingClear').addEventListener('click',()=>confirmAction('Delete the collected training pictures?','All pictures collected for training are deleted from the Pi. Download them first if you still need them.','Delete the training pictures.',async()=>{await api('ai-training/clear',{});trainingLoaded=0;await loadTraining(true);notice('Training pictures deleted.');}));
-// Test AI now: a fresh picture, checked right away, with the boxes the model found drawn on it.
+// Check AI now (one button): a fresh picture, checked right away, with the boxes the model found drawn on it. While a
+// print is running it's also a real check that pauses or alerts straight away if the picture looks failed.
 let aiTestResult=null,aiTestUrl='',aiTestFor='';
-function drawAiTest(){const r=aiTestResult,img=$('aiTestImage'),c=$('aiTestCanvas');if(!r||!img.naturalWidth)return;
- c.width=img.clientWidth;c.height=img.clientHeight;const g=c.getContext('2d');g.clearRect(0,0,c.width,c.height);
- g.setLineDash([6,5]);g.strokeStyle='rgba(255,255,255,.35)';g.lineWidth=1;
- (r.crops||[]).forEach(([x0,y0,x1,y1])=>g.strokeRect(x0*c.width,y0*c.height,(x1-x0)*c.width,(y1-y0)*c.height));   // where it zoomed in
- g.setLineDash([]);g.font='bold 13px sans-serif';g.textBaseline='bottom';
- r.detections.filter(d=>d.box).forEach(d=>{const counts=r.labels.includes(d.label),strong=d.score>=r.threshold;
-  const color=counts&&strong?'#ff5c52':counts?'#f3d684':'#8dc6ff';const [x0,y0,x1,y1]=d.box;const x=x0*c.width,y=y0*c.height,w=(x1-x0)*c.width,h=(y1-y0)*c.height;
-  g.strokeStyle=color;g.lineWidth=strong?3:2;g.strokeRect(x,y,w,h);const text=`${d.label} ${Math.round(d.score*100)}%`;const tw=g.measureText(text).width+8;
-  g.fillStyle=color;g.fillRect(x,Math.max(0,y-18),tw,18);g.fillStyle='#111';g.fillText(text,x+4,Math.max(18,y)-3);});}
+function drawAiTest(){const r=aiTestResult,img=$('aiTestImage');if(!r||!img.naturalWidth)return;
+ // Drawn like every other camera view (paintAi), plus the areas it zoomed in on for this check.
+ paintAi($('aiTestCanvas'),img,{boxes:r.detections.filter(d=>d.box).map(d=>({...d,counts:r.labels.includes(d.label)})),
+  zoom:r.crops||[],threshold:r.threshold,hold:r.hold??r.threshold},'');}
 $('aiTest').addEventListener('click',async e=>{const b=e.target;b.disabled=true;b.textContent='Checking…';
  try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/test',{});aiTestResult=r;aiTestFor=selectedPrinter;
   const bytes=Uint8Array.from(atob(r.picture),ch=>ch.charCodeAt(0));if(aiTestUrl)URL.revokeObjectURL(aiTestUrl);aiTestUrl=URL.createObjectURL(new Blob([bytes],{type:'image/jpeg'}));
   $('aiTestImage').onload=drawAiTest;$('aiTestImage').src=aiTestUrl;$('aiTestResult').hidden=false;
   const pct=v=>Math.round(v*100)+'%';
   $('aiTestText').className=r.failing?'bad':'good';
-  $('aiTestText').textContent=(r.failing?`⚠️ Looks like a failure: score ${pct(r.judged)}, at or above the ${pct(r.threshold)} threshold.`:`✅ No failure: score ${pct(r.judged)}, below the ${pct(r.threshold)} threshold.`)+(r.where?` (${r.where})`:'')+(r.judged!==r.score?` Raw model score ${pct(r.score)}.`:'')+' One frame only: a real alarm needs several failing frames over a few minutes.';
+  const done=!r.printing?(r.printer_state==='PAUSE'?' The print is paused, so nothing was paused or reported.':' Not printing, so nothing was paused or reported.'):r.already?' This print was already reported, so nothing more was done.':
+   r.acted?(r.status==='paused'?' The print was paused and reported.':' Reported in Discord and Activity.'):' Counted as a check of this print.';
+  $('aiTestText').textContent=(r.failing?`⚠️ Looks like a failure: score ${pct(r.judged)}, at or above the ${pct(r.threshold)} threshold.`:`✅ No failure: score ${pct(r.judged)}, below the ${pct(r.threshold)} threshold.`)+(r.where?` (${r.where})`:'')+(r.judged!==r.score?` Raw model score ${pct(r.score)}.`:'')+done;
+  if(r.printing)await refresh();
   $('aiTestList').innerHTML=r.detections.length?r.detections.map(d=>`<li>${esc(d.label)} ${pct(d.score)}${r.labels.includes(d.label)?'':' (not counted as a failure)'}${d.on_part!==undefined?` • ${d.on_part>=0.5?'on the part':'off the part'}`:''}</li>`).join(''):'<li>Nothing found above 5%.</li>';
   trainingLoaded=0;loadTraining(true);}
- catch(err){notice(err.message);}finally{b.disabled=false;b.textContent='Test AI now';}});
+ catch(err){notice(err.message);}finally{b.disabled=false;b.textContent='Check AI now';}});
 window.addEventListener('resize',()=>{if(!$('aiTestResult').hidden)drawAiTest();});
-// Check AI now: a real check while printing; acts (pause / notify, as set) straight away if this frame looks failed.
-async function aiCheckNow(button){button.disabled=true;button.textContent='Checking…';
- try{const r=await api('ai/'+encodeURIComponent(selectedPrinter)+'/check',{});const pct=v=>Math.round(v*100)+'%';
-  const action=r.state?.status==='paused'?'The print was paused.':r.acted?'Reported in Discord and Activity.':'';
-  notice(r.already?`Score ${pct(r.score)}. This print was already reported, so nothing more was done.`:
-   r.acted?`⚠️ The AI sees a failure (score ${pct(r.score)}, threshold ${pct(r.threshold)}). ${action}`:
-   `✅ No failure in this picture: score ${pct(r.score)}, below the ${pct(r.threshold)} threshold.`);await refresh();}
- catch(err){notice(err.message);}finally{button.disabled=false;button.textContent='Check AI now';}}
-$('aiCheck').addEventListener('click',e=>{const ai=state?.printers.find(p=>p.name===selectedPrinter)?.ai||{};
- if(ai.action==='pause')confirmAction('Check now and pause if needed?',`The AI checks a fresh picture of ${printerLabel(selectedPrinter)} now. If it scores at or above the threshold, the print is paused straight away and reported.`,'Check the print now and pause it if the AI sees a failure.',()=>aiCheckNow(e.target));
- else aiCheckNow(e.target);});
 $('aiWatch').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai/'+encodeURIComponent(selectedPrinter),{watch:on});notice(`AI failure watch ${on?'on':'off'} for ${selectedPrinter}.`);await refresh();}catch(err){e.target.checked=!on;notice(err.message);}});
 setInterval(()=>{if($('detailDialog').open&&state){renderSwapStatus();renderAiStatus();}},1000);
-$('swapForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,data={enabled:$('swapEnabled').checked,model:$('swapModel').value,spares:Number($('swapSpares').value),confirmed:true};confirmAction('Save plate-swap settings?',printerLabel(name)+' — '+(data.enabled?'enable '+data.model+' kit':'disable kit')+'; '+data.spares+' magazine plates. Existing plate checks and file approvals will be reset.','I verified the installed hardware and actual spare count.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/configure',data);notice('Saved for this printer. Approve the prepared Swaplist batch and check its starting setup before starting.');});};
-$('swapChecked').onclick=()=>{const name=selectedPrinter;confirmAction('Swapmod starting setup checked?',printerLabel(name)+' — this records your inspection; no swap movement is sent.','I checked the starting setup against Swaplist instructions, loaded the required magazine plates and cleared the ejection path.',async()=>{await api('plateswap/'+encodeURIComponent(name)+'/check',{confirmed:true});notice('Setup checked. Start the approved Swaplist batch when ready.');});};
-
-let swapApprovalJob=null;
-function openSwapApproval(id){const j=state.jobs.find(x=>x.id===id);swapApprovalJob=id;$('swapApproveText').textContent=j.label+' — '+printerLabel(j.printer);$('swapBatchPlates').value=j.options.swap_plates||1;$('swapBatchConfirm').checked=false;$('swapApproveDialog').showModal();}
-$('swapApproveForm').onsubmit=async e=>{e.preventDefault();try{await api('jobs/'+swapApprovalJob+'/swapapprove',{confirmed:$('swapBatchConfirm').checked,plates:Number($('swapBatchPlates').value)});$('swapApproveDialog').close();notice('Swaplist batch approved.');await refresh();}catch(e){notice(e.message);}};
+async function swapAction(action,body){const r=await api('plateswap/'+encodeURIComponent(selectedPrinter)+'/'+action,body||{});await refresh();return r;}
+$('swapEnabled').addEventListener('change',async e=>{const on=e.target.checked;try{await swapAction('configure',{enabled:on});notice(`Swapmod ${on?'on':'off'} for ${printerLabel(selectedPrinter)}.`);}catch(err){e.target.checked=!on;notice(err.message);}});
+let swapUpload=null;
+async function saveSwapFile(){try{const r=await swapAction('file',{asset:swapUpload.asset,plate:Number($('swapPlate').value||1)});notice(`Swap print file saved: ${r.file} (plate ${r.plate}).`);}catch(err){notice(err.message);}}
+$('swapFile').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;notice('Checking the swap print file…');
+ try{const form=new FormData();form.append('file',f);swapUpload=await api('upload',form);const plates=(swapUpload.plates||[]).filter(p=>p.sliced);
+  $('swapPlate').innerHTML=plates.map(p=>`<option value="${p.index}">${esc(p.name||'Plate '+p.index)}</option>`).join('');$('swapPlateRow').hidden=plates.length<2;
+  await saveSwapFile();}catch(err){notice(err.message);}finally{e.target.value='';}});
+$('swapPlate').addEventListener('change',()=>{if(swapUpload)saveSwapFile();});
+$('swapNow').addEventListener('click',async e=>{e.target.disabled=true;try{await swapAction('now');notice(`Swapping the plate on ${printerLabel(selectedPrinter)}.`);}catch(err){notice(err.message);}finally{e.target.disabled=false;}});
 // Cancel single objects mid-print, like Bambu Studio / Handy. Loaded when the panel opens and every 10 s while printing.
 let objectsFor='',objectsData=null;
 async function loadObjects(force){const p=devPrinter();if(!p||!$('detailDialog').open)return;const active=['RUNNING','PAUSE'].includes(p.state);

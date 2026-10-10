@@ -5,6 +5,64 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased (1.8.0)
 
 ### Added
+- **Desktop app for Windows laptops:** `3d-printer-management-desktop.exe`, attached to each release. See [Desktop app](docs/desktop-app.md).
+  - **The dashboard in its own window:** connect to the Pi by its address, or let **Find it for me** look on the laptop's networks and tailnet. Then sign in with the dashboard password. The sign-in is kept between starts for the dashboard's 12-hour session, and no password is stored.
+  - **A tray icon:** it lists the printers (state, progress, time left, errors), and its dot shows the dashboard's status. Closing the window keeps the app running there; **Quit** is in its menu.
+  - **Pop-up notifications:** the dashboard's notifications (prints finished or failed, printer errors, queue reviews, AI alerts) pop up on the laptop. Choose all of them, all but the progress updates (the default), only problems, or none. Several at once become one pop-up.
+  - **Start with Windows,** in the tray, for this Windows user.
+  - **No installation:** one file, no administrator rights. It needs the Microsoft Edge WebView2 Runtime, which Windows 11 and up-to-date Windows 10 already have.
+- **`GET /api/desktop` on the Pi:** the small summary the desktop app's tray reads every 15 seconds, with the window's sign-in. Unlike an open dashboard, it doesn't keep the camera pictures running.
+- **Desktop app workflow:** pull requests that touch the app or the dashboard build the .exe on Windows and test it end to end against a demo Pi. The **Publish release** workflow builds, tests and attaches it to each release.
+
+## 1.7.7-beta.1
+
+Built on 1.7.6-beta.1. Printers and the Discord bot are set up in the dashboard (Discord is now optional), AI boxes on every camera view, a reprint priority and **Mark available** for automatic reprints, and one **Check AI now** button.
+
+### Added
+- **The dashboard is the primary way to set up and use the app; Discord is optional (#8).**
+  - **New installations need no Discord and no file editing:** the installer no longer requires the old Discord bot (or demo mode). Sign in, press **Add a printer** on the **Welcome** banner, and enter each printer's name, IP address, serial number and access code. The model and camera type are worked out from the serial number. Demo printers are shown until the first printer is added.
+  - **Printers in the dashboard:** **Settings & help → Printers** adds, edits and removes printers. They're saved in the data folder, readable only by the service. Access codes are never shown again (blank keeps the saved one). Printers can't be renamed (use **Rename** for the display name) or removed while they have queue jobs. Printers in `config.json` are listed and still work.
+  - **Discord, optional:** **Settings & help → Discord (optional) → Connect a Discord bot** takes the bot token (never shown again) and server IDs. `discord_token` and `guild_ids` in `config.json` still work and take precedence. The sidebar says **Discord: not set up (optional)** instead of "offline".
+  - **Restart now:** printer and Discord changes apply when the app restarts, now possible from the dashboard (the service exits so systemd starts it again, about 15 seconds).
+  - **pm-doctor** checks the reachability of printers added in the dashboard too (after its next install).
+  - **Docs:** the README, installation, configuration, dashboard and Discord guides are now dashboard-first.
+- **Mark a printer available for an automatic reprint.** The reprint section of an AI-paused print now lists every other printer with why it can't take the job. **Mark available** uses a printer you've looked at even when the app can't confirm it: bed not confirmed empty, unknown model, or filament that isn't an exact match. It never overrides a different model, an offline, printing or erroring printer, or one busy with another job. The mark ends as soon as that printer is seen printing (from here, Bambu Studio or its screen), or after 12 hours. The reprint notification says who marked the printer.
+- **Reprint priority (1–5)** when queueing a print (dashboard and `/queueadd`), shown on each queue job. It sets how long an AI-paused print waits before it's reprinted elsewhere: 1 = 5 minutes, 2 = 1 hour, 3 = 1.5 hours, 4 = 2 hours, 5 = 2.5 hours (the default).
+
+### Changed
+- **AI boxes on every camera view.** Every camera picture now shows what the AI found in that very picture. See [AI boxes on the camera view](failureDetection/FAILURE_DETECTION.md#ai-boxes-on-the-camera-view).
+  - **Dashboard:** the overview printer cards and the printer panel's still picture show the boxes the AI found in that still, printing or not. A new still is shown straight away and its boxes follow a moment later; a still never shows another picture's boxes. Live view already had them on every frame.
+  - **Pictures sent as images:** Discord `/printer`, notifications with a picture (including AI failure alerts), **Take camera snapshot** and the raw live stream have the boxes drawn on. A picture the AI already looked at for the dashboard isn't looked at again, so `/printer` still answers quickly.
+  - **Always plain:** the pictures the AI judges, the training pictures and the calibration picture.
+  - **Display only:** these looks never pause or alert anything, and never hold up the real checks. If the AI can't look in time, the picture is still shown or sent, without boxes.
+- **Automatic reprints wait at most 2.5 hours** instead of 12. `after_hours` in config.json is now the longest wait, 2.5 by default.
+- **One Check AI now button** instead of separate **Test AI now** and **Check AI now** buttons. It always shows a fresh picture with what the AI sees. While a print is running it's also a real check: if the picture looks failed, the print is paused or reported straight away, as set. When not printing, nothing is paused or reported.
+
+## 1.7.6-beta.1
+
+Built on 1.7.5-beta.1. A bed check AI that tells whether a printer's bed is empty, a status and notification icon at the top left, and AI boxes on every live-view frame.
+
+### Added
+- **Bed check AI: is the bed empty?** A second AI model on the AI HAT, next to the failure model. See [Bed check AI](failureDetection/FAILURE_DETECTION.md#bed-check-ai-is-the-bed-empty).
+  - **Automatic setup:** the Pi downloads Hailo's precompiled CLIP model from the Hailo Model Zoo, built for its chip (Hailo-8 / Hailo-8L) and HailoRT version, in the background on first start. It downloads again after a HailoRT update. The Pi can't build a .hef itself: Hailo's compiler only runs on x86 PCs.
+  - **Learns each printer's bed by itself:** pictures of the empty bed when a queue job starts, of the bed with parts when a print finishes, and your **It's clear** / **Not clear** answers in the printer panel's new **Bed check**.
+  - **Used by Swapmod:** the next print isn't started when the AI is sure the swap left parts on the plate. **Automatic reprint** asks it first. When it's unsure, the picture comparison decides as before.
+  - **Safe:** failure detection keeps working if the bed model can't load.
+- **Status icon at the top left.** The **3D** icon shows what the Pi is doing and what needs a look (an update installing or available, an AI model downloading with its progress, printer errors, Discord offline). It also lists the last 50 notifications, with an unread count. See [Status icon](docs/dashboard.md#status-icon).
+
+### Changed
+- **AI boxes on every live-view frame.** While you watch a printer live, the AI looks at each new camera frame, printing or not, and the frame arrives with its own boxes, so they follow the toolhead instead of updating every few seconds. Live view also shows every new frame now (up to 5 per second on RTSP cameras) instead of about one per second.
+  - **On the CPU** (no AI HAT) it looks at most every 3 seconds, so the Pi isn't overloaded.
+  - **Display only:** failures are still judged by the regular checks, and it runs only while someone is watching.
+
+### Fixed
+- **The empty-bed picture for automatic reprints could show the finished part.** Since confirmations were removed in 1.7.5 it was taken at every start, including Swapmod's swap print, which starts with the finished part still on the bed. Swap prints are now skipped.
+
+## 1.7.5-beta.1
+
+Built on 1.7.4-beta.1. Clear printer errors, the pm-doctor watchdog, alerts to Home Assistant / ntfy / webhooks, the reworked Swapmod, no confirmation screens, readable printer states and many fixes.
+
+### Added
 - **Clear printer errors and health alerts from the dashboard and Discord (#34).**
   - **Dashboard:** printer cards get **Clear error…**. The printer panel lists each error and alert with its official description, with **Clear** / **Dismiss** and **Clear all**.
   - **Discord:** `/clearerror name?` (open to everyone, configurable), and a **Clear error…** button under error notifications.
@@ -32,14 +90,30 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Testing:** **Send test** checks each target, and the last result is shown.
   - **Privacy:** tokens never leave the Pi.
 
-## Unreleased (1.7.5)
-
 ### Changed
+- **No confirmation screens in the dashboard.** Every action runs straight away, and the server still checks it is safe (temperature limits, an idle printer for moves). Discord keeps its confirmations.
+- **Printer states people understand.**
+  - **Ready:** after a print, Bambu printers keep reporting FINISH, or FAILED after a failed or cancelled print, while they sit idle and ready. Cards and the printer panel now say **Ready**, with "last print finished" / "last print failed or was cancelled", plus **Printing**, **Paused**, **Error** (only with a real error code) and **Offline**. Discord `/printer` and `/status` match.
+  - **Queue:** a FAILED printer without an error starts the next job normally.
+- **Choose which classes count as a failure** (for all printers), for example **stringing**: tick them in a printer's AI panel. New installs count stringing too.
+- **"Pause the print when a failure is found"** is now a checkbox in the AI panel (all printers), instead of `"action"` in config.json.
+- **Important alerts ping the people you choose in Discord:** AI failure alerts and printer errors mention the people listed under Settings → Discord settings → **People to ping** (Discord user IDs). Nobody is pinged by default, and never @here or @everyone.
+- **Swapmod reworked: it runs your swap print and keeps the queue going.**
+  - **Settings:** per printer there's only **on/off** and the **swap print file** (the sliced `.3mf` that swaps the plate). Plate counts, Swaplist batch approvals and starting-setup checks are gone.
+  - **Finished print:** the swap print starts as a normal queue job, then the next waiting job starts on its own.
+  - **Failed print:** it doesn't swap automatically, so the cause doesn't repeat. **Swap plate now** in the printer panel, or `/plateswap now`, runs the swap any time.
+  - **Discord:** the commands are `/plateswap set` and `/plateswap now`.
 - **One Start button (#65).**
   - **Queue:** the separate **Start ignoring error** button is gone. When the printer reports FAILED or an error, **Start next** turns red, says so, and asks whether to start anyway (bypassing the management error check for that one start).
   - **Print now:** the same applies when queueing a new print; **Print now ignoring error** is gone.
 
 ### Fixed
+- **Commands show their result much sooner (#60).** The printer usually acted right away, but the dashboard could keep showing "waiting for the printer" for many seconds.
+  - **Full report after a command:** the app now asks the printer for a full report shortly after each command (light, pause/resume/stop, temperatures, fans, speed, moves, filament, cancelling objects, clearing errors). Before, an idle A1 or P1 could take a long time to report the change. The request is limited to once every 10 seconds per printer, because frequent full reports can make some printers stutter.
+  - **Faster checks after a click:** the dashboard looks again 0.6, 1.5, 3, 5, 8, 12 and 16 seconds after every control, instead of only after the light and print buttons.
+- **Movement commands didn't work after a failed or cancelled print.** Moves required IDLE or FINISH and refused the FAILED state that printers keep reporting. A queue job left in "needs review" also blocked moves forever, and the buttons needed an "unlock" checkbox. All three are fixed; the printer must still be idle with no error.
+- **Cancel object did nothing for prints started from Bambu Studio, Handy or the printer.** The section only appeared for prints started from this app. Now the print file is copied from the printer's storage once per print, and its objects can be cancelled. Prints sent from the cloud keep their file internally, which the app says.
+- **AI boxes on the live camera** now also show while the printer isn't printing: the AI looks at the live view while it's open (display only, never judged or paused on).
 - **The Discord bot reconnects without a restart (#14).** Once connected, it already reconnected by itself after the internet dropped. But if the internet was down when the bot first logged in (a Pi booting before its network, or a router restart), it stayed offline until the service was restarted. Now it tries again after 15 seconds, backing off to every 5 minutes. A rejected token is reported in the log, without retrying.
 - **Permission refusals are always private (#23).** "You can't use this command" used to be posted publicly in the commands channel. Now only the person who ran the command sees it, in every channel.
 - **Rounded numbers in Discord (#42).** `/printer`, progress notifications and `/filaments` showed values as reported, such as `219.96875°C` or `312 min`. They now show `220°C` and `5 h 12 min`. The dashboard already rounded them.

@@ -92,6 +92,8 @@ class Alerts:
             body = {root: dict(payload[root], sequence_id=str(time.time_ns() % 1000000000))}
             if client.publish(topic, json.dumps(body), qos=1).rc != 0:
                 raise ValueError('Sending the clear to the printer failed. Try again.')
+        if hasattr(self.core, 'request_report'):
+            self.core.request_report(name, delay=1)   # its next report says whether the error is gone
 
     async def clear(self, name, ids, confirmed, author='unknown', wait=WAIT):
         """Clear the alerts with these ids ('all' for every one). Returns {'cleared', 'still', 'message'}."""
@@ -106,6 +108,7 @@ class Alerts:
             raise ValueError('The printer no longer reports that alert.' if ids != 'all' else 'The printer reports no error or alert to clear.')
         errors = [a for a in chosen if a['kind'] == 'error']
         hms = [a for a in chosen if a['kind'] == 'hms']
+        failed = [a for a in chosen if a['kind'] == 'failed']
         if errors and not connected:
             raise ValueError('Printer is offline.')
         for alert in errors:
@@ -122,16 +125,18 @@ class Alerts:
                     break
                 await self.sleep(1)
         cleared = [a for a in chosen if a not in still]
-        if state == 'FAILED' and errors and not still:
+        if state == 'FAILED' and (errors or failed) and not still:
             self.failed_cleared[name] = str(data.get('subtask_id') or '')   # this failed print, not a later one
         for alert in cleared:
-            self.store.event(name, 'Printer error cleared' if alert['kind'] == 'error' else 'Health alert dismissed',
+            self.store.event(name, {'error': 'Printer error cleared', 'failed': 'Failed print cleared'}.get(alert['kind'], 'Health alert dismissed'),
                              f"{alert['code']} {alert['message']} • {author}")
         for alert in still:
             self.store.event(name, 'Printer still reports error', f"{alert['code']} {alert['message']} • {author}")
         parts = []
         if [a for a in cleared if a['kind'] == 'error']:
             parts.append('Cleared: the printer no longer reports ' + ('these errors.' if len(errors) - len(still) > 1 else 'the error.'))
+        if failed and not still:
+            parts.append('Cleared the failed print: the next job can start normally.')
         if hms:
             parts.append(f"Dismissed {len(hms)} health alert{'s' if len(hms) > 1 else ''} in the dashboard (it shows again if the printer reports it again).")
         if still:

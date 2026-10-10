@@ -9,7 +9,7 @@ def install(core, alerts):
     def describe(printer, items):
         if not items:
             return 'The printer reports no error or health alert.'
-        return '\n'.join(f"**{'Error' if a['kind'] == 'error' else 'Health alert'} {a['code']}** {core.safe(a['message'])}\n{a['url']}"
+        return '\n'.join(f"**{ {'error': 'Error ' + a['code'], 'failed': 'Print failed'}.get(a['kind'], 'Health alert ' + a['code'])}** {core.safe(a['message'])}" + (f"\n{a['url']}" if a['url'] else '')
                          for a in items)[:3800]
 
     async def confirm(click, printer, ids):
@@ -57,7 +57,7 @@ def install(core, alerts):
             def __init__(self):
                 super().__init__(interaction.user.id)
                 for alert in items[:4]:
-                    self.button(f"{'Clear' if alert['kind'] == 'error' else 'Dismiss'} {alert['code']}", self.pick([alert['id']]), discord.ButtonStyle.danger)
+                    self.button(f"{'Dismiss' if alert['kind'] == 'hms' else 'Clear'} {alert['code']}", self.pick([alert['id']]), discord.ButtonStyle.danger)
                 if len(items) > 1:
                     self.button('Clear all', self.pick('all'), discord.ButtonStyle.danger)
                 self.button('Cancel', self.cancel)

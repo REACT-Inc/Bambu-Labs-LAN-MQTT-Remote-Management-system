@@ -34,7 +34,7 @@ DEFAULT_REPO = 'REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system'
 TAG = 'ai-model'
 SERVICE_USER = 'printermanager'
 # Used when the release has no print_failure.json: the 3D Print Failure Detection dataset (v4, CC BY 4.0).
-DEFAULT_META = {'classes': ['spaghetti', 'stringing', 'warping'], 'labels': ['spaghetti', 'warping'],
+DEFAULT_META = {'classes': ['spaghetti', 'stringing', 'warping'], 'labels': ['spaghetti', 'stringing', 'warping'],
                 'threshold': 0.4, 'input_size': 640}
 MAX_MODEL = 200 * 1024 * 1024
 

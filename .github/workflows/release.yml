@@ -12,7 +12,35 @@ concurrency:
   group: publish-release
   cancel-in-progress: false
 jobs:
+  check:
+    # Before the Windows build below: a wrong version or branch stops the release straight away.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate version and branch
+        env:
+          RELEASE_TAG: ${{ inputs.version }}
+        run: |
+          python -c 'import os,re; assert re.fullmatch(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta)\.(0|[1-9][0-9]*))?",os.environ["RELEASE_TAG"]), "Use vMAJOR.MINOR.PATCH, optionally with -beta.N or -alpha.N"'
+          # Stable releases only from main; alpha/beta pre-releases may come from any branch (e.g. beta-v1.1).
+          case "$RELEASE_TAG" in
+            *-alpha.*|*-beta.*) ;;
+            *) test "$GITHUB_REF" = refs/heads/main || { echo 'Stable releases must be published from main.'; exit 1; } ;;
+          esac
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo 'This tag already exists. Choose a new version.'
+            exit 1
+          fi
+  desktop:
+    # The desktop app for Windows laptops, built and tested for this version (.github/workflows/desktop.yml).
+    needs: check
+    uses: ./.github/workflows/desktop.yml
+    with:
+      version: ${{ inputs.version }}
   release:
+    needs: desktop
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +67,12 @@ jobs:
       - run: python -m unittest discover -s tests -q
       - run: bash -n install.sh platform.sh Updater/update.sh Updater/install-web-updater.sh
       - run: for file in static/*.js; do node --check "$file"; done
-      - name: Build release and checksum
+      - name: The desktop app built above
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-app
+          path: dist
+      - name: Build release and checksums
         env:
           RELEASE_TAG: ${{ inputs.version }}
         run: |
@@ -47,12 +80,13 @@ jobs:
           python build_release.py "$RELEASE_TAG" dist/3d-printer-management.zip
           cd dist
           sha256sum 3d-printer-management.zip > 3d-printer-management.zip.sha256
+          sha256sum 3d-printer-management-desktop.exe > 3d-printer-management-desktop.exe.sha256
       - name: Upload assets to draft, then publish
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.version }}
         run: |
-          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes --draft dist/3d-printer-management.zip dist/3d-printer-management.zip.sha256
+          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes --draft dist/3d-printer-management.zip dist/3d-printer-management.zip.sha256 dist/3d-printer-management-desktop.exe dist/3d-printer-management-desktop.exe.sha256
           case "$RELEASE_TAG" in
             *-alpha.*|*-beta.*) gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false ;;
             *) gh release edit "$RELEASE_TAG" --draft=false --latest ;;

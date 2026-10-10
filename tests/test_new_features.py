@@ -111,7 +111,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             result=self.i.response.send_message.call_args.kwargs
             self.assertFalse(result['ephemeral']);self.assertLess(len(result['embed']),6000)
             admintext=' '.join(f.value for f in result['embed'].fields)
-            for name in ('temperature','move','rename','dm','plateswap approve','laptop cmd'):
+            for name in ('temperature','move','rename','dm','plateswap now','laptop cmd'):
                 self.assertIn('`/'+name+'`',admintext)
             self.i.user.id=7
             for name in ('temperature','chamber','move','rename','dm','plateswap','laptop'):
@@ -135,13 +135,10 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
         install(self.core,engine)
         for command in self.core.bot.tree.get_commands():command.to_dict(self.core.bot.tree)
         self.i.user.id=7
-        await self.core.bot.tree.get_command('plateswap').get_command('configure').callback(self.i,'A1',True,'A1',2)
+        await self.core.bot.tree.get_command('plateswap').get_command('set').callback(self.i,'A1',True)
         engine.plate_swap.configure.assert_not_called()
         self.assertTrue(self.i.response.send_message.call_args.kwargs['ephemeral'])   # a refusal is always private (#23)
-        self.i.user.id=42
-        await self.core.bot.tree.get_command('plateswap').get_command('configure').callback(self.i,'A1',True,'A1',2)
-        engine.plate_swap.configure.assert_not_called()
-        self.assertFalse(self.i.followup.send.call_args.kwargs['ephemeral'])
+        self.assertEqual({c.name for c in self.core.bot.tree.get_command('plateswap').commands},{'set','now'})
 
     async def test_controls_permission_and_registration(self):
         from discord_Intergration.controls_discord import install

@@ -18,6 +18,9 @@ function showLogin(){ $('app').hidden=true;$('loginScreen').hidden=false;state=n
 function notice(text){$('notice').textContent=text;$('notice').hidden=false;setTimeout(()=>$('notice').hidden=true,7000);}
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.'}[name];}
 function printerLabel(name){return state?.printers.find(p=>p.name===name)?.display_name||name;}
+// Printer badges use the server's display_state (Ready / Printing / Paused / Error / Offline), not the raw state.
+function printerClass(p){const d=p.display_state||p.state;return !p.connected||d==='Error'||d==='Offline'?'bad':['Paused','Preparing'].includes(d)?'warn':d==='Printing'?'blue':'';}
+function printerStateText(p){return p.connected?(p.display_state||p.state)+(p.last_print?` · ${p.last_print}`:''):'OFFLINE';}
 function statusClass(s,online=true){return !online||['FAILED','failed','needs_review'].includes(s)?'bad':['PAUSE','paused','PREPARE','staging','awaiting_start'].includes(s)?'warn':['RUNNING','printing'].includes(s)?'blue':'';}
 // Requested but not yet confirmed: the button pulses purple, a colour no result state uses, until the
 // printer reports the result (then it shows the real state, e.g. amber for light on) or the time runs out.
@@ -27,7 +30,8 @@ function isPending(key,p){const x=pending[key];if(!x)return false;
  if(p&&x.done(p)){delete pending[key];return false;}
  if(Date.now()>x.until){delete pending[key];if(x.label)notice(x.label+': the printer hasn\'t reported the change. Check the printer.');return false;}
  return true;}
-function pollSoon(){for(const ms of [1500,4000,7000,10500,15000])setTimeout(refresh,ms);}
+// After a command: look again soon and often, so the result shows as soon as the printer reports it (#60).
+function pollSoon(){for(const ms of [600,1500,3000,5000,8000,12000,16000])setTimeout(refresh,ms);}
 function reportedLight(p){return ((p.data||{}).lights_report||[]).find(l=>l.node==='chamber_light')?.mode==='on';}
 function lightShown(p){const key='light|'+p.name;return isPending(key,p)?{on:pending[key].on,busy:true}:{on:reportedLight(p),busy:false};}
 async function toggleLight(name){const p=state.printers.find(x=>x.name===name),on=!lightShown(p).on;
@@ -44,14 +48,37 @@ function pendingClass(action,p){return isPending(action+'|'+p.name,p)?' pending'
 function confirmPause(name){confirmAction('Pause this print?',printerLabel(name)+' — the print pauses until you resume it.','I want to pause this print.',()=>printAction(name,'pause'));}
 function confirmStop(name){confirmAction('Stop this print?',printerLabel(name)+' — this cancels the current job.','I want to cancel this print.',()=>printAction(name,'stop',{confirmed:true}));}
 function actionButton(action,label,extra='',cls=''){return `<button class="${cls}" data-action="${action}" ${extra}>${label}</button>`;}
-function render(){if($('jobDialog').open)renderPrintNowOverride();
+// ---- The status icon (top left): updates, AI model setup, problems and the notifications sent (status_center.py) ----
+let statusSeen=0;try{statusSeen=Number(localStorage.getItem('statusSeen'))||0;}catch{}
+const STATUS_WORDS={ok:'All good',busy:'Working on something',warn:'Needs a look',error:'Something went wrong'};
+function ago(at){const s=Math.max(0,Math.round(Date.now()/1000-at));return s<60?'just now':s<3600?Math.round(s/60)+' min ago':s<86400?Math.round(s/3600)+' h ago':new Date(at*1000).toLocaleDateString();}
+function renderStatus(){const s=state?.status;if(!s)return;
+ const unread=s.notifications.filter(n=>n.id>statusSeen).length,worst=unread&&s.level==='ok'?'info':s.level;
+ $('statusDot').className='status-dot '+worst;
+ $('statusCount').hidden=!unread;$('statusCount').textContent=unread>9?'9+':String(unread);
+ $('statusButton').title=`${STATUS_WORDS[s.level]||'Status'}${unread?` · ${unread} new notification${unread>1?'s':''}`:''}`;
+ $('statusButton').setAttribute('aria-label',$('statusButton').title);
+ if($('statusPanel').hidden)return;
+ $('statusSummary').textContent=STATUS_WORDS[s.level]||'';
+ $('statusItems').innerHTML=s.items.map(i=>`<li class="status-item ${esc(i.level)}"><span class="status-dot ${esc(i.level)}"></span><div><strong>${esc(i.title)}</strong>${i.detail?`<small>${esc(i.detail)}</small>`:''}${i.progress!=null?`<div class="progress"><progress max="1" value="${Number(i.progress)}"></progress></div><small>${Math.round(i.progress*100)}%</small>`:''}</div></li>`).join('')||'<li class="muted">Nothing to report.</li>';
+ $('statusNotes').innerHTML=s.notifications.map(n=>`<li class="status-item ${esc(n.level)}${n.id>statusSeen?' unread':''}"><span class="status-dot ${esc(n.level)}"></span><div><strong>${esc(n.title)}</strong><small>${esc(printerLabel(n.printer)||'')}${n.printer?' · ':''}${ago(n.at)}</small>${n.detail?`<small>${esc(n.detail)}</small>`:''}</div></li>`).join('')||'<li class="muted">No notifications yet. Print results, printer errors and AI alerts appear here.</li>';}
+function markStatusRead(){statusSeen=state?.status?.latest||statusSeen;try{localStorage.setItem('statusSeen',String(statusSeen));}catch{}}
+function toggleStatus(open=$('statusPanel').hidden){$('statusPanel').hidden=!open;$('statusButton').setAttribute('aria-expanded',String(open));
+ if(open)renderStatus();else{markStatusRead();renderStatus();}}
+$('statusButton').addEventListener('click',e=>{e.stopPropagation();toggleStatus();});
+$('statusRead').addEventListener('click',()=>{markStatusRead();renderStatus();});
+document.addEventListener('click',e=>{if(!$('statusPanel').hidden&&!$('statusPanel').contains(e.target))toggleStatus(false);});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('statusPanel').hidden){toggleStatus(false);$('statusButton').focus();}});
+function render(){if($('jobDialog').open)renderPrintNowOverride();renderStatus();
  const p=state.printers,j=state.jobs;
  $('printerSubtitle').textContent=state.demo?'Demo data. No real printers are controlled.':'Live telemetry. Shared control with Discord.';
  $('mode').textContent=state.demo?'DEMO MODE':'LIVE';$('mode').classList.toggle('demo',state.demo);
- $('discordState').textContent=state.discord?'Discord connected':'Discord offline · Dashboard available';
+ $('discordState').textContent=!state.discord_configured?'Discord: not set up (optional)':state.discord?'Discord connected':'Discord offline · Dashboard available';
+ $('setupBanner').hidden=!state.setup_needed;   // a new installation: no printers yet (#8)
  $('stats').innerHTML=[['Printers online',p.filter(x=>x.connected).length+' / '+p.length],['Printing now',p.filter(x=>x.state==='RUNNING').length],['Waiting in queue',j.filter(x=>x.status==='queued').length],['Need attention',p.filter(x=>x.error||!x.connected).length+j.filter(x=>x.status==='needs_review').length]].map(([label,n],i)=>`<div class="stat"><small>${label}</small><strong class="${i===1?'green':''}">${n}</strong></div>`).join('');
  $('printers').innerHTML=p.map(printerCard).join('')||'<div class="empty">No printers configured.</div>'
  applyStyles($('printers'));
+ $('printers').querySelectorAll('.pc-cam img').forEach(img=>{if(img.complete)drawCardAi(img);else img.addEventListener('load',()=>drawCardAi(img),{once:true});});   // AI boxes on each still
  const names=p.map(x=>x.name);
  for(const id of ['jobPrinter','queueFilter']){
   const element=$(id),value=element.value;
@@ -63,23 +90,25 @@ function render(){if($('jobDialog').open)renderPrintNowOverride();
  }
  renderJobs();
  $('events').innerHTML=state.events.map(e=>`<div class="event"><small>${new Date(e.time*1000).toLocaleString()}</small><div><strong>${esc(e.title)} · ${esc(printerLabel(e.printer)||'System')}</strong><p>${esc(e.detail)}</p></div></div>`).join('')||'<div class="empty">Events will appear here as printers report and jobs change.</div>';
- if(!settingsLoaded){$('notificationChannel').value=state.settings.notification_channel_id||'';$('commandsChannel').value=state.settings.commands_channel_id||'';$('adminIds').value=(state.settings.admin_user_ids||[]).join('\n');settingsLoaded=true;}
+ if(!settingsLoaded){$('notificationChannel').value=state.settings.notification_channel_id||'';$('commandsChannel').value=state.settings.commands_channel_id||'';$('adminIds').value=(state.settings.admin_user_ids||[]).join('\n');$('alertPingUsers').value=(state.settings.alert_ping_users||[]).join('\n');settingsLoaded=true;}
  $('refreshed').textContent='Updated '+new Date().toLocaleTimeString();
  if(selectedPrinter&&$('detailDialog').open)renderDetails();
 }
 function renderJobs(){
  if(!state)return;const filter=$('queueFilter').value,jobs=state.jobs.filter(j=>!filter||j.printer===filter);
  const row=j=>{const q=`data-job="${esc(j.id)}"`;let buttons='';
-  if(j.status==='queued'){if(state.printers.find(p=>p.name===j.printer)?.plate_swap?.enabled)buttons+=actionButton('swapapprove','Approve Swaplist batch…',q);const first=state.jobs.find(x=>x.printer===j.printer&&x.status==='queued');if(first?.id===j.id)buttons+=printerError(j.printer)?actionButton('start','Start next (printer reports an error)…',q,'danger'):actionButton('start','Start next',q,'primary');buttons+=actionButton('up','↑',q)+actionButton('down','↓',q)+actionButton('remove','Remove',q);}
+  if(j.status==='queued'){const first=state.jobs.find(x=>x.printer===j.printer&&x.status==='queued');if(first?.id===j.id)buttons+=printerError(j.printer)?actionButton('start','Start next (printer reports an error)…',q,'danger'):actionButton('start','Start next',q,'primary');buttons+=actionButton('up','↑',q)+actionButton('down','↓',q)+actionButton('remove','Remove',q);}
   if(j.status==='needs_review')buttons+=['finished','failed','cancelled'].map(o=>actionButton('resolve','Mark '+o,`${q} data-outcome="${o}"`)).join('');
   if(terminal.has(j.status))buttons+=actionButton('reprint','Queue again',q);
   if(terminal.has(j.status)&&state.printers.length>1)buttons+=actionButton('sendto','Print on another printer…',q);
-  return `<div class="job-row"><div class="job-info"><strong>${j.demo?'🧪 DEMO · ':''}${esc(j.label)}</strong><small>${esc(printerLabel(j.printer))} · Plate ${j.options.plate} · ${j.options.use_ams?'AMS '+esc(j.options.ams_mapping.join(', ')):'External spool'}</small><small>${esc(j.id)} · Added by ${esc(j.author)}</small>${j.note?`<div class="job-note">${esc(j.note)}</div>`:''}</div><span class="state ${statusClass(j.status)}">${esc(j.status.replaceAll('_',' '))}</span><div class="job-actions">${buttons}</div></div>`;};
+  return `<div class="job-row"><div class="job-info"><strong>${j.demo?'🧪 DEMO · ':''}${esc(j.label)}</strong><small>${esc(printerLabel(j.printer))} · Plate ${j.options.plate} · ${j.options.use_ams?'AMS '+esc(j.options.ams_mapping.join(', ')):'External spool'} · Priority ${j.options.priority||5}</small><small>${esc(j.id)} · Added by ${esc(j.author)}</small>${j.note?`<div class="job-note">${esc(j.note)}</div>`:''}</div><span class="state ${statusClass(j.status)}">${esc(j.status.replaceAll('_',' '))}</span><div class="job-actions">${buttons}</div></div>`;};
  $('jobs').innerHTML=jobs.filter(j=>!terminal.has(j.status)).map(row).join('')||'<div class="empty">The queue is clear. Add a print here or use /queueadd in Discord.</div>';
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
 }
 async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;$('connectionBanner').hidden=true;render();}catch(e){if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
-function confirmAction(title,text,label,callback){$('confirmTitle').textContent=title;$('confirmText').textContent=text;$('confirmLabel').textContent=label;$('confirmCheck').checked=false;pendingConfirmation=callback;$('confirmDialog').showModal();}
+// No confirmation screens in the dashboard: every action runs straight away (the server still checks it is safe,
+// e.g. temperature limits and an idle printer for moves). Discord keeps its confirmations.
+async function confirmAction(title,text,label,callback){notice(title.replace(/\?$/,'')+'…');try{await callback();await refresh();}catch(e){notice(e.message);}}
 function renderDetails(){if(typeof renderDevice==='function')renderDevice();}
 function fmtMinutes(v){const n=Number(v);if(v===null||v===undefined||v===''||!Number.isFinite(n))return '';return n>=60?Math.floor(n/60)+' h '+n%60+' min':n+' min';}
 function miniSwatches(d){const ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),trays=(ams.ams||[]).flatMap(u=>(u.tray||[]).map(t=>t));trays.push(...(Array.isArray(d.vir_slot)&&d.vir_slot.length?d.vir_slot:d.vt_tray?[d.vt_tray]:[]));
@@ -102,8 +131,8 @@ function printerCard(x){
  if(active)actions+=actionButton('stop','■ Stop',n,'danger'+pendingClass('stop',x));
  actions+=actionButton(light?'lightoff':'lighton','💡',`${n} aria-label="Turn light ${light?'off':'on'}" aria-pressed="${light}" title="Chamber light"`,'icon-btn'+(light?' on':'')+(lt.busy?' pending':''));
  return `<article class="printer-card${x.connected?'':' offline'}" ${n} tabindex="0" role="button" aria-label="Open ${esc(x.display_name||x.name)}">
-<div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${statusClass(x.state,x.connected)}">${esc(x.connected?x.state:'OFFLINE')}</span></div>
-${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/${encodeURIComponent(x.name)}?t=${x.snapshot.time}" alt="${esc(x.display_name||x.name)} camera"><small class="pc-cam-time">📷 ${new Date(x.snapshot.time*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</small>`:`<small class="pc-cam-msg">${esc(x.snapshot?.error||'Waiting for the first snapshot…')}</small>`}</div>`:''}
+<div class="pc-head"><h3>${esc(x.display_name||x.name)}</h3><span class="state ${printerClass(x)}" title="${esc(x.state||'')}">${esc(x.connected?(x.display_state||x.state):'OFFLINE')}</span></div>
+${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/${encodeURIComponent(x.name)}?t=${x.snapshot.time}" data-printer="${esc(x.name)}" alt="${esc(x.display_name||x.name)} camera"><canvas class="pc-ai" aria-hidden="true"></canvas><small class="pc-cam-time">📷 ${new Date(x.snapshot.time*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</small>`:`<small class="pc-cam-msg">${esc(x.snapshot?.error||'Waiting for the first snapshot…')}</small>`}</div>`:''}
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
@@ -153,9 +182,10 @@ function renderPlates(){const sliced=jobUpload.plates.filter(p=>p.sliced);if(!sl
  $('jobPlates').hidden=false;applyStyles($('jobPlates'));suggestAms();}
 $('jobPlates').addEventListener('click',e=>{const b=e.target.closest('[data-plate]');if(!b||b.disabled)return;jobPlate=Number(b.dataset.plate);renderPlates();});
 $('jobPrinter').addEventListener('change',()=>{if(jobUpload)suggestAms();renderPrintNowOverride();});
-// One Start / Print now button (#65): when the printer reports FAILED or an error code, the same button asks whether to
+// One Start / Print now button (#65): when the printer reports an error code, the same button asks whether to
 // start anyway (bypassing the management error check for that one attempt) instead of offering a second button.
-function printerError(name){const p=state?.printers.find(x=>x.name===name);return p&&p.connected&&(p.state==='FAILED'||p.error)?p:null;}
+// Only a reported error code counts: FAILED by itself just means the last print failed or was cancelled (ready).
+function printerError(name){const p=state?.printers.find(x=>x.name===name);return p&&p.connected&&p.error?p:null;}
 function errorText(p){return p.error?'error '+(p.error_text||p.error):p.state;}
 function renderPrintNowOverride(){const p=printerError($('jobPrinter').value);$('printNow').textContent=p?'Print now (printer reports an error)…':'Print now';$('printNow').classList.toggle('danger',!!p);}
 async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUpload.asset,printer=$('jobPrinter').value;$('jobAmsHint').textContent='Checking the AMS on that printer…';
@@ -165,7 +195,7 @@ async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUploa
   if(r.complete){$('jobAms').checked=true;$('jobMapping').value=r.mapping;}
   $('jobAmsHint').textContent=r.message+(r.rows.length?' '+r.rows.map(x=>`Filament ${x.filament} (${x.type||'?'}) → ${x.tray_label||'no matching slot'}`).join(' · '):'');}
  catch(e){$('jobAmsHint').textContent=e.message;}}
-function jobData(){const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value};
+function jobData(){const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value,priority:Number($('jobPriority').value)};
  if($('source').value==='upload'){if(!jobUpload)throw new Error($('jobFile').files[0]?'Wait for the file check to finish.':'Select a sliced .3mf file.');if(!jobPlate)throw new Error('Choose a plate.');data.asset=jobUpload.asset;data.plate=jobPlate;}
  else{data.remote=$('jobRemote').value;data.plate=Number($('jobPlate').value);}
  return data;}
@@ -198,7 +228,6 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  if(action==='resume'){await printAction(printer,'resume');return;}
  if(action==='stop'){confirmStop(printer);return;}
  if(action==='clearerrors'){confirmClearAlerts(printer,'all');return;}
- if(action==='swapapprove'){openSwapApproval(job);return;}
  if(action==='sendto'){openSendTo(job);return;}
  if(action==='start'){const j=state.jobs.find(x=>x.id===job),bad=printerError(j.printer);
   if(bad){confirmAction('Start next, ignoring the reported error?',`${j.label} on ${printerLabel(j.printer)}. The printer reports ${errorText(bad)}. This bypasses the management error check for this start and allows a FAILED state. It does not clear the printer error or override firmware protections.`,'I inspected the printer, cleared the plate, and verified the material and sliced file. Start despite the reported error.',()=>api('jobs/'+job+'/start',{confirmed:true,override_error:true}));return;}confirmAction('Start next print?',`${j.label} on ${printerLabel(j.printer)}. Plate ${j.options.plate}. ${j.options.use_ams?'AMS mapping: '+j.options.ams_mapping.join(', '):'External spool'}.`,'The plate is clear, the correct material is loaded, and this file was sliced for this printer.',()=>api('jobs/'+job+'/start',{confirmed:true}));return;}
@@ -208,7 +237,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  await refresh();
  }catch(e){notice(e.message);}});
 $('takeSnapshot').onclick=async()=>{$('takeSnapshot').disabled=true;$('cameraMessage').textContent='Requesting snapshot…';try{const r=await fetch('/api/camera/'+encodeURIComponent(selectedPrinter));if(!r.ok){const data=await r.json();throw new Error(data.error||'Camera unavailable.');}if(cameraUrl)URL.revokeObjectURL(cameraUrl);cameraUrl=URL.createObjectURL(await r.blob());$('cameraImage').src=cameraUrl;$('cameraImage').hidden=false;$('cameraMessage').textContent='Snapshot captured '+new Date().toLocaleTimeString();}catch(e){$('cameraMessage').textContent=e.message;}finally{$('takeSnapshot').disabled=false;}};
-$('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value});notice('Settings saved.');}catch(e){notice(e.message);}};
+$('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value,alert_ping_users:$('alertPingUsers').value});notice('Settings saved.');}catch(e){notice(e.message);}};
 $('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';showLogin();}catch(e){notice(e.message);}};
 $('testNotification').onclick=async()=>{try{await api('testnotification',{});notice('Test requested. Check Discord and the activity feed.');}catch(e){notice(e.message);}};
 refresh();setInterval(()=>{if(state&&!document.hidden)refresh();},5000);
@@ -277,4 +306,40 @@ $('alertTargets').addEventListener('click',async e=>{const f=e.target.closest('.
  if(e.target.closest('[data-alert-test]')){const b=e.target;b.disabled=true;try{const r=await api('alerttargets/test',{id:alertTargets[i].id});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Test: '+r.result;}catch(err){$('alertsStatus').textContent=err.message;}finally{b.disabled=false;}}});
 $('alertsForm').onsubmit=async e=>{e.preventDefault();try{const r=await api('alerttargets',{targets:readAlertTargets()});alertTargets=r.targets;renderAlertTargets();$('alertsStatus').textContent='Saved. Use Send test to check each target.';}catch(err){$('alertsStatus').textContent=err.message;}};
 const tabWithAlerts=tab;tab=function(name){tabWithAlerts(name);if(name==='settings')loadAlertTargets();};
-
+// ---- Printers and the optional Discord bot, set up here (printer_setup.py, #8) ----
+let setupState=null,editingPrinter='';
+const CAMERA_NAMES={none:'no camera',jpeg_tcp:'JPEG camera',rtsp:'RTSP camera'};
+async function loadSetup(){try{setupState=await api('setup',undefined,'GET');renderSetup();}catch(e){$('printerStatus').textContent=e.message;}}
+function renderSetup(){const s=setupState;if(!s)return;
+ if($('printerModel').options.length===1)$('printerModel').insertAdjacentHTML('beforeend',s.models.map(m=>`<option value="${esc(m.key)}">${esc(m.name)}</option>`).join(''));
+ $('setupPrinters').innerHTML=s.printers.map(p=>`<li><div><strong>${esc(p.name)}</strong><small>${esc(p.model_label)} · ${esc(p.ip)} · ${esc(CAMERA_NAMES[p.camera]||p.camera)}${p.has_access_code?'':' · no access code'}</small></div>`+
+  (p.source==='dashboard'?`<span><button type="button" data-edit-printer="${esc(p.name)}">Edit</button> <button type="button" class="danger" data-remove-printer="${esc(p.name)}">Remove</button></span>`:'<small class="muted">set in config.json</small>')+'</li>').join('')
+  ||'<li class="muted">No printers yet. Add your first printer below.</li>';
+ $('restartNote').hidden=!s.pending_restart;document.querySelector('[data-restart-note]').hidden=!s.pending_discord;
+ document.querySelectorAll('[data-restart]').forEach(b=>{b.disabled=!s.can_restart;b.title=s.can_restart?'':'Restart the app yourself: it is not run by systemd here.';});
+ const d=s.discord;$('discordSetupSummary').textContent=d.has_token?(d.connected?'Discord bot connected':'Discord bot set up (not connected yet)'):'Connect a Discord bot';
+ $('discordStatus').textContent=d.token_in_config?'The bot token is set in config.json; change it there.':d.saved_token?'A bot token is saved. Leave the token blank to keep it.':'';
+ if(document.activeElement!==$('discordGuilds'))$('discordGuilds').value=d.guild_ids.join('\n');$('discordGuilds').disabled=d.guilds_in_config;
+ $('discordToken').disabled=$('discordClearToken').disabled=d.token_in_config;}
+function printerForm(p){editingPrinter=p?.name||'';$('printerFormTitle').textContent=p?`Edit ${p.name}`:'Add a printer';$('printerSave').textContent=p?'Save changes':'Add printer';
+ $('printerName').value=p?.name||'';$('printerName').readOnly=!!p;$('printerIp').value=p?.ip||'';$('printerSerial').value=p?.serial||'';$('printerCode').value='';
+ $('printerCode').placeholder=p?'Blank keeps the saved code':'8 characters';$('printerCode').required=!p;
+ const key=p&&setupState?.models.find(m=>m.name===p.model)?.key;$('printerModel').value=key||'';$('printerCamera').value=p?(p.camera||'none'):'auto';
+ $('printerCancel').hidden=!p;$('printerStatus').textContent='';}
+$('printerForm').onsubmit=async e=>{e.preventDefault();const b=$('printerSave');b.disabled=true;
+ try{setupState=await api('setup/printer',{name:$('printerName').value,ip:$('printerIp').value,serial:$('printerSerial').value,access_code:$('printerCode').value,
+   model:$('printerModel').value,camera:$('printerCamera').value,edit:!!editingPrinter});
+  const saved=$('printerName').value.trim();printerForm(null);renderSetup();$('printerStatus').textContent=`${saved} saved. Restart to connect to it.`;}
+ catch(err){$('printerStatus').textContent=err.message;}finally{b.disabled=false;}};
+$('printerCancel').onclick=()=>printerForm(null);
+$('setupPrinters').addEventListener('click',async e=>{const edit=e.target.closest('[data-edit-printer]'),remove=e.target.closest('[data-remove-printer]');
+ if(edit){printerForm(setupState.printers.find(p=>p.name===edit.dataset.editPrinter));$('printerIp').focus();}
+ if(remove)try{setupState=await api('setup/printer/remove',{name:remove.dataset.removePrinter});renderSetup();$('printerStatus').textContent=`${remove.dataset.removePrinter} removed. Restart to apply.`;}catch(err){$('printerStatus').textContent=err.message;}});
+$('discordSave').onclick=async()=>{const b=$('discordSave');b.disabled=true;
+ try{setupState=await api('setup/discord',{token:$('discordToken').value,clear_token:$('discordClearToken').checked,guild_ids:$('discordGuilds').value});
+  $('discordToken').value='';$('discordClearToken').checked=false;renderSetup();notice('Discord connection saved. Restart to apply.');}
+ catch(err){$('discordStatus').textContent=err.message;}finally{b.disabled=false;}};
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-restart]');if(!b)return;b.disabled=true;
+ try{const r=await api('setup/restart',{});notice(r.message);}catch(err){notice(err.message);b.disabled=false;}});
+$('setupAddPrinter').onclick=()=>{tab('settings');printerForm(null);$('printersPanel').scrollIntoView({behavior:'smooth',block:'start'});$('printerName').focus();};
+const tabWithSetup=tab;tab=function(name){tabWithSetup(name);if(name==='settings')loadSetup();};

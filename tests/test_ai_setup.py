@@ -78,7 +78,7 @@ class ModelFetchTests(unittest.TestCase):
     def test_no_release_keeps_what_is_there(self):
         (self.models/'print_failure.onnx').write_bytes(b'local')
         meta,found=self.fetch(FakeGitHub())
-        self.assertEqual(found,{'onnx':self.models/'print_failure.onnx'});self.assertEqual(meta['labels'],['spaghetti','warping'])
+        self.assertEqual(found,{'onnx':self.models/'print_failure.onnx'});self.assertEqual(meta['labels'],['spaghetti','stringing','warping'])   # stringing counts too
 
     def test_no_hef_without_a_working_hat(self):
         _,found=self.fetch(FakeGitHub(asset('print_failure.onnx',b'm'),asset('print_failure_hailo8.hef',b'h')),chip='')
@@ -109,7 +109,7 @@ class ConfigTests(unittest.TestCase):
             path=Path(d)/'config.json';path.write_text(json.dumps({'port':8080,'printers':[]}));os.chmod(path,0o640)
             self.assertTrue(setup_ai.configure(path,Path('/opt/m/print_failure.onnx'),dict(setup_ai.DEFAULT_META)))
             section=json.loads(path.read_text())['failure_detection']
-            self.assertEqual((section['enabled'],section['action'],section['threshold'],section['labels']),(True,'notify',0.4,['spaghetti','warping']))
+            self.assertEqual((section['enabled'],section['action'],section['threshold'],section['labels']),(True,'notify',0.4,['spaghetti','stringing','warping']))
             self.assertEqual(os.stat(path).st_mode&0o777,0o640);self.assertEqual(json.loads(path.read_text())['port'],8080)
             mine=json.loads(path.read_text());mine['failure_detection']['action']='pause';path.write_text(json.dumps(mine))
             self.assertFalse(setup_ai.configure(path,Path('/other.onnx'),dict(setup_ai.DEFAULT_META)))

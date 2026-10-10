@@ -2,7 +2,7 @@
 
 The dashboard is served by the Pi at `http://<address>:8080`. It's protected by a single shared password: **anyone who signs in has full management access**, so give the password only to people who should manage printers. Sessions last 12 hours.
 
-The page refreshes printer data every 5 seconds and works on phones as well as desktops.
+The page refreshes printer data every 5 seconds and works on phones as well as desktops. On Windows laptops, the [desktop app](desktop-app.md) shows the dashboard in its own window, with a tray icon for the printers and pop-ups for its notifications.
 
 - [Overview](#overview)
 - [Printer details](#printer-details)
@@ -12,6 +12,21 @@ The page refreshes printer data every 5 seconds and works on phones as well as d
 - [Laptops](#laptops)
 - [Server](#server)
 - [Settings & help](#settings--help)
+
+## Status icon
+
+The **3D** icon at the top left is the dashboard's status and notification icon.
+
+- **Its dot** shows the worst current state:
+  - **green:** all good;
+  - **blue, pulsing:** something is working, such as an update installing or an AI model downloading;
+  - **yellow:** something needs a look, such as a printer error, Discord offline, or an AI model that couldn't be set up;
+  - **red:** something failed, such as the last update.
+- **The red number** counts notifications you haven't seen yet.
+- **Click it** to open the panel:
+  - **Status:** the version, an available or installing update, AI model setup with its progress, the AI helper, printers reporting errors and Discord, worst first.
+  - **Notifications:** the last 50 alerts the app sent, the same ones Discord gets (print started, finished or failed, printer errors, AI alerts…), so they're visible without Discord too. Print progress keeps only the latest one per printer.
+- **Closing the panel,** or **Mark all read**, marks them as seen in this browser.
 
 ## Overview
 
@@ -36,7 +51,7 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 | Part | What it shows / does |
 |---|---|
 | Header | Name, state, a progress ring with layers and time left, and **Pause / Resume / Stop / light** |
-| Camera | Shows the latest still snapshot straight away. **▶** starts live view (about 1 frame per second) and **Stop live view** stops it. See [Printer controls & camera](printer-controls.md#camera). |
+| Camera | Shows the latest still snapshot straight away. **▶** starts live view (every new camera frame, with AI boxes) and **Stop live view** stops it. See [Printer controls & camera](printer-controls.md#camera). |
 | Temperature | Tiles for nozzle, bed and chamber. Tap a tile to type a new target. |
 | Print speed | Silent, Standard, Sport, Ludicrous |
 | Fans | A slider per fan, plus all fans. The fan is set when you let go of the slider. It shows *Setting…* until the printer reports the new speed. |
@@ -97,7 +112,8 @@ MeshCentral connection settings, the matching laptops with their online state, a
 
 | Panel | Use it to |
 |---|---|
-| Discord settings | Set the notification channel ID, the **commands channel ID** (replies are public there and private in every other channel) and **approved user IDs** (admins without Discord Administrator). **Send test notification** checks the channel. |
+| Printers | Add, edit and remove printers: name, IP address, serial number, access code, and optionally the model and camera type (otherwise worked out from the serial number). Access codes are never shown again (blank keeps the saved one). A printer can't be renamed here (use **Rename** for its display name), and can't be removed while it has queue jobs. Changes apply after **Restart now**. Printers from `config.json` are listed but changed there. A new installation shows a **Welcome** banner with **Add a printer** until the first printer is added. |
+| Discord (optional) | **Connect a Discord bot:** its token (never shown again) and your server IDs, applied with **Restart now**. Then the notification channel ID, the **commands channel ID** (replies are public there and private in every other channel), the people to ping for important alerts, and **approved user IDs** (admins without Discord Administrator). **Send test notification** checks the channel. See [Discord bot](discord.md). |
 | Other alerts | Send the same alerts as Discord to **Home Assistant**, **ntfy** (phone push), any **webhook**, or a **Discord channel webhook**, even without the Discord bot. See [Other alerts](#other-alerts). |
 | Discord command permissions | Choose who can use each Discord command: Everyone, Allowed roles + admins (with the **Allowed role IDs** list), Admins only, or Off. Commands marked 🔒 can only be admin-only or off. Opening an admin command to everyone asks for confirmation, and **Reset all to defaults** restores the defaults. See [Commands and permissions](commands.md). |
 | Dashboard access | Change the dashboard password (12+ characters). This signs everyone out. |

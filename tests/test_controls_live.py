@@ -55,13 +55,20 @@ class ControlsTests(unittest.TestCase):
         self.assertFalse(axis_ctrl_supported({}));self.assertFalse(axis_ctrl_supported({'fun':'garbage'}))
         self.assertFalse(axis_ctrl_supported({'fun':format((1<<38)-1,'X')}));self.assertTrue(axis_ctrl_supported({'fun':'4000000000'}))
     def test_move_rechecks(self):
-        for state in ['RUNNING','PAUSE','PREPARE','FAILED','unknown']:
+        for state in ['RUNNING','PAUSE','PREPARE','unknown']:
             self.core.state_data=lambda n,s=state:(s,0,{},True)
             with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',1,'X',True,True)
+        self.core.state_data=lambda n:('FAILED',0x0300800A,{},True)   # FAILED with an error code still blocks
+        with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',1,'X',True,True)
         self.core.state_data=lambda n:('IDLE',0,{},True)
         self.core.last_seen['A1 Mini']=time.time()-60
         with self.assertRaises(ValueError):self.controls.apply('A1 Mini','move',1,'X',True,True)
         self.client.publish.assert_not_called()
+    def test_failed_without_an_error_is_idle_and_review_jobs_dont_block(self):
+        # Bambu printers keep reporting FAILED after a cancelled or failed print while idle and ready.
+        self.core.state_data=lambda n:('FAILED',0,{},True);self.store.jobs=lambda:[{'printer':'A1 Mini','status':'needs_review'}]
+        self.controls.apply('A1 Mini','move',1,'X',True,True)
+        self.client.publish.assert_called()
     def test_home_uses_g28_or_back_to_center(self):
         # No "already homed" confirmation is needed to home.
         self.controls.apply('A1 Mini','home',None,None,True,False)
@@ -74,7 +81,7 @@ class ControlsTests(unittest.TestCase):
         self.assertEqual(json.loads(self.client.publish.call_args.args[1])['print']['command'],'back_to_center')
     def test_home_blocked_while_printing_or_unconfirmed(self):
         with self.assertRaises(ValueError):self.controls.apply('A1 Mini','home',None,None,False)
-        for state in ['RUNNING','PAUSE','PREPARE','FAILED']:
+        for state in ['RUNNING','PAUSE','PREPARE']:
             self.core.state_data=lambda n,s=state:(s,0,{},True)
             with self.assertRaisesRegex(ValueError,'Homing requires'):self.controls.apply('A1 Mini','home',None,None,True)
         self.core.state_data=lambda n:('IDLE',0,{},True);self.store.jobs=lambda:[{'printer':'A1 Mini','status':'printing'}]

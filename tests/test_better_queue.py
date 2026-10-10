@@ -155,7 +155,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
     async def test_print_now_can_ignore_a_failed_state_or_error(self):
         asset=(await (await self.upload(make_3mf(Path(self.tmp.name)/'part.3mf'))).json())['asset']
         body={'printer':'Mini','label':'Again','asset':asset,'plate':1,'print_now':True,'confirmed':True}
-        for state,error,expected in (('FAILED',0,'FAILED'),('IDLE',0x0300800A,'error')):
+        for state,error,expected in (('RUNNING',0,'RUNNING'),('IDLE',0x0300800A,'error')):   # FAILED alone is ready now
             self.state,self.error=state,error
             r=await self.client.post('/api/jobs',json=body,headers=self.headers)
             self.assertEqual(r.status,400);self.assertIn(expected,(await r.json())['error'])

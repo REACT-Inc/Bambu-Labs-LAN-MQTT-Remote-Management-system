@@ -160,7 +160,7 @@ class TestRunTests(unittest.TestCase):
 
     def test_labels_and_section(self):
         self.assertEqual(m.trigger_labels(['spaghetti','stringing','warping'],['warping','blob']),['warping'])
-        self.assertEqual(m.trigger_labels(['spaghetti','stringing','warping'],[]),['spaghetti','warping'])
+        self.assertEqual(m.trigger_labels(['spaghetti','stringing','warping'],[]),['spaghetti','stringing','warping'])
         self.assertEqual(m.trigger_labels(['fail'],['spaghetti']),['fail'])
         same={'model':'/m/print_failure.onnx','classes':['spaghetti','stringing','warping'],'labels':['spaghetti'],'threshold':0.4}
         self.assertEqual(m.new_section(same,'/m/print_failure.hef',same['classes'],640),{**same,'model':'/m/print_failure.hef'})

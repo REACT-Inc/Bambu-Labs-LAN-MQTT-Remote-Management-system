@@ -25,6 +25,10 @@ from object_skip import ObjectSkip
 from queueing import MAX_UPLOAD, options, validate_archive
 import diagnostics
 from issue_reports import IssueReports
+from status_center import StatusCenter
+from printer_setup import Setup
+from Updater.web_updates import BUSY as UPDATE_BUSY
+from Updater.version import VERSION
 
 
 def password_hash(password, salt=None):
@@ -49,6 +53,7 @@ class Dashboard:
     def __init__(self, core, store, engine):
         self.core, self.store, self.engine = core, store, engine
         self.sessions, self.failures = {}, {}
+        self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
         self.file_browser = Browser(core)
         self.controls = Controls(core,store)
         self.objects = ObjectSkip(core,store,self.controls)   # cancel single objects mid-print
@@ -64,6 +69,7 @@ class Dashboard:
         self.updater = WebUpdates(self)
         self.github_updater = GitHubUpdates(self)
         self.issue_reports = IssueReports(core, store, self.app)
+        self.setup = Setup(core, store, self.app)   # printers and the optional Discord bot, set up here (#8)
         try:self.release=json.loads((Path(__file__).parent/'release.json').read_text()).get('id','')
         except (OSError,ValueError):self.release=''
         self.app.on_shutdown.append(self.cameras.close)
@@ -72,8 +78,15 @@ class Dashboard:
         self.alerts = engine.alerts = core.printer_alerts = Alerts(core, store)
         self.alert_targets = core.alert_targets = AlertTargets(core, core.log)   # Home Assistant, ntfy, webhooks (#9)
         self.app.on_cleanup.append(self.alert_targets.close)
+        # The top-left status icon: updates, AI model setup, problems, and the notifications sent (status_center.py).
+        self.status = core.status_center = StatusCenter({getattr(core, color, None): level for color, level in (('RED', 'error'), ('YELLOW', 'warn'), ('GREEN', 'ok'), ('BLUE', 'info'))})
+        for source in (self.update_status, self.ai_status, self.problem_status):
+            self.status.add_source(source)
         self.failure = FailureMonitor(core, engine)
         core.failure_monitor = self.failure   # Discord /printer shows the AI watch line (#70)
+        self.cameras.scorer = self.failure.live   # AI boxes on every live-view frame
+        self.cameras.drawer = self.failure.drawn   # ... drawn onto the frames of the raw live stream (/api/live)
+        self.snapshots.ai = self.failure.look   # ... and on every dashboard still
         self.app.on_startup.append(self.failure.start);self.app.on_shutdown.append(self.failure.stop)
         self.app.add_routes([
             web.get('/api/liveframe/{name}',self.cameras.frame_response),
@@ -87,12 +100,12 @@ class Dashboard:
             web.post('/api/ai/{name}/reprint',self.ai_reprint),
             web.post('/api/ai/{name}/test',self.ai_test),
             web.post('/api/ai/{name}/check',self.ai_check),
-            web.post('/api/ai/{name}/tuning',self.ai_tuning),
+            web.post('/api/ai/{name}/tuning',self.ai_tuning),web.post('/api/ai-labels',self.ai_labels),web.post('/api/ai/{name}/bed',self.ai_bed),
             web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
-            web.get('/api/state', self.state), web.post('/api/upload', self.upload),
+            web.get('/api/state', self.state), web.get('/api/desktop', self.desktop), web.post('/api/upload', self.upload),
             web.post('/api/jobs', self.add_job), web.post('/api/jobs/{id}/{action}', self.job_action),
             web.get('/api/jobs/{id}/targets', self.job_targets),
             web.get('/api/uploads/{asset}/plate/{index}', self.upload_thumbnail),
@@ -157,12 +170,16 @@ class Dashboard:
 
     async def ai_reprint(self, request):
         """Automatic reprint (#67): now = reprint the AI-paused job elsewhere at once; cancel = stop the countdown;
-        check = which printers could take it (uses the cameras)."""
+        check = which printers could take it (uses the cameras); available = mark another printer available (override)."""
         name=request.match_info['name']
         if name not in self.core.names():raise ValueError('Unknown printer.')
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
-        action=(await request.json()).get('action')
+        data=await request.json();action=data.get('action')
         reprints=self.failure.reprints
+        if action=='available':   # "Mark available": someone looked at that printer (target) and vouches for it
+            if type(data.get('on')) is not bool:raise ValueError('Say whether to mark the printer available.')
+            reprints.mark(data.get('target'),data['on'],'web administrator')   # the lists shown update without a camera
+            return web.json_response(self.failure.state(name))
         if action=='now':
             copy=await reprints.reprint(name,'web administrator')
             return web.json_response({'ok':True,'job':copy['id'],'printer':copy['printer']})
@@ -199,6 +216,30 @@ class Dashboard:
         self.failure.set_tuning(name,data)
         return web.json_response(self.failure.state(name))
 
+    async def ai_bed(self, request):
+        """Is the bed clear? (the bed check AI, or the picture comparison while it's learning), and the answer to it."""
+        name=request.match_info['name']
+        if name not in self.core.names():raise ValueError('Unknown printer.')
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        data=await request.json()
+        if data.get('action')=='answer':
+            if type(data.get('clear')) is not bool:raise ValueError('Say whether the bed was clear.')
+            if not self.failure.bed.ready:raise ValueError('The bed check AI is not set up yet.')
+            counts=self.failure.bed.answer(name,data['clear'],request['session'].get('name','dashboard'))
+            self.failure.store_event(name,'Bed check answer','Clear' if data['clear'] else 'Not clear')
+            return web.json_response({'counts':counts})
+        if data.get('action')!='check':raise ValueError('Unknown action.')
+        result=await self.failure.reprints.bed_state(name,refresh=True)
+        return web.json_response(dict(result,can_answer=self.failure.bed.ready and name in self.failure.bed.last))
+
+    async def ai_labels(self, request):
+        """Which classes count as a failure, for all printers (e.g. stringing too)."""
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        data=await request.json()
+        if 'labels' in data:self.failure.set_labels(data.get('labels'))
+        if 'action' in data:self.failure.set_action(data.get('action'))
+        return web.json_response({'ok':True})
+
     async def ai_training(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
         return web.json_response(await asyncio.to_thread(self.failure.training.summary))
@@ -219,6 +260,7 @@ class Dashboard:
     async def list_objects(self, request):
         name=request.match_info['name']
         if name not in self.core.names():raise ValueError('Unknown printer.')
+        await self.objects.fetch(name)   # a print started elsewhere: copy its file from the printer once
         # The queue database is only used from this thread; reading slice_info.config is small (capped at 4 MB).
         result=self.objects.objects(name)
         job=self.objects.job(name)
@@ -288,18 +330,80 @@ class Dashboard:
         self.sessions.pop(request.cookies.get('pm_session'),None)
         response=web.json_response({'ok':True});response.del_cookie('pm_session');return response
 
+    # ---- the status icon's live sources (status_center.py) ----
+
+    def update_status(self):
+        items, web_update = [], self.updater.read_status()
+        if web_update.get('state') in UPDATE_BUSY:
+            items.append(dict(key='update', title='Installing an update', detail=web_update.get('message', ''), level='busy'))
+        elif web_update.get('state') == 'failed' and time.time() - float(web_update.get('time') or 0) < 86400:
+            items.append(dict(key='update', title='The last update failed', detail=web_update.get('message', ''), level='error'))
+        github = self.github_updater.public()
+        if github['available']:
+            items.append(dict(key='release', title=f"Update {github['latest']} available", level='info',
+                              detail='It installs by itself when no printer is printing.' if github['automatic']
+                              else 'Install it under Settings & help → GitHub releases.'))
+        items.append(dict(key='version', title=f"Version {github['installed']}", detail=github['message'], level='ok'))
+        return items
+
+    def ai_status(self):
+        if not self.failure.enabled:
+            return []
+        about = self.failure.backend.describe() if hasattr(self.failure.backend, 'describe') else {}
+        if about.get('backend_note'):
+            return [dict(key='ai', title='AI failure detection: ' + about.get('backend', ''), detail=about['backend_note'],
+                         level='warn' if about.get('active_model') else 'error')]
+        return [dict(key='ai', title=f"AI failure detection on {about.get('backend') or 'starting'}",
+                     detail=about.get('active_model', ''), level='ok')]
+
+    def problem_status(self):
+        items = []
+        for name in self.core.names():
+            state, error, data, connected = self.core.state_data(name)
+            if error and connected:
+                text = self.core.printer_error_text(name, error, data) if hasattr(self.core, 'printer_error_text') else describe_error(error, data)
+                items.append(dict(key=f'printer:{name}', title=f"{self.core.display_name(name) if hasattr(self.core, 'display_name') else name} reports an error",
+                                  detail=text or '', level='warn', printer=name))
+        if getattr(self.core, 'DISCORD_BOT_TOKEN', '') and not self.core.EXAMPLE_MODE and not self.core.bot.is_ready():
+            items.append(dict(key='discord', title='Discord is offline', level='warn',
+                              detail='The bot is reconnecting. The dashboard and the other alerts keep working.'))
+        return items
+
+    def error_text(self, name, error, data):
+        if not (error or data.get('hms')):
+            return ''
+        return self.core.printer_error_text(name, error, data) if hasattr(self.core, 'printer_error_text') else describe_error(error, data)
+
     async def state(self, request):
         self.snapshots.touch()
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
-            discord=self.core.bot.is_ready(), printers=printers,jobs=jobs,events=self.store.events(),
-            settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)]},
+            discord=self.core.bot.is_ready(), discord_configured=bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
+            setup_needed=self.core.EXAMPLE_MODE and not getattr(self.core,'CONFIG',{}).get('demo'), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
+            settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)],
+                      # Discord IDs are sent as text: they are larger than JavaScript numbers can hold exactly.
+                      'alert_ping_users':[str(x) for x in self.core.settings.get('alert_ping_users') or []]},
             csrf=request['session']['csrf']))
+
+    async def desktop(self, request):
+        """What the desktop app's tray icon shows (desktop/): each printer's state and the status icon with its
+        notifications. Much smaller than /api/state, and unlike it a laptop polling this in the background doesn't count
+        as someone looking at the dashboard, so it doesn't keep the camera stills running."""
+        printers = []
+        for name in self.core.names():
+            state, error, data, connected = self.core.state_data(name)
+            printers.append(dict(
+                name=name, display_name=self.core.display_name(name) if hasattr(self.core, 'display_name') else name,
+                state=state, connected=connected, error_text=self.error_text(name, error, data),
+                display_state=self.core.display_state(state, error, connected) if hasattr(self.core, 'display_state') else state,
+                progress=data.get('mc_percent'), remaining=data.get('mc_remaining_time'), file=data.get('subtask_name') or ''))
+        return web.json_response(dict(application='3d-printer-management', version=VERSION, started=self.started,
+                                      demo=self.core.EXAMPLE_MODE, printers=printers, status=self.status.snapshot()))
 
     async def upload(self, request):
         if __import__('shutil').disk_usage(self.uploads).free < MAX_UPLOAD*2:
@@ -357,7 +461,7 @@ class Dashboard:
     def add(self, data, author):
         printer=data.get('printer')
         if printer not in self.core.names(): raise ValueError('Unknown printer.')
-        opts=options(data.get('plate',1),data.get('use_ams',False),data.get('mapping',''),data.get('bed','textured_plate'))
+        opts=options(data.get('plate',1),data.get('use_ams',False),data.get('mapping',''),data.get('bed','textured_plate'),data.get('priority'))
         asset=data.get('asset');remote=data.get('remote','')
         if bool(asset)==bool(remote): raise ValueError('Choose an uploaded file OR a path on the printer.')
         path=None
@@ -408,9 +512,7 @@ class Dashboard:
 
     async def job_action(self,request):
         data=await request.json();job_id=request.match_info['id'];action=request.match_info['action']
-        if action=='swapapprove':
-            self.engine.plate_swap.approve_job(job_id,data.get('confirmed'),'web administrator',data.get('plates'))
-        elif action=='start':
+        if action=='start':
             await self.engine.start(job_id,data.get('confirmed'),'web administrator',data.get('override_error',False))
         elif action=='resolve':
             self.engine.resolve(job_id,data.get('outcome'),data.get('confirmed'),'web administrator')
@@ -453,19 +555,29 @@ class Dashboard:
     async def plate_swap(self,request):
         name=request.match_info['name'];action=request.match_info['action'];data=await request.json()
         if name not in self.core.names():raise ValueError('Unknown printer.')
-        if action=='configure':
-            self.engine.plate_swap.configure(name,data.get('enabled'),data.get('model',''),data.get('spares'),data.get('confirmed'),'web administrator')
-        elif action=='check':
-            self.engine.ready(name)
-            self.engine.plate_swap.verify(name,data.get('confirmed'),'web administrator')
-        else:raise ValueError('Unknown plate-swap action.')
-        return web.json_response({'ok':True})
+        swap=self.engine.plate_swap
+        if action=='configure':   # Swapmod on/off
+            return web.json_response(swap.configure(name,data.get('enabled'),'web administrator'))
+        if action=='file':        # the swap print file: an upload from /api/upload
+            asset=str(data.get('asset',''))
+            if not __import__('re').fullmatch('[0-9a-f]{32}',asset): raise ValueError('Upload the swap print file first.')
+            path=self.uploads/(asset+'.3mf')
+            if not path.is_file(): raise ValueError('Upload not found.')
+            plate=int(data.get('plate') or 1);validate_archive(str(path),plate)
+            try:label=path.with_suffix('.name').read_text().strip()
+            except OSError:label='plate-swap.gcode.3mf'
+            return web.json_response(swap.set_file(name,path,label,plate,'web administrator'))
+        if action=='now':         # Swap plate now
+            job=await swap.swap_now(self.engine,name,'web administrator')
+            return web.json_response({'ok':True,'job':job['id'],**swap.state(name)})
+        raise ValueError('Unknown Swapmod action.')
 
     async def camera(self,request):
         name=request.match_info['name']
         if name not in self.core.names(): raise ValueError('Unknown printer.')
         image=await self.core.snapshot(name)
         if not image: raise web.HTTPNotFound(text='Camera unavailable.')
+        image=await self.failure.annotated(name,image) if self.failure.enabled else image   # with the AI's boxes
         return web.Response(body=image,content_type='image/jpeg')
 
     async def settings(self,request):
@@ -474,6 +586,12 @@ class Dashboard:
             value=data.get(key)
             updated[key]=int(value) if value else None
             if updated[key] is not None and updated[key]<=0: raise ValueError('IDs must be positive.')
+        # People to ping for important alerts: Discord user IDs, one per line or comma-separated.
+        people=[v.strip().strip('<@!>') for v in str(data.get('alert_ping_users','')).replace('\n',',').split(',') if v.strip()]
+        if any(not p.isdigit() or not 0<int(p)<2**63 for p in people) or len(people)>25:
+            raise ValueError('People to ping: up to 25 Discord user IDs (numbers), one per line.')
+        updated['alert_ping_users']=list(dict.fromkeys(int(p) for p in people))
+        updated.pop('alert_ping',None)
         ids=[int(v.strip()) for v in str(data.get('admin_user_ids','')).replace('\n',',').split(',') if v.strip()]
         if any(v<=0 for v in ids): raise ValueError('IDs must be positive.')
         updated['admin_user_ids']=ids

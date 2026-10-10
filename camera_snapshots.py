@@ -8,6 +8,10 @@ frame used up the browser's few connections to the dashboard, so control clicks 
 - it only runs while someone has the dashboard open (the page polls /api/state);
 - a camera that fails is skipped for a while instead of being retried straight away;
 - the browser only downloads the latest cached still, which never waits on a camera.
+
+Each still is shown with the AI's boxes for that very picture (when AI failure detection is on): the still is shown
+straight away, the AI looks at it, and its boxes are sent with that still's state once they're ready, so the browser
+draws them over it. Boxes are kept with the still they belong to and never shown on another one.
 """
 import asyncio
 import contextlib
@@ -25,6 +29,8 @@ class SnapshotRotation:
         self.retry_at = {}    # name -> monotonic time before which the camera is skipped
         self.viewed = None
         self.task = None
+        self.overlays = {}    # name -> (time of the still, the AI's boxes for it)
+        self.ai = None        # async (name, jpeg) -> AI boxes, or None; set by the dashboard (FailureMonitor.look)
 
     def touch(self):
         """Called whenever a dashboard polls /api/state: snapshots only run while someone is looking."""
@@ -39,7 +45,14 @@ class SnapshotRotation:
 
     def state(self, name):
         image, error = self.images.get(name), self.errors.get(name)
-        return {'time': image[1] if image else None, 'error': error[0] if error and (not image or error[1] > image[1]) else ''}
+        overlay = self.overlays.get(name)
+        return {'time': image[1] if image else None, 'error': error[0] if error and (not image or error[1] > image[1]) else '',
+                'ai': overlay[1] if image and overlay and overlay[0] == image[1] else None}
+
+    def overlay_for(self, name, picture):
+        """The AI's boxes when picture is this printer's latest still and the AI has looked at it, else None."""
+        image, overlay = self.images.get(name), self.overlays.get(name)
+        return overlay[1] if image and image[0] is picture and overlay and overlay[0] == image[1] else None
 
     async def capture(self, name):
         # Reuse a live view that's already streaming this printer: A1-family cameras accept one client at a time.
@@ -62,9 +75,17 @@ class SnapshotRotation:
         else:
             reason = 'Camera unavailable'
         if image:
-            self.images[name] = (image, time.time())
+            taken = time.time()
+            self.images[name] = (image, taken)   # shown straight away; the AI's boxes follow when it has looked
             self.errors.pop(name, None)
             self.retry_at.pop(name, None)
+            if self.ai:
+                try:
+                    overlay = await asyncio.wait_for(self.ai(name, image), self.timeout)
+                except Exception:
+                    overlay = None
+                if overlay is not None:
+                    self.overlays[name] = (taken, overlay)
         else:
             self.errors[name] = (reason + '; retrying in a few minutes.', time.time())
             self.retry_at[name] = time.monotonic() + self.backoff

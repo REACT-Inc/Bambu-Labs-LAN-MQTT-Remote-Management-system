@@ -142,14 +142,42 @@ Even 50–100 labelled pictures from your own cameras usually make a big differe
 
 ## AI boxes on the camera view
 
-A printer's camera view, live or still, shows what the AI found in the frame it checked last, with the same colours as **Test AI now**:
+Every camera picture you see shows what the AI found in that picture, with the same colours as **Check AI now**:
 
 - **Red:** a failure at or above the failure score.
 - **Yellow:** a failure at or above the keep-counting score.
 - **Blue:** a class that isn't a failure (for example `print`).
 - **🔍 AI zoom:** a dashed outline where the AI zooms in on the next checks.
 
-The corner label says how many seconds ago that frame was checked. With the AI HAT this is a few seconds, so the boxes can trail a moving toolhead slightly. Boxes older than 20 s (or three check intervals) aren't shown. Untick **AI boxes** under the picture to hide them; the choice is remembered in this browser.
+**Live view:** the AI looks at every new frame while you watch, printing or not, and each frame arrives together with its own boxes, so they follow a moving toolhead. The corner label says **AI live**.
+- **On the CPU** (no AI HAT): it looks at most every 3 seconds, so the Pi isn't overloaded. The picture keeps updating and the boxes follow when ready (**AI live · last look**).
+- **Display only:** these looks are never judged, saved or acted on. Failures are still judged by the regular checks (every 5 s with the AI HAT), so watching live doesn't make the AI pause sooner or more often.
+- **Load:** it only runs for printers someone is watching live, and stops with the live view.
+
+**Where the boxes are shown:**
+
+| View | Boxes |
+|---|---|
+| Printer panel, live view | Every frame, with that frame's own boxes (above). |
+| Printer panel, still picture | The boxes the AI found in that still (**AI · this picture**). |
+| Overview printer cards | The boxes the AI found in each card's still. |
+| More → **Take camera snapshot** | Drawn onto the picture. |
+| Discord `/printer` and notifications with a picture (including AI failure alerts) | Drawn onto the picture. |
+| The raw live stream (`/api/live/<printer>`) | Drawn onto every frame: with the AI HAT, each frame is one the AI looked at; on the CPU, its latest look. |
+| **Check AI now** | The fresh picture it checked, with its boxes, the areas it zoomed in on and a list of what it found. |
+
+- **Every still gets its own boxes.** The dashboard's stills (one printer at a time, while the dashboard is open) are each looked at by the AI, printing or not. A new still is shown straight away and its boxes appear a moment later, once the AI has looked at it.
+- **Boxes always belong to the picture shown.** A still the AI couldn't look at is shown without boxes, never with another picture's.
+- **No double work:** a picture the dashboard already had the AI look at (the latest still, or a live-view frame) goes to Discord with those boxes, without asking the AI again, so `/printer` still answers quickly.
+- **Display only:** like the live view, these looks are never judged, saved or acted on. They also never get in the way of the real checks: if a picture for display waits too long (15 s) it's shown or sent without boxes, and the AI still finishes that look before answering the next check.
+- **Always plain:**
+  - the pictures the AI itself judges;
+  - the training pictures;
+  - the calibration picture, where you click the bed's corners.
+- **Off:**
+  - when AI failure detection is off;
+  - when watching is turned off for that printer;
+  - in the dashboard only, untick **AI boxes** under the panel's picture. This hides them on the cards too, and is remembered in this browser.
 
 ## Comparing with the print file
 
@@ -239,7 +267,17 @@ The helper limits OpenCV to 2 threads, so the dashboard, MQTT and cameras stay r
 When the AI **pauses** a failing queue print, the job can carry on somewhere else:
 
 1. **The pause notification** says which printers could take it, for example *"Available for a reprint: Mini 2 (bed checked empty)"*, or why none can.
-2. **Countdown:** if nobody resumes or stops the paused print within **12 hours**, the app reprints the job on an available printer:
+2. **Countdown:** if nobody resumes or stops the paused print in time, the app reprints the job on an available printer. How long it waits is the job's **reprint priority**, chosen in **Queue a print** (or `/queueadd priority:`):
+
+   | Priority | Waits |
+   |---|---|
+   | 1 (urgent) | 5 minutes |
+   | 2 | 1 hour |
+   | 3 | 1.5 hours |
+   | 4 | 2 hours |
+   | 5 (default) | 2.5 hours |
+
+   When it's reprinted, the app:
    - it stops the paused print, so the printer doesn't sit paused and heated;
    - records the job as failed;
    - starts a copy on the chosen printer;
@@ -247,28 +285,58 @@ When the AI **pauses** a failing queue print, the job can carry on somewhere els
 3. **Reprint now:** open the printer → **More → AI failure watch → Reprint now…** does the same at once. **Cancel automatic reprint** stops the countdown, and **Check available printers** looks again.
 4. **No printer free when it's time:** it keeps waiting, tries again every minute, and tells you once why.
 
+**Mark available:** the reprint section lists every other printer, available or why not. If you've looked at a printer and know it's fine, press **Mark available** next to it, and it's used although the app can't confirm it. This works for:
+- a bed that isn't confirmed empty (or that the camera thinks has parts on it);
+- a printer model the app doesn't know;
+- filament that isn't an exact match: the closest loaded filaments are used, as long as every filament the plate needs is loaded.
+
+It never overrides what would make the print fail: a different printer model, a printer that's offline, printing or reporting an error, or one busy with another queue job. The mark ends as soon as that printer is seen printing (whether the print was started here, from Bambu Studio or on the printer's screen), or after 12 hours. **Undo** removes it sooner. Marking is instant: the list updates without looking at any camera, and the reprint itself checks everything again. Before the paused print is stopped, the app also checks that the copy can really be made, so a reprint that can't happen never leaves a stopped print behind. Marks are saved on the Pi and recorded in Activity, and the reprint notification says who marked the printer.
+
 **What makes a printer available:**
 - it's the **model the file was sliced for**;
 - it's online, idle or finished, with **no error** and **no active queue job**;
 - its loaded AMS filament matches the plate (or the job used the external spool);
 - its **bed is empty**, judged by the camera.
 
-**How the bed check works:** every time someone starts a print and confirms *"the plate is clear"*, the app takes a fresh picture of that empty bed. Later it compares a new picture with it, inside the calibrated bed outline when there is one, with lighting differences evened out.
+**How the bed check works:** the [bed check AI](#bed-check-ai-is-the-bed-empty) decides when it knows that printer's bed. Otherwise a picture comparison decides: every time a queue job starts, the app takes a picture of that empty bed (not for a Swapmod swap print, which starts with the finished part still on the bed). Later it compares a new picture with it, inside the calibrated bed outline when there is one, with lighting differences evened out.
 - It errs towards "parts on the bed": a printer with no empty-bed picture yet, or an unclear result, is never used automatically.
 - Calibrating the camera ([above](#comparing-with-the-print-file)) makes the check more precise.
 
 The countdown is saved in `/var/lib/3d-printer-management/ai-reprints.json`, so it survives restarts. It's only for prints the AI paused (`"action": "pause"`) and for queue jobs; a print started from Bambu Studio has no file on the Pi to reprint. Settings (optional), under `failure_detection`:
 
 ```json
-"auto_reprint": {"enabled": true, "after_hours": 12, "stop_original": true, "bed_threshold": 0.005}
+"auto_reprint": {"enabled": true, "after_hours": 2.5, "stop_original": true, "bed_threshold": 0.005}
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Offer and run automatic reprints. |
-| `after_hours` | `12` | How long a paused print waits before it's reprinted elsewhere. |
+| `after_hours` | `2.5` | The longest a paused print waits before it's reprinted elsewhere. Each job's reprint priority sets its wait, up to this. |
 | `stop_original` | `true` | Stop the paused print when reprinting. |
 | `bed_threshold` | `0.005` | Share of the bed that may differ from the empty-bed picture and still count as empty. |
+
+## Bed check AI: is the bed empty?
+
+A second AI model on the AI HAT, next to the failure model, that tells whether a printer's build plate is empty.
+
+**Setup is automatic.** The first time the service runs with an AI HAT, it downloads Hailo's own precompiled **CLIP** image model (`clip_resnet_50x4`) from the [Hailo Model Zoo](https://github.com/hailo-ai/hailo_model_zoo), built for this Pi's chip (Hailo-8 or Hailo-8L) and its HailoRT version. It's 65–125 MB and downloads in the background. The **status icon** at the top left of the dashboard shows the progress, then **Bed check AI ready**, or why it couldn't be set up (it tries again every hour). When HailoRT is updated (`apt upgrade`), the matching model is downloaded again; this is checked once a day.
+- **Why the Pi doesn't build the .hef itself:** Hailo's model compiler only runs on x86 PCs, not on a Raspberry Pi. The Model Zoo files are already compiled by Hailo, so nothing needs compiling.
+- **Only with the AI HAT.** On the CPU (`.onnx`), the picture comparison checks beds as before.
+- **Safe to add:** both models are loaded together, but only the failure model is active except for a moment during a bed check. If the bed model can't be loaded, failure detection carries on without it and the status icon says why.
+
+**It learns each printer's bed by itself.** CLIP turns a picture into a "fingerprint" of what's in it. Each printer keeps fingerprints of its own bed (the newest 30 of each kind, in `/var/lib/3d-printer-management/beds/`):
+- **Empty:** a picture when a queue job starts (the plate was just cleared).
+- **Parts on the bed:** a picture a few seconds after a queue print finishes.
+- **Your answers:** **Is the bed clear?** in the printer panel (**More → AI failure watch → Bed check**) checks it now. Answering **It's clear** or **Not clear** teaches it that picture.
+
+After 3 of each, a new picture is compared with the closest ones of each kind. If it's clearly closer to one kind, that's the answer. If it's too close to call, it says *not sure*, and the picture comparison decides. With a calibrated camera, only the bed area is compared.
+
+**Where it's used:**
+- **Swapmod:** after the swap print, if the AI is sure there are still parts on the plate, the next print isn't started. You're told, and you can start it from the queue after checking. When it's unsure or still learning, the queue carries on as before.
+- **Automatic reprint:** a printer is only "available" if its bed is empty, and the AI is asked first.
+- **Never on its own:** a "parts" or "not sure" answer never starts a print.
+
+Turn it off under `failure_detection`: `"bed_ai": {"enabled": false}`.
 
 ## Automatic model updates
 
@@ -424,6 +492,7 @@ Add a `failure_detection` section (see [Configuration](../docs/configuration.md#
 | `action` | `"notify"` | `"notify"` only reports; `"pause"` also pauses the print. |
 | `python` | `/usr/bin/python3` | The Python that has OpenCV (`.onnx`) or `hailo_platform` (`.hef`) installed. |
 | `input_size` | `640` | `.onnx` only: the image size the model was trained at. |
+| `bed_ai` | `{"enabled": true}` | The [bed check AI](#bed-check-ai-is-the-bed-empty) (AI HAT only). |
 
 Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 
@@ -431,6 +500,10 @@ Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 
 - **Printer card:** while watching a print, the card shows **🤖 AI watching**, **suspect frames**, **print may be failing** or **AI paused this print**, with the failing-frame count.
 - **Printer panel → More → AI failure watch:** the current status, the last score and a tick box to **turn watching off for that printer**. This is useful for a print that confuses the model. It's saved on the Pi and recorded in Activity.
+- **Check AI now** (one button, in the same place): the AI checks a fresh camera picture straight away and shows it with its boxes, the zoomed-in areas and a list of what it found.
+  - **While a print is running,** it's also a real check: it counts towards the failure rules. Because you asked for a decision, a picture at or above the failure score acts at once (pauses or alerts, as set) instead of waiting for several failing frames. A print that was already reported isn't acted on again.
+  - **Otherwise,** it only shows what the AI sees: nothing is paused or reported.
+  - **Either way,** the picture is kept as a training picture.
 - **Discord `/printer`:** an *AI failure watch* line.
 - **Notifications:** a red 🤖 message with the camera picture.
 

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect to your Pi · 3D Printer Management</title>
+<style>
+:root{color-scheme:dark;--bg:#101413;--panel:#19201e;--raised:#202925;--line:#303b36;--text:#edf5ef;--muted:#9daba3;--green:#baf778;--red:#ff9f99;font-family:Inter,"Segoe UI",ui-sans-serif,system-ui,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg) radial-gradient(ellipse at 80% 20%,#2c3c26 0,transparent 60%);color:var(--text);font-size:14px}
+.card{width:min(480px,100%);padding:35px;border:1px solid var(--line);border-radius:22px;background:var(--panel)}
+.mark{display:grid;place-items:center;background:var(--green);color:#15200e;font-size:24px;font-weight:850;width:64px;height:64px;border-radius:16px;letter-spacing:-2px;margin-bottom:28px}
+.eyebrow{font-size:10px;letter-spacing:1.8px;font-weight:650;color:var(--muted);margin:0 0 13px}
+h1{font-size:34px;letter-spacing:-1.4px;line-height:1.13;margin:0 0 14px}
+p{line-height:1.6;margin:0 0 14px}
+.muted,small{color:var(--muted)}
+label{display:block;margin:20px 0 6px;color:#c6d4ca}
+input{display:block;width:100%;font:inherit;background:#111815;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:11px;margin-top:7px}
+button{font:inherit;cursor:pointer;background:var(--raised);color:var(--text);border:1px solid var(--line);padding:11px 15px;border-radius:9px}
+button:hover{background:#303d35}
+button:disabled{opacity:.5;cursor:wait}
+button.primary{background:var(--green);color:#14200d;border-color:var(--green);font-weight:650}
+button.primary:hover{background:#d0ffa0}
+button.link{background:none;border:0;padding:0;color:var(--green);text-decoration:underline}
+button:focus-visible,input:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.hint{font-size:12px;margin-top:8px;line-height:1.5}
+#status{min-height:22px;margin:18px 0 0;line-height:1.5}
+#status.error{color:var(--red)}
+#found{list-style:none;padding:0;margin:14px 0 0}
+#found li{margin:0 0 8px}
+#found button{width:100%;text-align:left}
+#found small{display:block;margin-top:3px}
+footer{display:flex;justify-content:space-between;gap:12px;margin-top:26px;font-size:11px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="mark" aria-hidden="true">3D</div>
+  <p class="eyebrow">DESKTOP APP</p>
+  <h1>Connect to your Pi</h1>
+  <p class="muted">Enter the dashboard address the installer showed, the same one you'd open in a browser. You'll sign in with the dashboard password next.</p>
+  <form id="form" novalidate>
+    <label for="address">Dashboard address</label>
+    <input id="address" autocomplete="off" spellcheck="false" placeholder="192.168.1.50" required>
+    <p class="hint muted">For example <strong>192.168.1.50</strong>, or the Pi's Tailscale address such as <strong>100.101.102.103</strong>. Port 8080 is added for you.</p>
+    <div class="actions">
+      <button id="connect" class="primary" type="submit">Connect →</button>
+      <button id="find" type="button">Find it for me</button>
+      <button id="back" type="button" hidden>Back to the dashboard</button>
+    </div>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <ul id="found" aria-label="Dashboards found"></ul>
+  <footer class="muted"><span id="version"></span><span>Runs on your Raspberry Pi</span></footer>
+</main>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+let info = {}, retry = null, countdown = null;
+
+function say(text, error) {
+  $('status').textContent = text || '';
+  $('status').className = error ? 'error' : '';
+}
+function busy(on) {
+  for (const id of ['connect', 'find', 'back']) $(id).disabled = on;
+}
+function stopRetrying() {
+  clearTimeout(retry);
+  clearInterval(countdown);
+  retry = countdown = null;
+}
+async function call(name, ...args) {
+  try {
+    return await window.pywebview.api[name](...args);
+  } catch (error) {
+    return {ok: false, message: String((error && error.message) || error)};
+  }
+}
+
+async function connect(automatic) {
+  stopRetrying();
+  const address = $('address').value.trim();
+  if (!address) { say('Enter the address of your Pi, for example 192.168.1.50.', true); $('address').focus(); return; }
+  busy(true);
+  say('Connecting to ' + address + '…');
+  const result = await call('connect', address);
+  if (result.ok) {
+    say('Opening the dashboard…');
+    window.location.href = result.url;
+    return;
+  }
+  busy(false);
+  if (!automatic) { say(result.message, true); return; }
+  // On start-up the network may not be up yet (for example right after signing in to Windows): keep trying.
+  let seconds = 15;
+  const show = () => say(result.message + ' Trying again in ' + seconds + ' s.', true);
+  show();
+  countdown = setInterval(() => { seconds -= 1; if (seconds > 0) show(); }, 1000);
+  retry = setTimeout(() => connect(true), seconds * 1000);
+}
+
+async function find() {
+  stopRetrying();
+  busy(true);
+  $('found').replaceChildren();
+  say('Looking on this computer\'s networks and tailnet. This takes up to 15 seconds…');
+  const result = await call('find');
+  busy(false);
+  const found = result.found || [];
+  if (!found.length) {
+    say(result.message || 'No dashboard answered. Type the address the installer showed instead. (The search covers addresses like yours, ' +
+        'for example 192.168.1.1–254, and Tailscale devices if Tailscale is installed here.)', true);
+    return;
+  }
+  say(found.length === 1 ? 'Found one dashboard:' : 'Found ' + found.length + ' dashboards. Pick yours:');
+  for (const pi of found) {
+    const item = document.createElement('li'), button = document.createElement('button'), detail = document.createElement('small');
+    button.type = 'button';
+    button.textContent = pi.url;
+    detail.textContent = pi.name || 'On this network';
+    button.append(detail);
+    button.addEventListener('click', () => { $('address').value = pi.url; connect(false); });
+    item.append(button);
+    $('found').append(item);
+  }
+}
+
+async function ready() {
+  info = await call('start');
+  $('version').textContent = info.version ? 'Desktop app ' + info.version : '';
+  $('address').value = info.address || '';
+  $('back').hidden = !info.back;
+  if (info.auto) connect(true); else $('address').focus();
+}
+
+$('form').addEventListener('submit', event => { event.preventDefault(); connect(false); });
+$('find').addEventListener('click', find);
+$('back').addEventListener('click', () => { window.location.href = info.address + '/'; });
+$('address').addEventListener('input', stopRetrying);
+if (window.pywebview && window.pywebview.api && window.pywebview.api.start) ready();
+else window.addEventListener('pywebviewready', ready, {once: true});
+</script>
+</body>
+</html>

@@ -74,6 +74,36 @@ class CoreFixes(unittest.IsolatedAsyncioTestCase):
         self.assertIn('**Remaining:** 5 h 12 min',text);self.assertIn('**Nozzle:** 220°C',text);self.assertNotIn('219.96875',text)
 
 
+class ReadableStates(unittest.TestCase):
+    """FAILED and FINISH are what Bambu printers keep reporting while idle and ready after a print."""
+    def test_states_people_understand(self):
+        with tempfile.TemporaryDirectory() as d:
+            core=load_core(d)
+            self.assertEqual([core.display_state(s) for s in ('IDLE','FINISH','FAILED','RUNNING','PAUSE','PREPARE')],
+                             ['Ready','Ready','Ready','Printing','Paused','Preparing'])
+            self.assertEqual(core.display_state('FAILED',0x0300800A),'Error');self.assertEqual(core.display_state('IDLE',0,False),'Offline')
+            self.assertEqual(core.last_print_note('FAILED'),'last print failed or was cancelled');self.assertEqual(core.last_print_note('FAILED',5),'')
+            asyncio.run(core.bot.close())
+
+
+class AlertPings(unittest.TestCase):
+    """Important alerts ping only the people chosen in the dashboard: nobody by default, never @here/@everyone."""
+    def test_only_chosen_people_are_pinged(self):
+        with tempfile.TemporaryDirectory() as d:
+            core=load_core(d)
+            self.assertIsNone(core.ping_for('🤖 AI paused a failing print')[0])   # nobody by default
+            core.settings['alert_ping_users']=[111111111111111111,222222222222222222]
+            text,mentions=core.ping_for('🤖 AI: print may be failing')
+            self.assertEqual(text,'<@111111111111111111> <@222222222222222222>')
+            self.assertEqual([u.id for u in mentions.users],[111111111111111111,222222222222222222])
+            self.assertFalse(mentions.everyone);self.assertFalse(mentions.roles)
+            self.assertEqual(core.ping_for('🛑 Printer error')[0],text)
+            self.assertIsNone(core.ping_for('✅ Print complete')[0])          # routine updates stay quiet
+            core.settings['alert_ping']='everyone';core.settings['alert_ping_users']=[]
+            self.assertIsNone(core.ping_for('🛑 Printer error')[0])           # the old @here/@everyone setting is ignored
+            asyncio.run(core.bot.close())
+
+
 class OneStartButton(unittest.TestCase):
     """#65: the queue's Start next and the dialog's Print now are one button each, which asks to start anyway while
     the printer reports an error."""
