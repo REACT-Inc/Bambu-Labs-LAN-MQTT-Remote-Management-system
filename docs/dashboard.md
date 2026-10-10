@@ -2,7 +2,7 @@
 
 The dashboard is served by the Pi at `http://<address>:8080`. It's protected by a single shared password: **anyone who signs in has full management access**, so give the password only to people who should manage printers. Sessions last 12 hours.
 
-The page refreshes printer data every 5 seconds and works on phones as well as desktops.
+The page refreshes printer data every 5 seconds and works on phones as well as desktops. On Windows laptops, the [desktop app](desktop-app.md) shows the dashboard in its own window, with a tray icon for the printers and pop-ups for its notifications.
 
 - [Overview](#overview)
 - [Printer details](#printer-details)

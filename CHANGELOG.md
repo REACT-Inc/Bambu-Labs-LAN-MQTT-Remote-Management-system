@@ -2,6 +2,18 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.7.8)
+
+### Added
+- **Desktop app for Windows laptops:** `3d-printer-management-desktop.exe`, attached to each release. See [Desktop app](docs/desktop-app.md).
+  - **The dashboard in its own window:** connect to the Pi by its address, or let **Find it for me** look on the laptop's networks and tailnet. Then sign in with the dashboard password. The sign-in is kept between starts for the dashboard's 12-hour session, and no password is stored.
+  - **A tray icon:** it lists the printers (state, progress, time left, errors), and its dot shows the dashboard's status. Closing the window keeps the app running there; **Quit** is in its menu.
+  - **Pop-up notifications:** the dashboard's notifications (prints finished or failed, printer errors, queue reviews, AI alerts) pop up on the laptop. Choose all of them, all but the progress updates (the default), only problems, or none. Several at once become one pop-up.
+  - **Start with Windows,** in the tray, for this Windows user.
+  - **No installation:** one file, no administrator rights. It needs the Microsoft Edge WebView2 Runtime, which Windows 11 and up-to-date Windows 10 already have.
+- **`GET /api/desktop` on the Pi:** the small summary the desktop app's tray reads every 15 seconds, with the window's sign-in. Unlike an open dashboard, it doesn't keep the camera pictures running.
+- **Desktop app workflow:** pull requests that touch the app or the dashboard build the .exe on Windows and test it end to end against a demo Pi. The **Publish release** workflow builds, tests and attaches it to each release.
+
 ## 1.7.7-beta.1
 
 Built on 1.7.6-beta.1. Printers and the Discord bot are set up in the dashboard (Discord is now optional), AI boxes on every camera view, a reprint priority and **Mark available** for automatic reprints, and one **Check AI now** button.

@@ -28,6 +28,7 @@ from issue_reports import IssueReports
 from status_center import StatusCenter
 from printer_setup import Setup
 from Updater.web_updates import BUSY as UPDATE_BUSY
+from Updater.version import VERSION
 
 
 def password_hash(password, salt=None):
@@ -52,6 +53,7 @@ class Dashboard:
     def __init__(self, core, store, engine):
         self.core, self.store, self.engine = core, store, engine
         self.sessions, self.failures = {}, {}
+        self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
         self.file_browser = Browser(core)
         self.controls = Controls(core,store)
         self.objects = ObjectSkip(core,store,self.controls)   # cancel single objects mid-print
@@ -103,7 +105,7 @@ class Dashboard:
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
-            web.get('/api/state', self.state), web.post('/api/upload', self.upload),
+            web.get('/api/state', self.state), web.get('/api/desktop', self.desktop), web.post('/api/upload', self.upload),
             web.post('/api/jobs', self.add_job), web.post('/api/jobs/{id}/{action}', self.job_action),
             web.get('/api/jobs/{id}/targets', self.job_targets),
             web.get('/api/uploads/{asset}/plate/{index}', self.upload_thumbnail),
@@ -367,12 +369,17 @@ class Dashboard:
                               detail='The bot is reconnecting. The dashboard and the other alerts keep working.'))
         return items
 
+    def error_text(self, name, error, data):
+        if not (error or data.get('hms')):
+            return ''
+        return self.core.printer_error_text(name, error, data) if hasattr(self.core, 'printer_error_text') else describe_error(error, data)
+
     async def state(self, request):
         self.snapshots.touch()
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=(self.core.printer_error_text(name,error,data) if hasattr(self.core,"printer_error_text") else describe_error(error,data)) if error or data.get("hms") else "",connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
@@ -382,6 +389,21 @@ class Dashboard:
                       # Discord IDs are sent as text: they are larger than JavaScript numbers can hold exactly.
                       'alert_ping_users':[str(x) for x in self.core.settings.get('alert_ping_users') or []]},
             csrf=request['session']['csrf']))
+
+    async def desktop(self, request):
+        """What the desktop app's tray icon shows (desktop/): each printer's state and the status icon with its
+        notifications. Much smaller than /api/state, and unlike it a laptop polling this in the background doesn't count
+        as someone looking at the dashboard, so it doesn't keep the camera stills running."""
+        printers = []
+        for name in self.core.names():
+            state, error, data, connected = self.core.state_data(name)
+            printers.append(dict(
+                name=name, display_name=self.core.display_name(name) if hasattr(self.core, 'display_name') else name,
+                state=state, connected=connected, error_text=self.error_text(name, error, data),
+                display_state=self.core.display_state(state, error, connected) if hasattr(self.core, 'display_state') else state,
+                progress=data.get('mc_percent'), remaining=data.get('mc_remaining_time'), file=data.get('subtask_name') or ''))
+        return web.json_response(dict(application='3d-printer-management', version=VERSION, started=self.started,
+                                      demo=self.core.EXAMPLE_MODE, printers=printers, status=self.status.snapshot()))
 
     async def upload(self, request):
         if __import__('shutil').disk_usage(self.uploads).free < MAX_UPLOAD*2:

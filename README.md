@@ -3,6 +3,7 @@
 Self-hosted management for **Bambu Lab printers on your local network**. One service runs on a Raspberry Pi 4/5, **or any systemd-based Linux computer** (Ubuntu, Debian, Fedora, Arch, openSUSE…), and gives you:
 
 - a **web dashboard**, reachable over Tailscale or your LAN: everything is set up and done here, from adding printers to running the queue
+- a **desktop app for Windows laptops** (one `.exe`): the dashboard in its own window, with a tray icon for the printers and pop-up notifications
 - optionally, a **Discord bot** with slash commands and notifications in your server (connected from the dashboard)
 - optionally, alerts to **Home Assistant, ntfy and webhooks** (set up in the dashboard)
 
@@ -21,6 +22,7 @@ The dashboard and the bot share the same printer connections, print queues, file
 - **Printer controls:** pause/resume/stop, light, nozzle/bed/chamber temperatures, speed profile, fans, and axis jogging.
 - **Discord (optional):** about 50 slash commands and progress notifications with camera snapshots at every 10%. Printer and queue actions are open to every member with confirmation and logging, and admins can choose who may use each command.
 - **Team tools:** shared notes, DM reminders, report-writer assignment and practice schedules, channel archiving, MeshCentral laptop commands, and Pi status/reboot.
+- **Desktop app for Windows laptops:** the dashboard in its own window, plus a tray icon listing the printers (state, progress, time left, errors) and popping up the notifications: prints finished or failed, printer errors, AI alerts. It can start with Windows. See [Desktop app](docs/desktop-app.md).
 - **Operations:**
   - updates from the dashboard or GitHub releases, with stable/beta/alpha channels and automatic rollback
   - error logs with error IDs
@@ -39,6 +41,8 @@ sudo bash install.sh                               # uses the Pi's Tailscale add
 
 Save the **initial dashboard password** the installer prints, open the address it shows (`http://<address>:8080`), and change the password under **Settings & help**. Then press **Add a printer** and enter each printer's IP address, serial number and access code: no Discord or file editing needed. Full instructions, demo mode and migrating from the original Discord bot are in the [installation guide](docs/installation.md).
 
+On Windows laptops, you can also use the [desktop app](docs/desktop-app.md): download `3d-printer-management-desktop.exe` from the same release and enter the same address.
+
 ## Documentation
 
 The guides below are in the `docs/` folder of the [GitHub repository](https://github.com/REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system). Release ZIPs include only this README, the changelog and the files marked *(in release)*.
@@ -48,6 +52,7 @@ The guides below are in the `docs/` folder of the [GitHub repository](https://gi
 | [Installation](docs/installation.md) | Requirements, installing, network access, first login, demo mode, migrating from the old bot, uninstalling |
 | [Configuration](docs/configuration.md) | Every `config.json` setting, printer entries, files and folders, service commands, password reset |
 | [Web dashboard](docs/dashboard.md) | Each tab and what it does |
+| [Desktop app](docs/desktop-app.md) | The Windows app for laptops: download, connecting, the tray icon, notifications, Start with Windows |
 | [Discord bot](docs/discord.md) *(optional)* | Connecting a bot, all commands, reply visibility, notifications |
 | [Commands and permissions](docs/commands.md) | Every command's default permission, changing permissions in the dashboard, logging |
 | [Print queue](docs/print-queue.md) | Supported files, job states, starting prints safely, review and recovery |

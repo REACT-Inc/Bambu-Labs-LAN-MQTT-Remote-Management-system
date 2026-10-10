@@ -122,7 +122,8 @@ Releases are built and published by the **Publish release** GitHub Actions workf
 The workflow:
 1. runs the tests and syntax checks
 2. builds `3d-printer-management.zip` plus its `.sha256` file
-3. publishes them
+3. builds the [desktop app](desktop-app.md) for Windows laptops on a Windows machine, tests it end to end, and adds `3d-printer-management-desktop.exe` plus its `.sha256` file
+4. publishes them
 
 **Never reuse a tag.**
 

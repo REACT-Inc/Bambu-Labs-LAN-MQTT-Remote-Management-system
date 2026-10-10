@@ -5,11 +5,14 @@ from pathlib import Path
 ROOT=Path(__file__).parents[1]
 # Installed separately (root-owned updater) or only used to build releases.
 NOT_COPIED={'build_release.py','Updater/update_worker.py'}
+# Not part of the Pi's installation: the desktop app for laptops is built into its own .exe.
+NOT_ON_THE_PI=('desktop',)
 
 
 def runtime_python():
     return {p.relative_to(ROOT).as_posix() for p in ROOT.rglob('*.py')
-            if 'tests' not in p.relative_to(ROOT).parts and not any(part.startswith('.') or part in ('venv','__pycache__') for part in p.relative_to(ROOT).parts)}-NOT_COPIED
+            if 'tests' not in p.relative_to(ROOT).parts and p.relative_to(ROOT).parts[0] not in NOT_ON_THE_PI
+            and not any(part.startswith('.') or part in ('venv','__pycache__') for part in p.relative_to(ROOT).parts)}-NOT_COPIED
 
 
 class InstallListTests(unittest.TestCase):
