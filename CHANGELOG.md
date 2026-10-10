@@ -2,7 +2,7 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.7.8)
+## Unreleased (1.8.0)
 
 ### Added
 - **Desktop app for Windows laptops:** `3d-printer-management-desktop.exe`, attached to each release. See [Desktop app](docs/desktop-app.md).

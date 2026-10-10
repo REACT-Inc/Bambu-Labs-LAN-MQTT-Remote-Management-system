@@ -115,7 +115,7 @@ def summary(base, session, timeout=6):
         if exc.code == 401:
             raise SignedOut('Signed out of the dashboard.') from None
         if exc.code == 404:
-            raise TooOld('Update the Pi to version 1.7.8 or newer to see the printers here.') from None
+            raise TooOld('Update the Pi to version 1.8.0 or newer to see the printers here.') from None
         raise PiError(f'The Pi answered with an error (HTTP {exc.code}).') from None
     except (urllib.error.URLError, OSError) as exc:
         raise PiError(f"Can't reach the Pi ({_reason(exc)}).") from None

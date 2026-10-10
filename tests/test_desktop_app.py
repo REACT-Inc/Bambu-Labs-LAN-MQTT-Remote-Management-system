@@ -448,15 +448,15 @@ class IconAndBuildTests(unittest.TestCase):
 
     def test_build_inputs(self):
         import build
-        self.assertEqual(build.version_numbers('v1.7.8-beta.1'), (1, 7, 8, 1))
+        self.assertEqual(build.version_numbers('v1.8.0-beta.1'), (1, 8, 0, 1))
         self.assertEqual(build.version_numbers('v2.0.0'), (2, 0, 0, 0))
         self.assertEqual(build.version_numbers('dev'), (0, 0, 0, 0))
         with tempfile.TemporaryDirectory() as folder:
             work = Path(folder)
-            build.prepare('v1.7.8-beta.1', work)
-            self.assertEqual((work / '_version.py').read_text(), "VERSION = '1.7.8-beta.1'\n")
+            build.prepare('v1.8.0-beta.1', work)
+            self.assertEqual((work / '_version.py').read_text(), "VERSION = '1.8.0-beta.1'\n")
             info = (work / 'version_info.txt').read_text()
-            self.assertIn('filevers=(1, 7, 8, 1)', info)
+            self.assertIn('filevers=(1, 8, 0, 1)', info)
             self.assertIn("StringStruct('FileDescription', '3D Printer Management')", info)
             self.assertTrue((work / 'icon.ico').stat().st_size > 1000)
             command = build.command(work, work / 'dist')
@@ -608,9 +608,9 @@ class WindowAndTrayTests(unittest.TestCase):
                 patch.object(pi_client, 'check', side_effect=pi_client.PiError('down')):
             self.assertEqual(self.app.poll(), self.module.UNREACHABLE_EVERY)
         self.assertEqual(self.app.problem, "Can't reach the Pi")
-        with patch.object(pi_client, 'summary', side_effect=pi_client.TooOld('Update the Pi to version 1.7.8')):
+        with patch.object(pi_client, 'summary', side_effect=pi_client.TooOld('Update the Pi to version 1.8.0')):
             self.app.poll()
-        self.assertEqual(self.app.problem, 'Update the Pi to version 1.7.8')
+        self.assertEqual(self.app.problem, 'Update the Pi to version 1.8.0')
 
     def test_showing_the_window_puts_it_back_as_it_was(self):
         self.app.show()

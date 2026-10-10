@@ -1,7 +1,7 @@
 """Build the desktop app's .exe with PyInstaller: one file, no console window, with the app's icon and version.
 
     pip install -r desktop/requirements-build.txt
-    python desktop/build.py v1.7.8-beta.1
+    python desktop/build.py v1.8.0-beta.1
 
 Run it on Windows (an .exe can only be built there); the GitHub Actions workflow .github/workflows/desktop.yml does it
 for pull requests and releases. The result is dist/3d-printer-management-desktop.exe.
@@ -36,7 +36,7 @@ VERSION_INFO = """VSVersionInfo(
 
 
 def version_numbers(version):
-    """'v1.7.8-beta.1' -> (1, 7, 8, 1): Windows wants four numbers in an .exe's version."""
+    """'v1.8.0-beta.1' -> (1, 8, 0, 1): Windows wants four numbers in an .exe's version."""
     match = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)(?:-(?:alpha|beta)\.(\d+))?', version)
     return tuple(int(part or 0) for part in match.groups()) if match else (0, 0, 0, 0)
 
@@ -63,7 +63,7 @@ def command(work, dist):
 def main(argv):
     version = argv[0] if argv else 'dev'
     if not re.fullmatch(r'[A-Za-z0-9._-]{1,40}', version):
-        raise SystemExit('Give a version such as v1.7.8-beta.1.')
+        raise SystemExit('Give a version such as v1.8.0-beta.1.')
     work, dist = HERE / 'build', HERE.parent / 'dist'
     prepare(version, work)
     subprocess.run(command(work, dist), check=True)

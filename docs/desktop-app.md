@@ -21,7 +21,7 @@ Contents:
 
 ## Download and start
 
-1. **Download** `3d-printer-management-desktop.exe` from the same [GitHub release](https://github.com/REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system/releases) as your Pi's version. The tray needs the Pi on 1.7.8 or newer; the window works with any version.
+1. **Download** `3d-printer-management-desktop.exe` from the same [GitHub release](https://github.com/REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system/releases) as your Pi's version. The tray needs the Pi on 1.8.0 or newer; the window works with any version.
 2. **Put it somewhere permanent,** for example your Documents folder. There's nothing to install: it's one file.
 3. **Double-click it.** The first start takes a few seconds while it unpacks itself.
 
@@ -78,7 +78,7 @@ The app's **3D** icon sits in the notification area at the bottom right of the t
 | **Change Pi address…** | Connects to another address |
 | **Reload the dashboard** | Loads the dashboard again |
 | **Help** | Opens this guide |
-| *Desktop app 1.7.8 · Pi 1.7.8* | The two versions |
+| *Desktop app 1.8.0 · Pi 1.8.0* | The two versions |
 | **Quit** | Closes the app completely |
 
 The tray asks the Pi for a small summary every 15 seconds, using the window's sign-in. It doesn't count as someone looking at the dashboard, so it doesn't keep the printers' cameras busy the way an open dashboard does.
@@ -127,7 +127,7 @@ If you move the .exe, start it once from its new place: Start with Windows follo
 | **Find it for me finds nothing** | Type the address instead. The search covers addresses like the laptop's own (for example 192.168.1.1–254); it can't see a Pi on a larger or different network, or past a guest Wi-Fi that keeps devices apart. |
 | **Tray: "Not signed in"** | Open the app and sign in. |
 | **Tray: "Can't reach the Pi"** | As for "Nothing answered" above. The tray recovers by itself once the Pi can be reached. |
-| **Tray: "Update the Pi to version 1.7.8 or newer…"** | The window works; the tray's summary needs the newer Pi. [Update the Pi](updates.md). |
+| **Tray: "Update the Pi to version 1.8.0 or newer…"** | The window works; the tray's summary needs the newer Pi. [Update the Pi](updates.md). |
 | **No pop-ups** | Check **Notifications** in the tray menu, and that Windows notifications and Focus assist allow them. |
 | **"needs the Microsoft Edge WebView2 Runtime"** | Install it from the page the app opens, then start the app again. |
 
@@ -154,6 +154,6 @@ The app is in `desktop/`:
 | `ci/demo_pi.py`, `ci/smoke_test.py` | The end-to-end test against a demo Pi |
 
 - **Run from source:** `pip install -r desktop/requirements.txt`, then `python desktop/desktop_app.py`. On Linux, also `pip install "pywebview[qt]"`. This is experimental: Linux trays can't show pop-ups, and after a restart the tray needs a fresh sign-in.
-- **Build the .exe** on Windows: `pip install -r desktop/requirements-build.txt`, then `python desktop/build.py v1.7.8-beta.1`. The result is `dist\3d-printer-management-desktop.exe`.
+- **Build the .exe** on Windows: `pip install -r desktop/requirements-build.txt`, then `python desktop/build.py v1.8.0-beta.1`. The result is `dist\3d-printer-management-desktop.exe`.
 - **Tests:** `tests/test_desktop_app.py` runs with the other tests. The **Desktop app** workflow (`.github/workflows/desktop.yml`) builds the .exe on Windows for pull requests and runs `desktop/ci/smoke_test.py` against `desktop/ci/demo_pi.py`, the real dashboard with demo printers: connect (with Find it for me), sign in, the tray's printers and a notification, closing to the tray, starting again, quitting, and staying signed in. Its screenshots and log are kept as the run's `desktop-app-test` artifact.
 - **Releases:** the **Publish release** workflow builds and tests the .exe for the release's version and attaches it, with its `.sha256` file, next to the Pi's ZIP.
