@@ -4,6 +4,9 @@
 config.json
 settings.json
 auth.json
+printer-status.json
+status.json
+*password*.txt
 meshcentral.json
 github-updates.json
 release.json

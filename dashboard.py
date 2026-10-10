@@ -15,6 +15,7 @@ from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits
 from live_camera import Cameras
 from queueing import MAX_UPLOAD, options, validate_archive
+from printer_status import status_document
 
 
 def password_hash(password, salt=None):
@@ -60,7 +61,8 @@ class Dashboard:
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
-            web.get('/api/state', self.state), web.post('/api/upload', self.upload),
+            web.get('/api/state', self.state), web.get('/api/printer-status', self.printer_status),
+            web.post('/api/upload', self.upload),
             web.post('/api/jobs', self.add_job), web.post('/api/jobs/{id}/{action}', self.job_action),
             web.post('/api/printers/{name}/{action}', self.control),
             web.get('/api/camera/{name}', self.camera), web.post('/api/settings', self.settings),
@@ -138,6 +140,9 @@ class Dashboard:
     async def logout(self, request):
         self.sessions.pop(request.cookies.get('pm_session'),None)
         response=web.json_response({'ok':True});response.del_cookie('pm_session');return response
+
+    async def printer_status(self, request):
+        return web.json_response(status_document(self.core))
 
     async def state(self, request):
         printers=[]

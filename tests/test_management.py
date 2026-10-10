@@ -174,6 +174,28 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,200)
         self.assertEqual(self.store.get(job['id'])['status'],'staging')
 
+    async def test_printer_status_requires_login_and_is_minimal(self):
+        self.assertEqual((await self.client.get('/api/printer-status')).status,401)
+        await self.login()
+        response=await self.client.get('/api/printer-status')
+        self.assertEqual(response.status,200)
+        self.assertEqual(set(await response.json()),{'summary','detail','tooltip'})
+        self.assertEqual(response.headers['Cache-Control'],'no-store')
+
+    async def test_status_file_client_end_to_end(self):
+        from status_client import StatusClient, refresh, UNAVAILABLE
+        directory=Path(self.tmp.name)
+        password=directory/'password.txt';password.write_text('test-password-123')
+        output=directory/'status.json'
+        client=StatusClient(str(self.client.make_url('/')),password)
+        self.assertTrue(await asyncio.to_thread(refresh,client,output))
+        self.assertEqual(json.loads(output.read_text())['summary'],'Demo: 1 idle')
+        self.dashboard.sessions.clear()
+        self.assertTrue(await asyncio.to_thread(refresh,client,output))
+        self.dashboard.sessions.clear();password.write_text('wrong')
+        self.assertFalse(await asyncio.to_thread(refresh,client,output))
+        self.assertEqual(json.loads(output.read_text()),UNAVAILABLE)
+
     async def test_auth_required(self):self.assertEqual((await self.client.get('/api/state')).status,401)
     async def test_cross_origin_login_blocked(self):
         r=await self.client.post('/api/login',json={'password':'test-password-123'},headers={'X-PM':'1','Origin':'https://attacker.example'})
