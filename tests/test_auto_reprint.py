@@ -33,7 +33,8 @@ class FakeEngine:
         self.core.states[name]='IDLE'
     async def start(self,job_id,confirmed,author,override_error=False):
         assert confirmed is True
-        self.started.append((job_id,author));self.store.set_status(job_id,'staging')
+        self.store.claim(job_id)   # as the real queue: only a printer's first waiting job can start
+        self.started.append((job_id,author))
 
 
 class ReprintTests(unittest.IsolatedAsyncioTestCase):
@@ -44,7 +45,7 @@ class ReprintTests(unittest.IsolatedAsyncioTestCase):
         self.states={'Mini 1':'PAUSE','Mini 2':'IDLE','Mini 3':'IDLE','H2D':'IDLE'}
         self.core=SimpleNamespace(DATA_DIR=d,settings={},names=lambda:list(configs),printer_config=configs.get,
             states=self.states,state_data=lambda n:(self.states[n],0,{},True),display_name=lambda n:n,
-            capture_still=AsyncMock(return_value=b'\xff\xd8bed\xff\xd9'),notify=AsyncMock(),BLUE=1,YELLOW=2,EXAMPLE_MODE=False)
+            capture_still=AsyncMock(return_value=b'\xff\xd8bed\xff\xd9'),notify=AsyncMock(),BLUE=1,YELLOW=2,GREEN=3,RED=4,EXAMPLE_MODE=False)
         self.store=Store(d/'db');self.engine=FakeEngine(self.core,self.store)
         (d/'uploads').mkdir()
         self.asset=str(make_3mf(d/'uploads'/'part.3mf'))
@@ -58,6 +59,15 @@ class ReprintTests(unittest.IsolatedAsyncioTestCase):
         async def bed_state(name,refresh=False):return dict(state=self.beds.get(name,'unknown'),detail='test',checked=self.clock())
         self.reprints.bed_state=bed_state
     async def asyncTearDown(self):self.store.db.close();self.tmp.cleanup()
+
+    def swapmod(self,name,with_file=True):
+        """Swapmod on for a printer: the real swapMod.plate_swap.PlateSwap, on the same queue."""
+        from swapMod.plate_swap import PlateSwap
+        from tests.test_plate_swap import swap_file
+        if not hasattr(self.engine,'plate_swap'):self.engine.plate_swap=PlateSwap(self.core,self.store,settle=0)
+        self.engine.plate_swap.configure(name,True,'Ana')
+        if with_file:self.engine.plate_swap.set_file(name,swap_file(Path(self.tmp.name)/'swap.3mf'),'swap.gcode.3mf',1,'Ana')
+        return self.engine.plate_swap
 
     async def test_availability_reasons(self):
         self.store.add('Mini 3','Other',None,'x.3mf',options(),'t');self.store.set_status(self.store.jobs('Mini 3')[0]['id'],'printing')
@@ -219,6 +229,60 @@ class ReprintTests(unittest.IsolatedAsyncioTestCase):
         rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
         self.assertEqual(rows['Mini 2']['reason'],"the job's file is no longer on the Pi")
 
+    async def test_the_reprint_goes_ahead_of_that_printers_waiting_jobs(self):
+        waiting=self.store.add('Mini 2','Waiting',None,'cache/waiting.gcode.3mf',options(),'t')
+        copy=await self.reprints.reprint('Mini 1','web administrator')
+        self.assertEqual(self.engine.started,[(copy['id'],'web administrator')])
+        self.assertEqual([j['label'] for j in self.store.jobs('Mini 2')],['Bracket','Waiting'])
+        self.assertEqual(self.store.get(waiting['id'])['status'],'queued')
+
+    async def test_a_swapmod_printer_swaps_its_plate_first_when_its_bed_is_not_clear(self):
+        self.beds={'Mini 2':'parts','Mini 3':'unknown'}
+        swap=self.swapmod('Mini 3')
+        waiting=self.store.add('Mini 3','Waiting',None,'cache/waiting.gcode.3mf',options(),'t')   # already in its queue
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertEqual(rows['Mini 2']['reason'],'parts on the bed')                                # no Swapmod there
+        self.assertEqual((rows['Mini 3']['ok'],rows['Mini 3']['swap'],rows['Mini 3']['can_mark']),(True,True,False))
+        self.assertIn('Mini 3 (Swapmod swaps its plate first)',self.reprints.state('Mini 1')['available'])
+        self.assertTrue(next(r for r in self.reprints.state('Mini 1')['printers'] if r['name']=='Mini 3')['swap'])
+        self.reprints.flag('Mini 1',self.job);self.clock.now+=2.5*HOUR
+        await self.reprints.tick()
+        self.assertEqual(self.engine.controls,[('Mini 1','stop',AUTHOR)])                          # the paused print is stopped
+        self.assertIn('reprinted on Mini 3 after a plate swap',self.store.get(self.job['id'])['note'])
+        queue=self.store.jobs('Mini 3')
+        self.assertEqual([j['label'] for j in queue],['Plate swap','Bracket','Waiting'])            # the swap, then the reprint
+        self.assertTrue(queue[0]['options']['swap'])
+        self.assertEqual(self.engine.started,[(queue[0]['id'],AUTHOR)])                             # only the swap print starts
+        self.assertEqual(queue[1]['status'],'queued');self.assertFalse(self.reprints.state('Mini 1')['pending'])
+        self.assertEqual(self.core.notify.await_args.args[:2],('Mini 3','🤖 AI reprint: swapping the plate first'))
+        self.assertIn("isn't confirmed empty",self.core.notify.await_args.args[2])
+        # When the swap print finishes, Swapmod starts the next waiting job on that printer: the reprint.
+        self.store.set_status(queue[0]['id'],'finished')
+        await swap.after(self.engine,'Mini 3',queue[0],'FINISH')
+        self.assertEqual(self.engine.started[-1],(queue[1]['id'],'Swapmod'))
+        self.assertEqual(self.store.get(waiting['id'])['status'],'queued')
+
+    async def test_a_printer_that_can_start_at_once_comes_before_one_that_swaps(self):
+        self.beds={'Mini 2':'parts','Mini 3':'clear'}
+        self.swapmod('Mini 2');self.swapmod('Mini 3')
+        rows=await self.reprints.availability(self.store.get(self.job['id']))
+        self.assertEqual([(r['name'],r['ok'],r['swap']) for r in rows],[('Mini 3',True,False),('Mini 2',True,True),('H2D',False,False)])
+        copy=await self.reprints.reprint('Mini 1','web administrator')
+        self.assertEqual((copy['printer'],copy['swap']),('Mini 3',False))
+        self.assertEqual([j['label'] for j in self.store.jobs('Mini 3')],['Bracket'])              # a clear bed: no swap
+        self.assertEqual(self.core.notify.await_args.args[1],'🤖 AI reprint started')
+        self.beds={'Mini 2':'parts','Mini 3':'parts'};self.reprints.mark('Mini 2',True,'Ana')       # someone looked: no swap
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertEqual((rows['Mini 2']['ok'],rows['Mini 2']['swap'],rows['Mini 2']['bed']),(True,False,'marked'))
+
+    async def test_swapmod_off_or_without_its_swap_file_is_not_used(self):
+        self.beds={'Mini 2':'parts','Mini 3':'parts'}
+        self.swapmod('Mini 2',with_file=False);self.swapmod('Mini 3').configure('Mini 3',False,'Ana')
+        rows={r['name']:r for r in await self.reprints.availability(self.store.get(self.job['id']))}
+        self.assertEqual([(rows[n]['ok'],rows[n]['reason']) for n in ('Mini 2','Mini 3')],[(False,'parts on the bed')]*2)
+        with self.assertRaisesRegex(ValueError,'No printer available'):await self.reprints.reprint('Mini 1','web administrator')
+        self.assertEqual((self.engine.controls,self.engine.started),([],[]))
+
     async def test_settings(self):
         self.assertEqual(ar.settings_for({'after_hours':-3,'bed_threshold':9})['after_hours'],0.0)
         reprints=AutoReprint(self.core,self.engine,{'enabled':False})
@@ -231,6 +295,51 @@ class ReprintTests(unittest.IsolatedAsyncioTestCase):
         reprints.reference('Mini 2').unlink()
         await reprints.capture_reference({'printer':'Mini 2'},AUTHOR)              # an automatic start isn't a human check
         self.assertFalse(reprints.reference('Mini 2').exists())
+
+
+class SwapOnTheRealQueueTests(unittest.IsolatedAsyncioTestCase):
+    """The whole chain on the real queue (queueing.Engine) and Swapmod, in demo mode, with the printer's reports played
+    by hand: the reprint goes to a Swapmod printer with parts on its bed, which swaps its plate, then prints the job."""
+    async def asyncSetUp(self):
+        import queueing
+        self.tmp=tempfile.TemporaryDirectory();d=Path(self.tmp.name)
+        configs={'Mini 1':{'model':'A1 mini','camera_type':'jpeg_tcp'},'Mini 2':{'model':'A1 mini','camera_type':'jpeg_tcp'}}
+        self.data={'Mini 1':{'state':'PAUSE'},'Mini 2':{'state':'FINISH'}}   # Mini 2's last print is still on its plate
+        self.core=SimpleNamespace(DATA_DIR=d,settings={},names=lambda:list(configs),printer_config=configs.get,display_name=lambda n:n,
+            state_data=lambda n:(self.data[n]['state'],0,{},True),last_seen={},EXAMPLE_MODE=True,EXAMPLE_DATA=self.data,
+            publish_action=lambda name,action:None,notify=AsyncMock(),BLUE=1,GREEN=2,RED=3,YELLOW=4)
+        self.store=Store(d/'db');self.engine=queueing.Engine(self.core,self.store)
+        self.engine.demo=AsyncMock()   # no simulated print: the printer's reports are played below
+        swap=self.engine.plate_swap;swap.settle=0
+        from tests.test_plate_swap import swap_file
+        swap.configure('Mini 2',True,'Ana');swap.set_file('Mini 2',swap_file(d/'swap.3mf'),'swap.gcode.3mf',1,'Ana')
+        (d/'uploads').mkdir()
+        self.job=self.store.add('Mini 1','Bracket',str(make_3mf(d/'uploads'/'part.3mf')),'',options(1),'t',True)
+        self.store.set_status(self.job['id'],'paused')
+        self.reprints=AutoReprint(self.core,self.engine,{},clock=Clock())
+        async def bed_state(name,refresh=False):return dict(state='parts',detail='test',checked=0)
+        self.reprints.bed_state=bed_state
+    async def asyncTearDown(self):self.store.db.close();self.tmp.cleanup()
+
+    async def settle(self):
+        while self.engine.tasks:await asyncio.gather(*list(self.engine.tasks))
+
+    async def report(self,job,state):
+        self.data['Mini 2']['state']=state
+        await self.engine.telemetry('Mini 2',{'gcode_state':state,'subtask_name':job['remote']})
+        await self.settle()
+
+    async def test_swap_then_reprint(self):
+        copy=await self.reprints.reprint('Mini 1',AUTHOR);await self.settle()
+        self.assertTrue(copy['swap']);self.assertEqual(self.store.get(self.job['id'])['status'],'failed')
+        swap,queued=self.store.jobs('Mini 2')
+        self.assertEqual((swap['label'],swap['status'],queued['id'],queued['status']),('Plate swap','awaiting_start',copy['id'],'queued'))
+        await self.report(swap,'RUNNING');await self.report(swap,'FINISH')
+        self.assertEqual(self.store.get(swap['id'])['status'],'finished')
+        self.assertEqual(self.store.get(copy['id'])['status'],'awaiting_start')   # the reprint was started after the swap
+        titles=[c.args[1] for c in self.core.notify.await_args_list]
+        self.assertEqual(titles,['🤖 AI reprint: swapping the plate first','♻️ Plate swapped, next print started'])
+        self.assertIn(f"{copy['id']} • Swapmod",[e['detail'] for e in self.store.events() if e['title']=='Start approved'])
 
 
 class BedCheckTests(unittest.IsolatedAsyncioTestCase):

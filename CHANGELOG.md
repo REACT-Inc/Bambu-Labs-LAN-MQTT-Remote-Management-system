@@ -13,6 +13,10 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **No installation:** one file, no administrator rights. It needs the Microsoft Edge WebView2 Runtime, which Windows 11 and up-to-date Windows 10 already have.
 - **`GET /api/desktop` on the Pi:** the small summary the desktop app's tray reads every 15 seconds, with the window's sign-in. Unlike an open dashboard, it doesn't keep the camera pictures running.
 - **Desktop app workflow:** pull requests that touch the app or the dashboard build the .exe on Windows and test it end to end against a demo Pi. The **Publish release** workflow builds, tests and attaches it to each release.
+- **Automatic reprints can use a Swapmod printer whose bed isn't clear.** When an AI-paused print is reprinted on another printer, a printer with Swapmod on swaps its plate first if its bed isn't confirmed empty, and the reprint starts when the swap print finishes. Printers that can start at once are still chosen first. See [Swapmod printers swap their plate first](failureDetection/FAILURE_DETECTION.md#swapmod-printers-swap-their-plate-first).
+
+### Fixed
+- **An automatic reprint onto a printer with jobs waiting in its queue** stopped the paused print, then couldn't start the copy, because only a printer's first waiting job can start. The reprint now goes ahead of the jobs waiting there.
 
 ## 1.7.7-beta.1
 
