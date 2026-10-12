@@ -20,6 +20,7 @@ That's all. The app doesn't count plates or approve batches.
 3. When the swap print finishes, the **next waiting job** for that printer starts on its own. If nothing is waiting, you're told the fresh plate is ready. With the AI HAT, the [bed check AI](../failureDetection/FAILURE_DETECTION.md#bed-check-ai-is-the-bed-empty) looks first: if it's sure parts are still on the plate, the next job waits and you're told.
 4. After a **failed** print it doesn't swap on its own, because the cause (a clog, a run-out) would just repeat. You're told, and **Swap plate now** runs the swap whenever you want.
 5. If the swap print itself fails, the queue stops and you're told.
+6. **Automatic reprints:** when the AI pauses a failing print on another printer and the job is [reprinted](../failureDetection/FAILURE_DETECTION.md#swapmod-printers-swap-their-plate-first) on this one, but this printer's bed isn't confirmed empty, the swap print runs first. The reprint then starts as in step 3. If this printer's bed was checked empty, the reprint starts straight away.
 
 **Swap plate now** (dashboard) or `/plateswap now` runs the swap print straight away.
 

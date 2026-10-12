@@ -10,10 +10,14 @@ A printer is available for a job when all of these hold:
 - it's online, idle or finished, with no error and no active queue job,
 - its loaded AMS filament matches the plate (or the job used the external spool),
 - its bed is empty: the bed check AI (bed_model.py) when it knows that bed, otherwise a comparison with the empty-bed
-  picture taken the last time a queue job started there (failureDetection/bed_check.py).
+  picture taken the last time a queue job started there (failureDetection/bed_check.py). A Swapmod printer
+  (swapMod/plate_swap.py) whose bed isn't confirmed empty is available too: it swaps its plate first.
 
 The reprint: the paused print is stopped (so the printer doesn't sit paused and heated), the job is recorded as
-failed, and a copy is started on the chosen printer, with no confirmation needed since the camera checked its bed.
+failed, and a copy is started on the chosen printer, with no confirmation needed since the camera checked its bed. The
+copy goes to the front of that printer's queue. On a Swapmod printer that has to clear its bed, the swap print starts
+instead, and Swapmod starts the copy when the swap print finishes (as it does for the next job after any swap).
+Printers that can start at once come before ones that have to swap first.
 With no available printer the countdown keeps waiting and tries again every minute, saying why in the dashboard.
 
 **Mark available** (an override, per printer): someone who has looked at a printer can make it available although the
@@ -55,6 +59,11 @@ def safe_name(name):
 
 def wait_text(seconds):
     return f'{round(seconds / 60)} min' if seconds < 3600 else f'{seconds / 3600:g} h'
+
+
+def rank(row):
+    """Best first: available (marked, then bed checked empty, then after a plate swap), then the rest, by name."""
+    return (not row['ok'], bool(row.get('swap')), not row['marked'], row['name'])
 
 
 class AutoReprint:
@@ -167,8 +176,13 @@ class AutoReprint:
             return False, '', 'the loaded filament does not match'
         return True, suggestion['mapping'], ''
 
+    def can_swap(self, name):
+        """True when Swapmod can clear this printer's bed: it's on, with its swap print file (swapMod/plate_swap.py)."""
+        swap = getattr(self.engine, 'plate_swap', None)
+        return bool(swap and swap.state(name)['ready'])
+
     async def availability(self, job, refresh=False):
-        """[{name, display, ok, reason, bed}] for every other printer, best first. Uses the cameras, so it runs only
+        """[{name, display, ok, reason, bed, swap}] for every other printer, best first. Uses the cameras, so it runs only
         when the AI pauses a print, on "Check available printers" and when reprinting, never on dashboard refreshes."""
         import job_transfer
         results = []
@@ -177,7 +191,7 @@ class AutoReprint:
                 continue
             marked = self.marked(name)
             row = dict(name=name, display=self.core.display_name(name) if hasattr(self.core, 'display_name') else name,
-                       ok=False, reason='', bed='', marked=bool(marked), can_mark=False)
+                       ok=False, reason='', bed='', marked=bool(marked), can_mark=False, swap=False)
             check = job_transfer.check(self.core, job, name)
             if check['compatible'] is False:
                 row['reason'] = ("the job's file is no longer on the Pi" if 'no longer on the Pi' in check['reason']
@@ -199,14 +213,16 @@ class AutoReprint:
             elif not row['reason']:
                 bed = await self.bed_state(name, refresh)
                 row['bed'] = bed['state']
-                if bed['state'] != 'clear':
+                if bed['state'] != 'clear' and self.can_swap(name):
+                    row['swap'] = True   # Swapmod: its swap print clears the bed, then the reprint starts
+                elif bed['state'] != 'clear':
                     row['reason'] = 'parts on the bed' if bed['state'] == 'parts' else f"bed not confirmed empty: {bed['detail']}"
                     row['can_mark'] = True
             row['ok'] = not row['reason']
             results.append(row)
-        results.sort(key=lambda r: (not r['ok'], not r['marked'], r['name']))
+        results.sort(key=rank)
         self.last[job['printer']] = (self.clock(), self.summary(results),
-                                     [{k: r[k] for k in ('name', 'display', 'ok', 'reason', 'marked', 'can_mark')} for r in results])
+                                     [{k: r[k] for k in ('name', 'display', 'ok', 'reason', 'marked', 'can_mark', 'swap')} for r in results])
         return results
 
     # ---- "Mark available" (an override someone sets after looking at the printer) ----
@@ -245,13 +261,13 @@ class AutoReprint:
             changed = False
             for row in rows:
                 if row['name'] == name and on and not row['ok'] and row['can_mark']:
-                    row.update(ok=True, reason='', marked=True, can_mark=False)
+                    row.update(ok=True, reason='', marked=True, can_mark=False, swap=False)
                     changed = True
                 elif row['name'] == name and not on and row['marked']:
                     row.update(ok=False, reason=why, marked=False, can_mark=True)
                     changed = True
             if changed:
-                rows.sort(key=lambda r: (not r['ok'], not r['marked'], r['name']))
+                rows.sort(key=rank)
                 self.last[job_printer] = (checked, self.summary(rows), rows)
 
     def started(self, name, why='it started a print'):
@@ -273,7 +289,8 @@ class AutoReprint:
 
     @staticmethod
     def summary(rows):
-        ok = [r['display'] + (' (marked available)' if r['marked'] else ' (bed checked empty)') for r in rows if r['ok']]
+        ok = [r['display'] + (' (marked available)' if r['marked'] else ' (Swapmod swaps its plate first)' if r.get('swap')
+                              else ' (bed checked empty)') for r in rows if r['ok']]
         if ok:
             return 'Available for a reprint: ' + ', '.join(ok) + '.'
         if not rows:
@@ -344,7 +361,8 @@ class AutoReprint:
                                                getattr(self.core, 'YELLOW', 0xF1C40F), False)
 
     async def reprint(self, name, author):
-        """Reprint the AI-paused job from this printer on an available printer now. Returns the new job."""
+        """Reprint the AI-paused job from this printer on an available printer now. Returns the new job, with
+        swap=True when that printer swaps its plate first (Swapmod then starts the job)."""
         import job_transfer
         async with self.lock:
             job_id, entry = self.for_printer(name)
@@ -374,17 +392,32 @@ class AutoReprint:
                 if asset:
                     Path(asset).unlink(missing_ok=True)
                 raise ValueError(f"{target['display']}: {fits['reason']}")
+            swap = target['swap']
             if self.settings['stop_original'] and self.core.state_data(name)[0] in ('PAUSE', 'RUNNING'):
                 await self.engine.control(name, 'stop', author)
-            self.engine.store.set_status(job['id'], 'failed', f"AI: failed print, reprinted on {target['display']} • {author}")
+            self.engine.store.set_status(job['id'], 'failed', f"AI: failed print, reprinted on {target['display']}"
+                                         f"{' after a plate swap' if swap else ''} • {author}")
             copy = job_transfer.send(self.core, self.engine.store, job['id'], target['name'], target.get('use_ams', False),
                                      target.get('mapping', ''), bool(marked), author, asset=asset)
-            await self.engine.start(copy['id'], True, author)
+            self.engine.store.move_to_front(copy['id'])   # only the first waiting job can start, so it goes first
+            if swap:
+                # The swap print goes in front of the copy. When it finishes, Swapmod starts the next waiting job on
+                # that printer, which is the copy (after the bed check AI's look, as after any swap).
+                await self.engine.plate_swap.swap_now(self.engine, target['name'], author)
+            else:
+                await self.engine.start(copy['id'], True, author)
             self.pending.pop(job['id'], None)
             self.save()
-            await self.core.notify(target['name'], '🤖 AI reprint started', f"{job['label']} failed on {name} and is now printing here. "
-                                   f"{checked} • {author}", getattr(self.core, 'BLUE', 0x3498DB), True)
-            return copy
+            if swap:
+                why = "The camera saw parts on this printer's bed" if target['bed'] == 'parts' else "This printer's bed isn't confirmed empty"
+                await self.core.notify(target['name'], '🤖 AI reprint: swapping the plate first',
+                                       f"{job['label']} failed on {name} and prints here next. {why}, so Swapmod is running "
+                                       f"the swap print to clear it; the reprint starts when the swap finishes. • {author}",
+                                       getattr(self.core, 'BLUE', 0x3498DB), True)
+            else:
+                await self.core.notify(target['name'], '🤖 AI reprint started', f"{job['label']} failed on {name} and is now printing here. "
+                                       f"{checked} • {author}", getattr(self.core, 'BLUE', 0x3498DB), True)
+            return dict(copy, swap=swap)
 
     def state(self, name):
         job_id, entry = self.for_printer(name)
