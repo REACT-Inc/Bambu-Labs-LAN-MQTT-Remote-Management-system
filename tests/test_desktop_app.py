@@ -317,6 +317,10 @@ class TrayTextTests(unittest.TestCase):
                                  'F — Printing'])
         self.assertEqual(desktop_state.printer_line(dict(name='G', display_state='Error', error_text='x' * 200))[-1], '…')
 
+    def test_numbers_as_on_the_dashboard(self):   # #42: the same rules as the dashboard and Discord
+        self.assertEqual([desktop_state.minutes(v) for v in (45, 60, 65, 125.4, None, 'x')], ['45 min', '1 h 0 min', '1 h 5 min', '2 h 5 min', '', ''])
+        self.assertEqual([desktop_state.percent(v) for v in (2.5, 99.5, 140, -3, None)], ['3%', '100%', '100%', '0%', ''])
+
     def test_lines_tooltip_and_icon(self):
         data = summary(printers=self.printers, level='warn')
         self.assertEqual(len(desktop_state.tray_lines(data)), 6)

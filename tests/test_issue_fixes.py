@@ -59,9 +59,9 @@ class CoreFixes(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(max(waits),300)
 
     # --- #42: rounded numbers in Discord ----------------------------------------------------------------------
-    def test_numbers_are_rounded(self):
-        self.assertEqual((self.core.whole(219.96875),self.core.whole('24.5000'),self.core.whole(None)),('220','24','?'))
-        self.assertEqual((self.core.duration(45),self.core.duration('312'),self.core.duration(None)),('45 min','5 h 12 min','?'))
+    def test_numbers_are_rounded(self):   # the full rules and edge cases are in test_round_numbers.py
+        self.assertEqual((self.core.format_temp(219.96875),self.core.format_temp('24.5000'),self.core.format_temp(None)),('220°C','25°C','—'))
+        self.assertEqual((self.core.format_minutes(45),self.core.format_minutes('312'),self.core.format_minutes(None)),('45 min','5 h 12 min','—'))
 
     def test_printer_card_and_progress_use_rounded_numbers(self):
         data={'nozzle_temper':219.96875,'nozzle_target_temper':220.0,'bed_temper':59.81,'bed_target_temper':60,

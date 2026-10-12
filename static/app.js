@@ -110,7 +110,14 @@ async function refresh(){if(polling)return;polling=true;try{state=await api('sta
 // e.g. temperature limits and an idle printer for moves). Discord keeps its confirmations.
 async function confirmAction(title,text,label,callback){notice(title.replace(/\?$/,'')+'…');try{await callback();await refresh();}catch(e){notice(e.message);}}
 function renderDetails(){if(typeof renderDevice==='function')renderDevice();}
-function fmtMinutes(v){const n=Number(v);if(v===null||v===undefined||v===''||!Number.isFinite(n))return '';return n>=60?Math.floor(n/60)+' h '+n%60+' min':n+' min';}
+// Numbers for display (#42), the same rules as core.py's format_*() for Discord: whole degrees and percentages, "2 h 5 min",
+// and "—" for anything the printer didn't report. Only what's shown is rounded; values sent to printers stay exact.
+function num(v){const n=Number(v);return v===null||v===undefined||v===''||!Number.isFinite(n)?null:n;}
+function fmtTemp(v){const n=num(v);return n===null?'—':Math.round(n)+'°';}
+function fmtPercent(v){const n=num(v);return n===null?'—':Math.round(Math.max(0,Math.min(100,n)))+'%';}
+function fmtMinutes(v){const n=num(v);if(n===null)return '';const t=Math.max(0,Math.round(n));return t>=60?Math.floor(t/60)+' h '+t%60+' min':t+' min';}
+// An AMS unit's humidity: the percentage when it reports one (humidity_raw: AMS 2 Pro, AMS HT), else its 1–5 level.
+function fmtHumidity(u){const raw=num(u?.humidity_raw);if(raw!==null)return fmtPercent(raw);const level=num(u?.humidity);return level===null?'—':level>=1&&level<=5?'level '+Math.round(level):fmtPercent(level);}
 function miniSwatches(d){const ams=Array.isArray(d.ams)?{ams:d.ams}:(d.ams||{}),trays=(ams.ams||[]).flatMap(u=>(u.tray||[]).map(t=>t));trays.push(...(Array.isArray(d.vir_slot)&&d.vir_slot.length?d.vir_slot:d.vt_tray?[d.vt_tray]:[]));
  return trays.slice(0,17).map(t=>{const c=/^[0-9a-f]{6}/i.test(t.tray_color||'')&&t.tray_type?'#'+t.tray_color.slice(0,6):'';return `<i class="mini-swatch${c?'':' is-empty'}"${c?` data-color="${c}"`:''} title="${esc(t.tray_type||'Empty')}"></i>`;}).join('');}
 // The Content-Security-Policy blocks inline style attributes, so colours and widths are applied through the DOM.
@@ -120,10 +127,9 @@ const AI_LABELS={watching:'🤖 AI watching',suspect:'🤖 AI: suspect frames',f
 function aiLine(ai){if(!ai?.enabled||!ai.watching||!AI_LABELS[ai.status])return '';const bad=['failure','paused'].includes(ai.status);
  return `<p class="ai-line ai-${esc(ai.status)}" title="${esc(ai.message||'')}">${AI_LABELS[ai.status]}${ai.status==='suspect'||bad?` · ${esc(ai.failing??0)}/${esc(ai.frames??0)} frames`:''}</p>`;}
 function printerCard(x){
- const d=x.data||{},n=`data-printer="${esc(x.name)}"`,progress=Math.max(0,Math.min(100,Number(d.mc_percent)||0)),active=['RUNNING','PAUSE','PREPARE'].includes(x.state);
+ const d=x.data||{},n=`data-printer="${esc(x.name)}"`,progress=Math.round(Math.max(0,Math.min(100,num(d.mc_percent)??0))),active=['RUNNING','PAUSE','PREPARE'].includes(x.state);
  const waiting=state.jobs.filter(v=>v.printer===x.name&&v.status==='queued').length,left=fmtMinutes(d.mc_remaining_time);
- const round=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?'—':Math.round(Number(v));
- const temp=(now,target)=>`<b>${round(now)}°</b>${Number(target)?`<em>→ ${round(target)}°</em>`:''}`;
+ const temp=(now,target)=>`<b>${fmtTemp(now)}</b>${num(target)?`<em>→ ${fmtTemp(target)}</em>`:''}`;
  const lt=lightShown(x),light=lt.on;
  let actions='';
  if(x.state==='RUNNING'||x.state==='PREPARE')actions+=actionButton('pause','⏸ Pause',n,pendingClass('pause',x));
