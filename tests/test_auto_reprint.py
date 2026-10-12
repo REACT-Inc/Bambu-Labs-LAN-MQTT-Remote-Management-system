@@ -322,7 +322,14 @@ class SwapOnTheRealQueueTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):self.store.db.close();self.tmp.cleanup()
 
     async def settle(self):
-        while self.engine.tasks:await asyncio.gather(*list(self.engine.tasks))
+        """Wait until the queue's background tasks (dispatch, Swapmod's next step) have finished."""
+        async def drain():
+            while self.engine.tasks:
+                await asyncio.gather(*list(self.engine.tasks))
+                # A finished task leaves the set in its done callback, on a later turn of the loop. From Python 3.12
+                # awaiting gather() of tasks that are already done doesn't yield, so without this it spins forever.
+                await asyncio.sleep(0)
+        await asyncio.wait_for(drain(),5)
 
     async def report(self,job,state):
         self.data['Mini 2']['state']=state
