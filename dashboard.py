@@ -182,7 +182,7 @@ class Dashboard:
             return web.json_response(self.failure.state(name))
         if action=='now':
             copy=await reprints.reprint(name,'web administrator')
-            return web.json_response({'ok':True,'job':copy['id'],'printer':copy['printer']})
+            return web.json_response({'ok':True,'job':copy['id'],'printer':copy['printer'],'swap':copy['swap']})
         if action=='cancel':
             reprints.cancel(name,'web administrator')
         elif action=='check':

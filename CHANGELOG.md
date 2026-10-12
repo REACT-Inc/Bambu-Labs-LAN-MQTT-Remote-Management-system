@@ -2,6 +2,16 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.8.1)
+
+Built on 1.8.0.
+
+### Added
+- **Automatic reprints can use a Swapmod printer whose bed isn't clear.** When an AI-paused print is reprinted on another printer, a printer with Swapmod on swaps its plate first if its bed isn't confirmed empty, and the reprint starts when the swap print finishes. Printers that can start at once are still chosen first. See [Swapmod printers swap their plate first](failureDetection/FAILURE_DETECTION.md#swapmod-printers-swap-their-plate-first).
+
+### Fixed
+- **An automatic reprint onto a printer with jobs waiting in its queue** stopped the paused print, then couldn't start the copy, because only a printer's first waiting job can start. The reprint now goes ahead of the jobs waiting there.
+
 ## Unreleased (1.8.0)
 
 ### Added

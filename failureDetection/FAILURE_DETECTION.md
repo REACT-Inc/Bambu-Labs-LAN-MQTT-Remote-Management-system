@@ -296,7 +296,7 @@ When the AI **pauses** a failing queue print, the job can carry on somewhere els
    When it's reprinted, the app:
    - it stops the paused print, so the printer doesn't sit paused and heated;
    - records the job as failed;
-   - starts a copy on the chosen printer;
+   - starts a copy on the chosen printer, ahead of any jobs waiting there (a [Swapmod printer](#swapmod-printers-swap-their-plate-first) may swap its plate first);
    - says so in Discord and Activity.
 3. **Reprint now:** open the printer → **More → AI failure watch → Reprint now…** does the same at once. **Cancel automatic reprint** stops the countdown, and **Check available printers** looks again.
 4. **No printer free when it's time:** it keeps waiting, tries again every minute, and tells you once why.
@@ -312,7 +312,7 @@ It never overrides what would make the print fail: a different printer model, a 
 - it's the **model the file was sliced for**;
 - it's online, idle or finished, with **no error** and **no active queue job**;
 - its loaded AMS filament matches the plate (or the job used the external spool);
-- its **bed is empty**, judged by the camera.
+- its **bed is empty**, judged by the camera, or it's a Swapmod printer, which swaps its plate first ([below](#swapmod-printers-swap-their-plate-first)).
 
 **How the bed check works:** the [bed check AI](#bed-check-ai-is-the-bed-empty) decides when it knows that printer's bed. Otherwise a picture comparison decides: every time a queue job starts, the app takes a picture of that empty bed (not for a Swapmod swap print, which starts with the finished part still on the bed). Later it compares a new picture with it, inside the calibrated bed outline when there is one, with lighting differences evened out.
 - It errs towards "parts on the bed": a printer with no empty-bed picture yet, or an unclear result, is never used automatically.
@@ -330,6 +330,14 @@ The countdown is saved in `/var/lib/3d-printer-management/ai-reprints.json`, so 
 | `after_hours` | `2.5` | The longest a paused print waits before it's reprinted elsewhere. Each job's reprint priority sets its wait, up to this. |
 | `stop_original` | `true` | Stop the paused print when reprinting. |
 | `bed_threshold` | `0.005` | Share of the bed that may differ from the empty-bed picture and still count as empty. |
+
+### Swapmod printers swap their plate first
+
+A printer with [Swapmod](../docs/swapmod.md) on and its swap print file chosen can take a reprint although its bed isn't confirmed empty, or the camera sees parts on it. It runs its swap print first to clear the bed, and the reprint starts when the swap print finishes, as Swapmod starts the next waiting job after any swap.
+- **Shown as:** *Available after a plate swap* in the printer list. The pause notification says, for example, *Mini 3 (Swapmod swaps its plate first)*.
+- **Printers that can start at once come first:** a printer marked available, or one whose bed was checked empty, is chosen before one that has to swap. A Swapmod printer whose bed was checked empty starts the reprint straight away, without swapping.
+- **When the reprint is sent,** Discord and Activity say the plate is being swapped first. When the swap finishes, Swapmod's *Plate swapped, next print started* says the reprint started.
+- **After the swap,** the [bed check AI](#bed-check-ai-is-the-bed-empty) looks first, as after any swap. If it's sure there are still parts on the plate, the reprint waits at the front of that printer's queue and you're told. If the swap print fails, the reprint waits there too.
 
 ## Bed check AI: is the bed empty?
 
@@ -349,7 +357,7 @@ After 3 of each, a new picture is compared with the closest ones of each kind. I
 
 **Where it's used:**
 - **Swapmod:** after the swap print, if the AI is sure there are still parts on the plate, the next print isn't started. You're told, and you can start it from the queue after checking. When it's unsure or still learning, the queue carries on as before.
-- **Automatic reprint:** a printer is only "available" if its bed is empty, and the AI is asked first.
+- **Automatic reprint:** a printer is only "available" if its bed is empty, and the AI is asked first. A Swapmod printer whose bed isn't confirmed empty swaps its plate first.
 - **Never on its own:** a "parts" or "not sure" answer never starts a print.
 
 Turn it off under `failure_detection`: `"bed_ai": {"enabled": false}`.
