@@ -5,11 +5,15 @@ mini's low side view of a holographic plate). The fix is training on pictures fr
 printer prints the monitor keeps:
 - one camera still every `every_minutes` (1), and
 - every frame the AI found suspicious or failing (each check, every 30 s), which are the most useful to label.
+It also keeps a picture of each printer's **empty bed** whenever a queue print is started on a cleared plate, and when
+someone answers "It's clear" to the bed check. A model trained without pictures of your empty plate can take its
+texture (a textured or holographic plate) for spaghetti.
 
 Pictures are kept per printer and print in /var/lib/3d-printer-management/training/, capped at `max_pictures`
 (oldest removed first) and never filling the disk. "Download training pictures" in the dashboard gives a ZIP sorted
-by how each print ended (failed / finished / other): upload it to your Roboflow project, draw boxes on the failures,
-and retrain (failureDetection/FAILURE_DETECTION.md, "Better accuracy for your printers").
+by what each picture shows (empty bed / false alarm / how the print ended): upload it to your Roboflow project, draw
+boxes on the failures, mark everything else Null, and retrain (failureDetection/FAILURE_DETECTION.md, "Better accuracy
+for your printers").
 """
 import os
 import re
@@ -22,22 +26,31 @@ from pathlib import Path
 DEFAULTS = dict(enabled=True, every_minutes=1.0, max_pictures=5000, min_free_mb=2048)
 FLAGGED_GAP = 25   # seconds between kept suspicious frames per printer
 HEADROOM = 20   # a tidy-up removes this many extra old pictures, so it lists the folder (slow on an SD card) rarely
+EMPTY_BED = '@empty-bed'   # the folder for empty-bed pictures (safe() never makes an '@', so no print is named this)
 README = """Training pictures from your printers' cameras
 =============================================
 
-failed/    prints that failed or were stopped
-finished/  prints that finished normally
-other/     prints still running, cancelled before starting, or not started from the queue
+empty-bed/     each printer's empty plate: taken when a queue print was started on a cleared plate,
+               or when you answered "It's clear" to the bed check
+false-alarms/  pictures the AI scored as failing, from prints that went on to finish: most are false alarms
+failed/        prints that failed or were stopped
+finished/      prints that finished normally
+other/         prints still running, cancelled before starting, or not started from the queue
 
-File names: <time>_score<AI score>.jpg; the score is how sure the current model was that the print was failing.
+File names: <time>_score<AI score>.jpg; the score is how sure the model was that the print was failing.
 
 To improve the model:
 1. In Roboflow, open your project and Upload these pictures (drag the folders in).
 2. Draw a box around every spaghetti, warping or stringing area and label it with that name.
-   Leave pictures of good prints without boxes: they teach the model what normal looks like
-   (for example a shiny holographic plate is NOT spaghetti).
-3. Generate a new dataset version and run the Colab training again (FAILURE_DETECTION.md).
-4. Replace /opt/3d-printer-management-models/print_failure.onnx with the new best.onnx,
+3. Mark every picture that has nothing to box as Null (the Mark Null tool, key N, in Roboflow Annotate):
+   all of empty-bed/, and the good pictures in false-alarms/, finished/ and the rest.
+   This matters: Roboflow leaves pictures that have no boxes and no Null mark out of the dataset.
+   Without them the model never sees your empty plate or a good print, and can take the plate's
+   texture (for example a textured or holographic plate) for spaghetti.
+4. Generate a new dataset version and run the Colab training again (FAILURE_DETECTION.md).
+5. Before installing the new model, check it on your empty beds:
+   install_model.py ... --healthy empty-bed --max-false 0.05 refuses a model that flags them.
+6. Replace /opt/3d-printer-management-models/print_failure.onnx with the new best.onnx,
    or publish it in the repository's ai-model release so every Pi updates itself.
 """
 
@@ -74,20 +87,37 @@ class TrainingPictures:
         periodic = now - self.last.get(name, 0) >= self.settings['every_minutes'] * 60
         if not force and not periodic and not (flagged and now - self.last_flagged.get(name, 0) >= FLAGGED_GAP):
             return None
-        try:
-            free = shutil.disk_usage(self.folder.parent).free
-        except OSError as exc:
-            self.problem = f'Not saving: cannot check the free space ({exc.strerror or type(exc).__name__}).'
-            return None
-        if free < self.settings['min_free_mb'] * 1024 * 1024:
-            self.problem = (f"Not saving: only {free / 1024 ** 3:.1f} GB free on the Pi, below the {self.settings['min_free_mb'] / 1024:.1f} GB "
-                            'safety limit. Free some space, or lower "min_free_mb" under failure_detection.collect.')
+        if not self.room():
             return None
         if periodic and not force:   # suspicious extras and tests don't shift the steady once-a-minute still
             self.last[name] = now
         if flagged:
             self.last_flagged[name] = now
-        target = self.folder / safe(name) / safe(job or 'no-job') / f"{time.strftime('%Y%m%d-%H%M%S', time.localtime(now))}_score{score:.2f}.jpg"
+        stamp = time.strftime('%Y%m%d-%H%M%S', time.localtime(now))
+        return self.write(self.folder / safe(name) / safe(job or 'no-job') / f'{stamp}_score{score:.2f}.jpg', picture)
+
+    def save_empty(self, name, picture):
+        """Keep a picture of this printer's empty bed (a print was just started on a cleared plate, or someone said
+        it's clear). They're the pictures to mark Null: without them a model doesn't know what the plate looks like."""
+        if not self.settings['enabled'] or not picture or not self.folder or not self.room():
+            return None
+        stamp = time.strftime('%Y%m%d-%H%M%S', time.localtime(self.clock()))
+        return self.write(self.folder / safe(name) / EMPTY_BED / f'{stamp}_empty.jpg', picture)
+
+    def room(self):
+        """True when there's room on the Pi for another picture; otherwise self.problem says why not."""
+        try:
+            free = shutil.disk_usage(self.folder.parent).free
+        except OSError as exc:
+            self.problem = f'Not saving: cannot check the free space ({exc.strerror or type(exc).__name__}).'
+            return False
+        if free < self.settings['min_free_mb'] * 1024 * 1024:
+            self.problem = (f"Not saving: only {free / 1024 ** 3:.1f} GB free on the Pi, below the {self.settings['min_free_mb'] / 1024:.1f} GB "
+                            'safety limit. Free some space, or lower "min_free_mb" under failure_detection.collect.')
+            return False
+        return True
+
+    def write(self, target, picture):
         number = 2
         while target.exists():   # two pictures in the same second (e.g. repeated "Check AI now")
             target = target.with_name(f'{target.stem.rsplit("~", 1)[0]}~{number}.jpg')
@@ -128,14 +158,23 @@ class TrainingPictures:
         return dict(enabled=self.settings['enabled'], count=len(pictures), mb=round(size / 1024 / 1024, 1),
                     every_minutes=self.settings['every_minutes'], problem=self.problem)
 
-    def export(self, outcomes, target):
-        """Write a ZIP of all pictures to target, sorted by outcome. outcomes: job id -> 'failed'/'finished'/..."""
+    def export(self, outcomes, target, thresholds=None):
+        """Write a ZIP of all pictures to target, sorted by what they show. outcomes: job id -> 'failed'/'finished'/...
+        thresholds: printer -> its failure score; a picture from a print that finished, which the AI scored at least
+        that, goes in false-alarms/."""
+        thresholds = {safe(printer): score for printer, score in (thresholds or {}).items()}
         with zipfile.ZipFile(target, 'w', zipfile.ZIP_STORED) as archive:   # JPEGs don't compress further
             archive.writestr('README.txt', README)
             for picture in self.pictures():
                 printer, job = picture.parent.parent.name, picture.parent.name
+                if job == EMPTY_BED:
+                    archive.write(picture, f'empty-bed/{printer}/{picture.name}')
+                    continue
                 outcome = outcomes.get(job, '')
                 group = 'failed' if outcome in ('failed', 'needs_review') else 'finished' if outcome == 'finished' else 'other'
+                scored = re.search(r'_score(\d+(?:\.\d+)?)', picture.name)
+                if group == 'finished' and scored and printer in thresholds and float(scored.group(1)) >= thresholds[printer]:
+                    group = 'false-alarms'
                 archive.write(picture, f'{group}/{printer}/{job}_{picture.name}')
         return target
 

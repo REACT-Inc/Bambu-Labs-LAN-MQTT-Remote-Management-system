@@ -13,6 +13,12 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **No installation:** one file, no administrator rights. It needs the Microsoft Edge WebView2 Runtime, which Windows 11 and up-to-date Windows 10 already have.
 - **`GET /api/desktop` on the Pi:** the small summary the desktop app's tray reads every 15 seconds, with the window's sign-in. Unlike an open dashboard, it doesn't keep the camera pictures running.
 - **Desktop app workflow:** pull requests that touch the app or the dashboard build the .exe on Windows and test it end to end against a demo Pi. The **Publish release** workflow builds, tests and attaches it to each release.
+- **Training pictures that teach the AI what isn't spaghetti.** For when the AI takes a textured or holographic plate for spaghetti. See [Train on your own pictures](failureDetection/FAILURE_DETECTION.md#2-train-on-your-own-pictures-the-real-fix).
+  - **The empty bed:** a picture of each printer's empty plate is kept when a queue print is started on a cleared plate, and when you answer **It's clear** to the bed check. They're in a new `empty-bed/` folder of **Download training pictures**.
+  - **False alarms:** pictures the AI scored as failing, from prints that went on to finish, are in a new `false-alarms/` folder.
+
+### Fixed
+- **The training instructions lost the good pictures.** They said to leave pictures of good prints without boxes, but Roboflow leaves pictures with no boxes out of the dataset unless they're marked **Null**. A model retrained that way never saw an empty plate or a good print. The ZIP's README and the guide now say to mark them Null, and to check a new model on your empty beds (`install_model.py --healthy`) before installing it. The troubleshooting table covers spaghetti on an empty plate.
 
 ## 1.7.7-beta.1
 

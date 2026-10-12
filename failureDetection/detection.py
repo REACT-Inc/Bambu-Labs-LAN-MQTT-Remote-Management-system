@@ -1065,14 +1065,46 @@ class FailureMonitor:
 
     async def start_approved(self, job, author=''):
         """A queue job is starting: the plate was just cleared, so its picture is an empty bed (the auto-reprint
-        reference, and an "empty" example for the bed check AI). Not for a Swapmod swap print (the finished part is
-        still on the bed) or an AI reprint (nobody looked)."""
+        reference, an "empty" example for the bed check AI, and an empty-bed training picture). Not for a Swapmod swap
+        print (the finished part is still on the bed) or an AI reprint (nobody looked)."""
         self.reprints.started(job['printer'])   # its bed won't be empty afterwards: "Mark available" ends
         if (job.get('options') or {}).get('swap') or author == 'AI auto reprint':
             return
-        if self.reprints.settings['enabled']:
-            await self.reprints.capture_reference(job, author)
+        picture = await self.reprints.capture_reference(job, author) if self.reprints.settings['enabled'] else None
+        await self.keep_empty(job['printer'], picture)
         await self.bed.learn(job['printer'], 'empty', 'print started')
+
+    async def keep_empty(self, name, picture=None):
+        """Keep a training picture of this printer's empty bed (training.py): the picture just taken, or a fresh one.
+        Without such pictures a model doesn't know what the plate looks like, and can take its texture for spaghetti."""
+        if not self.training.settings['enabled'] or getattr(self.core, 'EXAMPLE_MODE', False):
+            return
+        if picture is None:
+            if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
+                return
+            try:
+                picture = await self.core.capture_still(name, 20)
+            except Exception as exc:
+                log.info('No empty-bed training picture for %s (%s)', name, type(exc).__name__)
+                return
+        try:
+            await asyncio.to_thread(self.training.save_empty, name, picture)
+        except OSError:
+            log.warning('Could not save an empty-bed training picture for %s', name)
+
+    async def bed_answer(self, name, clear, author):
+        """Someone answered "Is the bed clear?": the bed check AI learns the picture it checked, and a clear bed is
+        kept as an empty-bed training picture too."""
+        picture = (self.bed.last.get(name) or {}).get('picture')
+        counts = self.bed.answer(name, clear, author)
+        if clear and picture:
+            await self.keep_empty(name, picture)
+        return counts
+
+    def training_thresholds(self):
+        """Each printer's failure score, for sorting the training pictures (false alarms: finished prints' pictures
+        the AI scored at least this)."""
+        return {name: self.tuning(name)['threshold'] for name in self.core.names()}
 
     async def job_ended(self, name, job, state):
         """A queue job finished: its part is on the bed, which teaches the bed check AI what "not clear" looks like."""
