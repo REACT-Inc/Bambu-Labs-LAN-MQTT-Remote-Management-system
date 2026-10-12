@@ -14,6 +14,7 @@ from swapMod.plate_swap_discord import install as install_plate_swap
 from team import Team
 from discord_Intergration.team_discord import install as install_team
 from loop_watchdog import LoopWatchdog
+from discord_lifecycle import maintain_discord
 
 
 async def main():
@@ -50,14 +51,7 @@ async def main():
     watchdog=LoopWatchdog(core.log,stall_file=diagnostics.log_dir(core.DATA_DIR)/'stalls.log')
     watchdog.start()
 
-    async def discord_task():
-        if not core.DISCORD_BOT_TOKEN:
-            core.log.warning('No Discord token configured: dashboard-only mode.');return
-        try:
-            await core.bot.start(core.DISCORD_BOT_TOKEN)
-        except Exception:
-            core.log.exception('Discord stopped. Dashboard remains available; correct token/access and restart the service.')
-    task=asyncio.create_task(discord_task())
+    task=asyncio.create_task(maintain_discord(core.bot,core.DISCORD_BOT_TOKEN,core.log))
     scheduler=asyncio.create_task(team.scheduler())
     try:
         await stopped.wait()
@@ -67,9 +61,9 @@ async def main():
         await asyncio.gather(scheduler,return_exceptions=True)
         for t in list(engine.tasks):t.cancel()
         await asyncio.gather(*engine.tasks,return_exceptions=True)
-        await core.bot.close()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):await task
+        await core.bot.close()
         for client in core.clients.values():
             client.disconnect()
             await asyncio.to_thread(client.loop_stop)
