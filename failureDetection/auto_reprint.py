@@ -89,23 +89,25 @@ class AutoReprint:
         return self.beds / f'{safe_name(name)}.jpg'
 
     async def capture_reference(self, job, author=''):
-        """Called when a print start is approved with "the plate is clear": take a fresh picture of the empty bed."""
+        """Called when a print start is approved with "the plate is clear": take a fresh picture of the empty bed.
+        Returns the picture (also kept as a training picture), or None when none was taken."""
         if author == AUTHOR or (job.get('options') or {}).get('swap') or getattr(self.core, 'EXAMPLE_MODE', False):
-            return   # a Swapmod swap print starts with the finished part still on the bed
+            return None   # a Swapmod swap print starts with the finished part still on the bed
         name = job['printer']
         if (self.core.printer_config(name) or {}).get('camera_type') not in ('rtsp', 'jpeg_tcp'):
-            return
+            return None
         try:
             picture = await self.core.capture_still(name, 20)
         except Exception as exc:
             log.info('Empty-bed reference not taken for %s (%s)', name, type(exc).__name__)
-            return
+            return None
         if picture:
             self.beds.mkdir(parents=True, exist_ok=True)
             temporary = self.reference(name).with_suffix('.tmp')
             temporary.write_bytes(picture)
             os.replace(temporary, self.reference(name))
             self.bed_cache.pop(name, None)
+        return picture or None
 
     async def bed_state(self, name, refresh=False):
         """{'state': 'clear'|'parts'|'unknown', 'detail': text, 'checked': time}."""

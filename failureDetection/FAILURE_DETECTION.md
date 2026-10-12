@@ -126,17 +126,33 @@ That makes the print area about 1.6–2× bigger to the model, without the table
 
 ### 2. Train on your own pictures (the real fix)
 
-While a printer prints, the app keeps training pictures from its camera:
-- a still **every minute**;
+The app keeps training pictures from each printer's camera:
+- a still **every minute** while it prints;
 - **every frame the AI found suspicious** (every check, 30 s apart);
+- the **empty bed**, each time a queue print is started on a cleared plate, and when you answer **It's clear** to the [bed check](#bed-check-ai-is-the-bed-empty). Not for a Swapmod swap print or an automatic reprint, where nobody cleared the plate;
 - capped at 5,000 pictures, about 1 GB (oldest removed first), and never saved when less than 2 GB is free.
 
+**Why the empty bed matters:** a model only learns what isn't a failure from pictures that show none. The public dataset has no pictures of your plates, so a model trained on it can take a textured or holographic plate for spaghetti, on an empty bed or around the print. Your own empty-bed pictures, labelled as showing nothing, teach it the difference.
+
 To use them:
-1. **Download:** open any printer → **More → AI failure watch → Download training pictures**. The ZIP is sorted into `failed/`, `finished/` and `other/` by how each print ended.
+1. **Download:** open any printer → **More → AI failure watch → Download training pictures**. The ZIP has these folders:
+
+   | Folder | What's in it |
+   |---|---|
+   | `empty-bed/` | Each printer's empty plate |
+   | `false-alarms/` | Pictures the AI scored at or above the printer's failure score, from prints that went on to finish: most are false alarms |
+   | `failed/` | Prints that failed or were stopped |
+   | `finished/` | Prints that finished normally |
+   | `other/` | Prints still running, cancelled before starting, or not started from the queue |
+
 2. **Upload:** in Roboflow, open your project → **Upload**, and drag the folders in.
-3. **Label:** draw a box around every spaghetti, warping or stringing area, labelled with that name. **Leave good prints without boxes**: they teach the model what normal looks like on your plates and in your lighting.
+3. **Label:**
+   - Draw a box around every spaghetti, warping or stringing area, labelled with that name.
+   - **Mark every picture that has nothing to box as Null** (the **Mark Null** tool, key **N**, in Roboflow Annotate): all of `empty-bed/`, and the good pictures in `false-alarms/`, `finished/` and the rest.
+   - **Don't skip this:** Roboflow leaves pictures that have no boxes and no Null mark out of the dataset. The model then never sees your empty plate or a good print.
 4. **Retrain:** generate a new dataset version and run the Colab training cell again (see [Running on the CPU](#running-on-the-cpu-onnx)).
-5. **Install the new model:** copy the new `best.onnx` over `/opt/3d-printer-management-models/print_failure.onnx`, or publish it in the [`ai-model` release](#publishing-a-model-for-every-pi) so every Pi updates itself.
+5. **Check it before installing:** `install_model.py` with `--healthy` set to the `empty-bed` folder reports how many of your empty beds the new model would flag, and `--max-false 0.05` refuses it if that's more than 1 in 20 ([Installing it](#installing-it)).
+6. **Install the new model:** copy the new `best.onnx` over `/opt/3d-printer-management-models/print_failure.onnx`, or publish it in the [`ai-model` release](#publishing-a-model-for-every-pi) so every Pi updates itself.
 
 Even 50–100 labelled pictures from your own cameras usually make a big difference. Spaghetti tests are the quickest way to get failure pictures. Settings (optional): `"collect": {"enabled": true, "every_minutes": 1, "max_pictures": 5000}`. With several printers going, 5,000 pictures is roughly a day or two of printing; download them before they roll over.
 
@@ -335,7 +351,7 @@ A second AI model on the AI HAT, next to the failure model, that tells whether a
 **It learns each printer's bed by itself.** CLIP turns a picture into a "fingerprint" of what's in it. Each printer keeps fingerprints of its own bed (the newest 30 of each kind, in `/var/lib/3d-printer-management/beds/`):
 - **Empty:** a picture when a queue job starts (the plate was just cleared).
 - **Parts on the bed:** a picture a few seconds after a queue print finishes.
-- **Your answers:** **Is the bed clear?** in the printer panel (**More → AI failure watch → Bed check**) checks it now. Answering **It's clear** or **Not clear** teaches it that picture.
+- **Your answers:** **Is the bed clear?** in the printer panel (**More → AI failure watch → Bed check**) checks it now. Answering **It's clear** or **Not clear** teaches it that picture. A clear one is also kept as an [empty-bed training picture](#2-train-on-your-own-pictures-the-real-fix) for the failure model.
 
 After 3 of each, a new picture is compared with the closest ones of each kind. If it's clearly closer to one kind, that's the answer. If it's too close to call, it says *not sure*, and the picture comparison decides. With a calibrated camera, only the bed area is compared.
 
@@ -402,7 +418,7 @@ The [Ultralytics Platform](https://platform.ultralytics.com) can compile your tr
 Two things to know about this export:
 
 - **On-chip cut-off.** The HAT drops every detection below `nms_scores_th` (0.25). A picture the CPU model scores at 0.13 scores **0** on the HAT. This doesn't matter for a `threshold` of 0.25 or higher.
-- **Generic calibration.** The 8-bit quantisation was calibrated on COCO128, which contains no printer pictures. Compare it with the `.onnx` on your own failure pictures before you trust it (`--failure` below). Exporting again with your own pictures as calibration data improves this.
+- **Generic calibration.** The 8-bit quantisation was calibrated on COCO128, which contains no printer pictures. Compare it with the `.onnx` on your own failure pictures and empty beds before you trust it (`--failure` and `--healthy` below). If the HAT model raises false alarms the `.onnx` doesn't, this is the likely cause. Exporting again with your own pictures as calibration data improves this.
 
 ### Installing it
 
@@ -526,6 +542,7 @@ Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 | *No camera picture this time.* | The camera didn't answer; see [Camera](../docs/printer-controls.md#camera). |
 | *Running on: CPU ⚠️ AI HAT model failed to start* | The `.hef` didn't load and the `.onnx` is used. Check `hailortcli fw-control identify`; after fixing it, restart the service. |
 | Failures missed, scores stay around 30–45% | Choose **Sensitive** under Sensitivity, and keep **Zoom in on the print** on. Best: train on your own pictures. |
-| False alarms | Choose **Cautious**, or raise the failure score or how long it must last, or turn watching off for that printer. Better: add pictures of your own good prints to the training data. |
+| False alarms | Choose **Cautious**, or raise the failure score or how long it must last, or turn watching off for that printer. Better: [retrain on your own pictures](#2-train-on-your-own-pictures-the-real-fix), with the good ones marked Null. |
+| Spaghetti boxes on an empty plate, or on the plate around the print | The model takes the plate's texture for spaghetti: it was trained without pictures of your plates. [Retrain](#2-train-on-your-own-pictures-the-real-fix) with the `empty-bed/` and `false-alarms/` pictures marked Null. Until then, untick **Zoom in on the print automatically** under Sensitivity (its close-ups enlarge the plate's texture too) and choose **Cautious**. With the AI HAT, check whether the `.onnx` does the same ([generic calibration](#getting-a-hef-without-a-hailo-account)). |
 
 After a failed start, the helper is retried every 5 minutes. Errors are logged to the service log (`sudo journalctl -u 3d-printer-management`).

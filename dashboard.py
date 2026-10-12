@@ -225,7 +225,7 @@ class Dashboard:
         if data.get('action')=='answer':
             if type(data.get('clear')) is not bool:raise ValueError('Say whether the bed was clear.')
             if not self.failure.bed.ready:raise ValueError('The bed check AI is not set up yet.')
-            counts=self.failure.bed.answer(name,data['clear'],request['session'].get('name','dashboard'))
+            counts=await self.failure.bed_answer(name,data['clear'],request['session'].get('name','dashboard'))
             self.failure.store_event(name,'Bed check answer','Clear' if data['clear'] else 'Not clear')
             return web.json_response({'counts':counts})
         if data.get('action')!='check':raise ValueError('Unknown action.')
@@ -245,11 +245,12 @@ class Dashboard:
         return web.json_response(await asyncio.to_thread(self.failure.training.summary))
 
     async def ai_training_zip(self, request):
-        """Training pictures from this Pi's cameras, sorted by how each print ended, for Roboflow."""
+        """Training pictures from this Pi's cameras, sorted by what they show (empty beds, false alarms, how each print
+        ended), for Roboflow."""
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
         outcomes={j['id']:j['status'] for j in self.store.jobs()}   # read here: the database stays on this thread
         target=self.core.DATA_DIR/'training-pictures.zip'
-        await asyncio.to_thread(self.failure.training.export,outcomes,target)
+        await asyncio.to_thread(self.failure.training.export,outcomes,target,self.failure.training_thresholds())
         return web.FileResponse(target,headers={'Content-Disposition':'attachment; filename="training-pictures.zip"','Content-Type':'application/zip'})
 
     async def ai_training_clear(self, request):

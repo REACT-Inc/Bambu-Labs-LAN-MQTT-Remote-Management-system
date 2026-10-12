@@ -8,9 +8,13 @@ Built on 1.8.0.
 
 ### Added
 - **Automatic reprints can use a Swapmod printer whose bed isn't clear.** When an AI-paused print is reprinted on another printer, a printer with Swapmod on swaps its plate first if its bed isn't confirmed empty, and the reprint starts when the swap print finishes. Printers that can start at once are still chosen first. See [Swapmod printers swap their plate first](failureDetection/FAILURE_DETECTION.md#swapmod-printers-swap-their-plate-first).
+- **Training pictures that teach the AI what isn't spaghetti.** For when the AI takes a textured or holographic plate for spaghetti. See [Train on your own pictures](failureDetection/FAILURE_DETECTION.md#2-train-on-your-own-pictures-the-real-fix).
+  - **The empty bed:** a picture of each printer's empty plate is kept when a queue print is started on a cleared plate, and when you answer **It's clear** to the bed check. They're in a new `empty-bed/` folder of **Download training pictures**.
+  - **False alarms:** pictures the AI scored as failing, from prints that went on to finish, are in a new `false-alarms/` folder.
 
 ### Fixed
 - **An automatic reprint onto a printer with jobs waiting in its queue** stopped the paused print, then couldn't start the copy, because only a printer's first waiting job can start. The reprint now goes ahead of the jobs waiting there.
+- **The training instructions lost the good pictures.** They said to leave pictures of good prints without boxes, but Roboflow leaves pictures with no boxes out of the dataset unless they're marked **Null**. A model retrained that way never saw an empty plate or a good print. The ZIP's README and the guide now say to mark them Null, and to check a new model on your empty beds (`install_model.py --healthy`) before installing it. The troubleshooting table covers spaghetti on an empty plate.
 
 ## Unreleased (1.8.0)
 

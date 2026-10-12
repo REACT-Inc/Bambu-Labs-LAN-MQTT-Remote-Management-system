@@ -248,11 +248,13 @@ class BedAI:
         if not self.ready:
             return dict(state='unknown', detail='the bed check AI is not ready', checked=self.clock())
         try:
+            if picture is None:
+                picture = await self.core.capture_still(name, 20) or b''
             vector = await self.fingerprint(name, picture)
         except Exception as exc:
             return dict(state='unknown', detail=f'bed check AI: {str(exc)[:150]}', checked=self.clock())
         result = dict(self.judge(name, vector), checked=self.clock())
-        self.last[name] = dict(result, vector=vector)
+        self.last[name] = dict(result, vector=vector, picture=picture)   # the picture: kept if someone says it's clear
         return result
 
     async def learn(self, name, kind, source, delay=0, still=None):
