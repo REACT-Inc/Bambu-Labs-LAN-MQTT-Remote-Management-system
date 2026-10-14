@@ -2,6 +2,16 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Changed
+- **More reliable spaghetti detection when the AI takes the plate for spaghetti.** See [Plate baseline](failureDetection/FAILURE_DETECTION.md#plate-baseline-when-the-model-takes-the-plate-for-spaghetti).
+  - **How it works:** each print first learns what the AI scores its empty plate as, while the print starts (warm-up, layer 0 or 1). For the rest of that print, a frame has to score 15 points more than the plate did to count as failing. For example, a plate that scores 50% means frames count from 65% instead of 60%.
+  - **What you see:** the plate's boxes are drawn as not counting, **Check AI now** doesn't act on them, and the AI panel and Activity say what the plate scored.
+  - **A plate the AI can't tell from a failure** (above 84%): that print isn't judged, and the AI panel says to retrain the model.
+  - **Learned again for every print,** and kept nowhere. `plate_baseline` and `plate_margin` under `failure_detection` adjust it.
+- **Training pictures are no longer collected unless you turn it on.** The new **Collect training pictures from the cameras** switch (printer panel → **More → AI failure watch → Training pictures**) turns it on for all printers. The pictures never changed the AI by themselves: they're only for training a new model. Pictures already collected are kept until you delete them, and `collect.enabled` in `config.json` still works.
+
 ## 1.8.1-beta.1
 
 Built on 1.7.7-beta.1, and includes 1.8.0, which wasn't released on its own: a desktop app for Windows laptops, automatic reprints that can use a Swapmod printer by swapping its plate first, and training pictures that teach the AI what isn't spaghetti.

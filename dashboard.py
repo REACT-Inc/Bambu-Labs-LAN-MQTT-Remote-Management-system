@@ -101,7 +101,7 @@ class Dashboard:
             web.post('/api/ai/{name}/test',self.ai_test),
             web.post('/api/ai/{name}/check',self.ai_check),
             web.post('/api/ai/{name}/tuning',self.ai_tuning),web.post('/api/ai-labels',self.ai_labels),web.post('/api/ai/{name}/bed',self.ai_bed),
-            web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),
+            web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),web.post('/api/ai-training/collect',self.ai_training_collect),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
@@ -252,6 +252,12 @@ class Dashboard:
         target=self.core.DATA_DIR/'training-pictures.zip'
         await asyncio.to_thread(self.failure.training.export,outcomes,target,self.failure.training_thresholds())
         return web.FileResponse(target,headers={'Content-Disposition':'attachment; filename="training-pictures.zip"','Content-Type':'application/zip'})
+
+    async def ai_training_collect(self, request):
+        """Turn collecting training pictures on or off (all printers). Off by default."""
+        if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
+        self.failure.set_collect((await request.json()).get('on'))
+        return web.json_response(await asyncio.to_thread(self.failure.training.summary))
 
     async def ai_training_clear(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')

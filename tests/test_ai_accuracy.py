@@ -69,7 +69,7 @@ class LookTests(unittest.TestCase):
 class TrainingTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.now=[1_800_000_000.0]
-        self.pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(self.tmp.name)),{},clock=lambda:self.now[0])
+        self.pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(self.tmp.name)),{'enabled':True},clock=lambda:self.now[0])
     def tearDown(self):self.tmp.cleanup()
     def tick(self,seconds):self.now[0]+=seconds
 
@@ -83,7 +83,7 @@ class TrainingTests(unittest.TestCase):
         self.assertEqual(self.pictures.summary()['count'],4)
 
     def test_capped(self):
-        pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(self.tmp.name)),{'max_pictures':50,'every_minutes':1},clock=lambda:self.now[0])
+        pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(self.tmp.name)),{'enabled':True,'max_pictures':50,'every_minutes':1},clock=lambda:self.now[0])
         listed=[0];original=pictures.pictures
         def counting():listed[0]+=1;return original()
         pictures.pictures=counting
@@ -140,7 +140,8 @@ class TestNowTests(unittest.IsolatedAsyncioTestCase):
         core=SimpleNamespace(DATA_DIR=Path(self.tmp.name),settings={},names=lambda:['James'],printer_config=lambda n:{'camera_type':camera},
             state_data=lambda n:(state,0,{'layer_num':0},True),capture_still=AsyncMock(return_value=picture),snapshot=AsyncMock(return_value=None),
             notify=AsyncMock(),save_settings=lambda s:None,event_listener=lambda *a:self.events.append(a),RED=1,
-            CONFIG={'failure_detection':{'enabled':True,'model':'m.onnx','threshold':0.4,'labels':['spaghetti','warping'],'classes':['spaghetti','stringing','warping']}})
+            CONFIG={'failure_detection':{'enabled':True,'model':'m.onnx','threshold':0.4,'labels':['spaghetti','warping'],'classes':['spaghetti','stringing','warping'],
+                                         'collect':{'enabled':True}}})
         self.events=[];self.crops=[]
         test=self
         class Backend:

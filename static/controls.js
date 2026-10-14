@@ -367,8 +367,13 @@ $('aiReprintNow').addEventListener('click',e=>confirmAction('Reprint on another 
 // Training pictures (count refreshed when the panel opens and every 30 s).
 let trainingLoaded=0;
 async function loadTraining(force){if(!force&&Date.now()-trainingLoaded<30000)return;trainingLoaded=Date.now();
- try{const t=await api('ai-training',undefined,'GET');$('aiTraining').textContent=t.enabled?`${t.count} pictures collected (${t.mb} MB): a still every ${t.every_minutes} min while printing, every frame the AI found suspicious, and the empty bed at each start.`+(t.problem?' ⚠️ '+t.problem:' Download them, box the failures in Roboflow, mark the rest Null, and retrain for a model that knows these cameras and plates.'):'Collecting training pictures is turned off.';
+ try{const t=await api('ai-training',undefined,'GET');if(document.activeElement!==$('aiCollect'))$('aiCollect').checked=!!t.enabled;
+  const kept=t.count?`${t.count} pictures collected (${t.mb} MB). `:'';
+  $('aiTraining').textContent=t.enabled?`Collecting: a still every ${t.every_minutes} min while printing, every frame the AI found suspicious, and the empty bed at each start. ${kept}`+(t.problem?'⚠️ '+t.problem:'Download them, box the failures in Roboflow, mark the rest Null, and retrain for a model that knows these cameras and plates.')
+   :`Not collecting. ${kept}The pictures never change the AI by themselves: turn this on only to gather pictures for training a new model.`;
   $('aiTrainingDownload').hidden=!t.count;$('aiTrainingClear').hidden=!t.count;}catch(e){$('aiTrainingBlock').hidden=true;}}
+$('aiCollect').addEventListener('change',async e=>{const on=e.target.checked;try{await api('ai-training/collect',{on});
+ notice(on?'Collecting training pictures.':'Stopped collecting training pictures.');trainingLoaded=0;await loadTraining(true);}catch(err){notice(err.message);e.target.checked=!on;}});
 $('aiTrainingClear').addEventListener('click',()=>confirmAction('Delete the collected training pictures?','All pictures collected for training are deleted from the Pi. Download them first if you still need them.','Delete the training pictures.',async()=>{await api('ai-training/clear',{});trainingLoaded=0;await loadTraining(true);notice('Training pictures deleted.');}));
 // Check AI now (one button): a fresh picture, checked right away, with the boxes the model found drawn on it. While a
 // print is running it's also a real check that pauses or alerts straight away if the picture looks failed.
