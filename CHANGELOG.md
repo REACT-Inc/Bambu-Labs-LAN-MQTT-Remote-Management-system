@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## Unreleased (1.8.4)
+
+Built on 1.8.1-beta.1.
 
 ### Changed
 - **Round numbers everywhere (#42), finished.** 1.7.5 rounded Discord's temperatures and times; now every place uses one set of rules, in Discord, the dashboard and the desktop app's tray:
