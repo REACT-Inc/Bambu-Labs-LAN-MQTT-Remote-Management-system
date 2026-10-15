@@ -2,9 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.8.4)
+## 1.8.4-beta.1
 
-Built on 1.8.1-beta.1.
+Built on 1.8.1-beta.1: more reliable spaghetti detection when the AI takes the plate for spaghetti, training pictures only when you turn them on, rounded numbers everywhere, and a clear message when a printer can't save a print (for example the H2D without its USB drive).
 
 ### Changed
 - **Round numbers everywhere (#42), finished.** 1.7.5 rounded Discord's temperatures and times; now every place uses one set of rules, in Discord, the dashboard and the desktop app's tray:
