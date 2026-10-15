@@ -89,6 +89,18 @@ How odd frames are handled:
 - **Camera gaps:** if no frame arrives for a few minutes, the evidence starts again.
 - **Suspect frames:** two or more failing frames that don't yet meet the rules show **suspect** on the dashboard. Nothing is sent.
 
+### Plate baseline: when the model takes the plate for spaghetti
+
+A model trained without pictures of your plates can take the plate itself (a textured or holographic plate) for spaghetti, on an empty bed or around the print. So each print first learns what the model makes of its plate:
+
+- **While the print starts** (the `warm_up` minutes, on layer 0 or 1), nothing has been printed yet, so what the model scores then is its false-alarm level for this plate. The second highest of those frames is used, so one odd frame doesn't count.
+- **For the rest of the print,** a frame has to score `plate_margin` (15 points) more than the empty plate did to count. For example, if the plate scores 50%, frames count as failing from 65% instead of 60%, and the keep-counting score moves up by as much. A plate that scores low changes nothing.
+- **What you see:** the camera view draws the plate's boxes as not counting, **Check AI now** doesn't act on them, and the AI panel and Activity say what the plate scored.
+- **A plate the model can't tell from a failure** (above 84% with the default margin): that print isn't judged, and the AI panel says so. [Retrain the model](#2-train-on-your-own-pictures-the-real-fix) with pictures of your empty plates.
+- **Learned again for every print** (another plate, other light), and kept nowhere. It's skipped when the watch began mid-print (after a restart) or the printer doesn't report its layer; then the usual scores apply.
+
+Settings (optional), under `failure_detection`: `"plate_baseline": false` turns it off, and `"plate_margin"` (0.05–0.5, default 0.15) sets how much more than the plate a frame must score.
+
 ### Sensitivity (per printer, in the dashboard)
 
 Open a printer → **More → AI failure watch → Sensitivity**. Pick a preset, or type your own numbers (that switches the preset to **Custom**), then press **Save sensitivity**. The text under the fields explains what the numbers mean. Settings are kept per printer in `settings.json` (`ai_tuning`).
@@ -126,7 +138,7 @@ That makes the print area about 1.6–2× bigger to the model, without the table
 
 ### 2. Train on your own pictures (the real fix)
 
-The app keeps training pictures from each printer's camera:
+**Off unless you turn it on:** tick **Collect training pictures from the cameras** (printer panel → **More → AI failure watch → Training pictures**; it applies to all printers). The pictures never change the AI by themselves: they're only for training a new model, as below. While it's on, the app keeps:
 - a still **every minute** while it prints;
 - **every frame the AI found suspicious** (every check, 30 s apart);
 - the **empty bed**, each time a queue print is started on a cleared plate, and when you answer **It's clear** to the [bed check](#bed-check-ai-is-the-bed-empty). Not for a Swapmod swap print or an automatic reprint, where nobody cleared the plate;
@@ -154,7 +166,7 @@ To use them:
 5. **Check it before installing:** `install_model.py` with `--healthy` set to the `empty-bed` folder reports how many of your empty beds the new model would flag, and `--max-false 0.05` refuses it if that's more than 1 in 20 ([Installing it](#installing-it)).
 6. **Install the new model:** copy the new `best.onnx` over `/opt/3d-printer-management-models/print_failure.onnx`, or publish it in the [`ai-model` release](#publishing-a-model-for-every-pi) so every Pi updates itself.
 
-Even 50–100 labelled pictures from your own cameras usually make a big difference. Spaghetti tests are the quickest way to get failure pictures. Settings (optional): `"collect": {"enabled": true, "every_minutes": 1, "max_pictures": 5000}`. With several printers going, 5,000 pictures is roughly a day or two of printing; download them before they roll over.
+Even 50–100 labelled pictures from your own cameras usually make a big difference. Spaghetti tests are the quickest way to get failure pictures. Settings (optional): `"collect": {"enabled": false, "every_minutes": 1, "max_pictures": 5000}`; the dashboard's switch overrides `enabled`. With several printers going, 5,000 pictures is roughly a day or two of printing; download them before they roll over.
 
 ## AI boxes on the camera view
 
@@ -512,7 +524,10 @@ Add a `failure_detection` section (see [Configuration](../docs/configuration.md#
 | `min_minutes` | `4` | Minimum minutes between the first and last failing frame. |
 | `hold` | `threshold` − 0.15 | Once two frames reached `threshold`, frames at or above this keep counting as failing. |
 | `focus` | `true` | Add close-ups around suspicious spots (and a `print`/`bed` class) automatically. |
-| `warm_up` | `3` | Minutes at the start of a print that aren't judged. |
+| `warm_up` | `3` | Minutes at the start of a print that aren't judged. The plate baseline is learned in them. |
+| `plate_baseline` | `true` | Raise each print's scores over what its empty plate scored ([plate baseline](#plate-baseline-when-the-model-takes-the-plate-for-spaghetti)). |
+| `plate_margin` | `0.15` | How much more than the empty plate a frame must score (0.05–0.5). |
+| `collect` | `{"enabled": false}` | [Training pictures](#2-train-on-your-own-pictures-the-real-fix); the dashboard's switch overrides `enabled`. |
 | `action` | `"notify"` | `"notify"` only reports; `"pause"` also pauses the print. |
 | `python` | `/usr/bin/python3` | The Python that has OpenCV (`.onnx`) or `hailo_platform` (`.hef`) installed. |
 | `input_size` | `640` | `.onnx` only: the image size the model was trained at. |
@@ -543,6 +558,6 @@ Only printers with a camera (`camera_type` `rtsp` or `jpeg_tcp`) are watched.
 | *Running on: CPU ⚠️ AI HAT model failed to start* | The `.hef` didn't load and the `.onnx` is used. Check `hailortcli fw-control identify`; after fixing it, restart the service. |
 | Failures missed, scores stay around 30–45% | Choose **Sensitive** under Sensitivity, and keep **Zoom in on the print** on. Best: train on your own pictures. |
 | False alarms | Choose **Cautious**, or raise the failure score or how long it must last, or turn watching off for that printer. Better: [retrain on your own pictures](#2-train-on-your-own-pictures-the-real-fix), with the good ones marked Null. |
-| Spaghetti boxes on an empty plate, or on the plate around the print | The model takes the plate's texture for spaghetti: it was trained without pictures of your plates. [Retrain](#2-train-on-your-own-pictures-the-real-fix) with the `empty-bed/` and `false-alarms/` pictures marked Null. Until then, untick **Zoom in on the print automatically** under Sensitivity (its close-ups enlarge the plate's texture too) and choose **Cautious**. With the AI HAT, check whether the `.onnx` does the same ([generic calibration](#getting-a-hef-without-a-hailo-account)). |
+| Spaghetti boxes on an empty plate, or on the plate around the print | The model takes the plate's texture for spaghetti: it was trained without pictures of your plates. The [plate baseline](#plate-baseline-when-the-model-takes-the-plate-for-spaghetti) keeps such boxes from counting during a print. If alarms still come, untick **Zoom in on the print automatically** under Sensitivity (its close-ups enlarge the plate's texture too) and choose **Cautious**. With the AI HAT, check whether the `.onnx` does the same ([generic calibration](#getting-a-hef-without-a-hailo-account)). The real fix: [retrain](#2-train-on-your-own-pictures-the-real-fix) with pictures of your empty plates marked Null. |
 
 After a failed start, the helper is retried every 5 minutes. Errors are logged to the service log (`sudo journalctl -u 3d-printer-management`).
