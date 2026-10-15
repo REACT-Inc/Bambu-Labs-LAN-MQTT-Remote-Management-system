@@ -16,7 +16,7 @@ EMPTY=b'\xff\xd8empty\xff\xd9'
 class ZipTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.now=[1_800_000_000.0]
-        self.pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(self.tmp.name)),{},clock=lambda:self.now[0])
+        self.pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(self.tmp.name)),{'enabled':True},clock=lambda:self.now[0])
     def tearDown(self):self.tmp.cleanup()
     def tick(self,seconds=61):self.now[0]+=seconds
 
@@ -62,7 +62,8 @@ class MonitorTests(unittest.IsolatedAsyncioTestCase):
         self.core=SimpleNamespace(DATA_DIR=Path(self.tmp.name),settings={},names=lambda:['James'],printer_config=lambda n:{'camera_type':camera},
             state_data=lambda n:('IDLE',0,{},True),capture_still=AsyncMock(return_value=EMPTY),EXAMPLE_MODE=example,notify=AsyncMock(),
             save_settings=lambda s:None,RED=1,
-            CONFIG={'failure_detection':{'enabled':True,'model':'m.onnx','threshold':0.45,'auto_reprint':{'enabled':auto_reprint}}})
+            CONFIG={'failure_detection':{'enabled':True,'model':'m.onnx','threshold':0.45,'auto_reprint':{'enabled':auto_reprint},
+                                         'collect':{'enabled':True}}})
         return FailureMonitor(self.core,SimpleNamespace(),backend=SimpleNamespace())
     def tearDown(self):self.tmp.cleanup()
     def kept(self,m):return [p.read_bytes() for p in m.training.pictures() if p.parent.name==EMPTY_BED]
@@ -126,7 +127,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
     async def test_zip_and_answer(self):
         import dashboard
         with tempfile.TemporaryDirectory() as d:
-            pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(d)),{})
+            pictures=TrainingPictures(SimpleNamespace(DATA_DIR=Path(d)),{'enabled':True})
             pictures.save('James','job1',b'jpg',0.9,'failure');pictures.save_empty('James',EMPTY)
             answers=[]
             async def bed_answer(name,clear,author):answers.append((name,clear,author));return {'empty':1,'parts':0}

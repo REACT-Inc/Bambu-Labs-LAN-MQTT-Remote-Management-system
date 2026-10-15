@@ -52,7 +52,7 @@ WORKER = Path(__file__).with_name('hailo_worker.py')
 DEFAULTS = dict(enabled=False, model='', classes=['spaghetti'], labels=[], threshold=0.6, interval='auto', window=10,
                 needed=6, min_minutes=4, warm_up=3, action='notify', python='/usr/bin/python3', input_size=640,
                 geometry={}, auto_reprint={}, crops='auto', collect={}, min_interval=None, max_interval=60,
-                hold=None, focus=True, bed_ai={}, bed_model='')
+                hold=None, focus=True, bed_ai={}, bed_model='', plate_baseline=True, plate_margin=0.15)
 CAMERAS = 2   # camera pictures fetched at the same time
 ANNOTATE_WAIT = 15   # seconds the AI may take to box a picture before it's sent without boxes
 LIVE_CPU_GAP = 3   # seconds between live-view AI looks on the CPU (the AI HAT looks at every frame)
@@ -90,6 +90,9 @@ def settings_for(config):
     s['labels'] = [str(c) for c in s['labels']] or [c for c in s['classes'] if c.lower() not in AREA_CLASSES] or list(s['classes'])
     s['hold'] = hold_for(s['threshold'], s['hold'])
     s['focus'] = bool(s['focus'])
+    # The plate baseline (Judge.baseline): what the plate scores before anything is printed, plus this much, counts.
+    s['plate_baseline'] = bool(s['plate_baseline'])
+    s['plate_margin'] = min(0.5, max(0.05, float(s['plate_margin'])))
     g = {**GEOMETRY_DEFAULTS, **(s['geometry'] if isinstance(s['geometry'], dict) else {})}
     s['geometry'] = dict(enabled=bool(g['enabled']), on_part_weight=min(1.0, max(0.0, float(g['on_part_weight']))),
                          margin_mm=min(50.0, max(0.0, float(g['margin_mm']))))
@@ -396,7 +399,13 @@ class Throttle:
 
 
 class Judge:
-    """The per-print evidence for one printer, and the decision."""
+    """The per-print evidence for one printer, and the decision.
+
+    **Plate baseline:** a model trained without pictures of your plates can take the plate itself (a textured or
+    holographic plate) for spaghetti. While a print is starting (its warm-up, on layer 0 or 1), nothing has been
+    printed yet, so what the model scores then is what it makes of the empty plate. This print's failure and
+    keep-counting scores are raised so that a frame has to score plate_margin more than that to count. It's
+    learned again for every print (another plate, other light) and kept nowhere."""
 
     def __init__(self, settings, clock=time.time):
         self.settings, self.clock = settings, clock
@@ -404,14 +413,18 @@ class Judge:
 
     def reset(self, job):
         self.job, self.started, self.frames, self.last_hash, self.flagged, self.acted = job, self.clock(), deque(maxlen=600), None, False, False
+        self.plate, self.plate_noted = [], False   # scores while the print was starting: the empty plate
 
-    def add(self, score, frame_hash):
-        """Record one scored frame; returns 'warming_up', 'duplicate', 'watching', 'suspect' or 'failure'."""
+    def add(self, score, frame_hash, start=False):
+        """Record one scored frame; returns 'warming_up', 'duplicate', 'watching', 'suspect' or 'failure'.
+        start: the frame is from the very start of the print (layer 0 or 1), when the plate is still empty."""
         now = self.clock()
         if frame_hash == self.last_hash:
             return 'duplicate'
         self.last_hash = frame_hash
         if now - self.started < self.settings['warm_up'] * 60:
+            if start:
+                self.plate.append(float(score))
             return 'warming_up'
         # A long camera gap breaks the run of evidence.
         if self.frames and now - self.frames[-1][0] > self.settings['gap_seconds']:
@@ -423,18 +436,46 @@ class Judge:
         if self.flagged:
             return 'failure'
         if (len(failing) >= self.needed() and failing[-1] - failing[0] >= self.settings['min_minutes'] * 60
-                and self.frames[-1][1] >= self.settings['hold'] and self.strong() >= STRONG_NEEDED):
+                and self.frames[-1][1] >= self.hold() and self.strong() >= STRONG_NEEDED):
             self.flagged = True
             return 'failure'
         return 'suspect' if len(failing) >= 2 else 'watching'
 
+    def baseline(self):
+        """What this print's empty plate scored as a failure: the second highest of its starting frames, so one odd
+        frame doesn't count. 0 without two of them (the watch began mid-print), or with plate_baseline off."""
+        if not self.settings.get('plate_baseline', True) or len(self.plate) < 2:
+            return 0.0
+        return sorted(self.plate)[-2]
+
+    def raised(self):
+        """How much this print's failure and keep-counting scores are raised: enough that a frame must score
+        plate_margin more than the empty plate did. 0 when the plate scored low."""
+        return max(0.0, self.baseline() + self.settings.get('plate_margin', 0.15) - self.settings['threshold'])
+
+    def threshold(self):
+        return round(min(0.99, self.settings['threshold'] + self.raised()), 3)
+
+    def hold(self):
+        return round(min(self.threshold(), self.settings['hold'] + self.raised()), 3)
+
+    def plate_text(self):
+        """What the plate baseline does for this print, for the dashboard ('' when it changes nothing)."""
+        if not self.raised():
+            return ''
+        if self.threshold() >= 0.99:
+            return (f"The model scores this empty plate at {self.baseline():.0%} as a failure, so it can't tell a failure "
+                    "from the plate: this print isn't judged. Retrain the model with pictures of your empty plates.")
+        return (f"This plate scored {self.baseline():.0%} before anything was printed, so frames count as failing from "
+                f"{self.threshold():.0%} for this print.")
+
     def strong(self):
-        return sum(1 for _, s in self.frames if s >= self.settings['threshold'])
+        return sum(1 for _, s in self.frames if s >= self.threshold())
 
     def failing_times(self):
         """Times of the failing frames in the window: those at or above the threshold, and once STRONG_NEEDED frames
         reached it, every frame from the first of them on that is at or above the lower hold score."""
-        th, hold = self.settings['threshold'], self.settings['hold']
+        th, hold = self.threshold(), self.hold()
         if self.strong() < STRONG_NEEDED:
             return [t for t, s in self.frames if s >= th]
         first = next(t for t, s in self.frames if s >= th)
@@ -685,6 +726,15 @@ class FailureMonitor:
         self.core.save_settings({**self.core.settings, 'ai_action': action})
         self.store_event('AI', 'AI action changed', 'A detected failure now ' + ('pauses the print and alerts.' if action == 'pause' else 'only alerts (never pauses).'))
 
+    def set_collect(self, on):
+        """The dashboard's switch for training pictures (training.py), for all printers. Off by default: the pictures
+        never change the AI by themselves, they're only for training a new model."""
+        if type(on) is not bool:
+            raise ValueError('Choose on or off.')
+        self.core.save_settings({**self.core.settings, 'ai_collect': on})
+        self.store_event('AI', 'Training pictures', 'Collecting training pictures from the cameras.' if on else
+                         'Stopped collecting training pictures. Those already collected are kept until you delete them.')
+
     def failure_classes(self):
         """Classes that can count as a failure (not a "print" / "bed" area class)."""
         return [c for c in self.settings['classes'] if c.lower() not in AREA_CLASSES]
@@ -828,9 +878,16 @@ class FailureMonitor:
         raw = score
         score, where = self.geometry.adjust(name, score, detections, layer)
         frame_id = hashlib.sha256(picture).hexdigest() + (f'@{self.clock()}' if on_request else '')
-        verdict = judge.add(score, frame_id)
+        # Layer 0 or 1: the plate is still empty. A printer that reports no layer gives no plate baseline (the watch may
+        # have begun mid-print, after a restart, when a real failure could already be on the plate).
+        verdict = judge.add(score, frame_id, start=data.get('layer_num') is not None and layer <= 1)
         if verdict == 'duplicate':
             return None
+        if verdict != 'warming_up' and not judge.plate_noted:   # the warm-up just ended: say what the plate scored
+            judge.plate_noted = True
+            if judge.plate_text():
+                self.store_event(name, 'AI plate baseline', judge.plate_text())
+        shown = self.effective(name, tuning)   # this print's thresholds, raised over what its empty plate scored
         status = {'warming_up': 'watching', 'watching': 'watching', 'suspect': 'suspect', 'failure': 'failure'}[verdict]
         active = self.engine.store.active(name) if getattr(self.engine, 'store', None) else None
         try:   # training pictures from this camera (never lets a disk problem stop the watch)
@@ -838,24 +895,25 @@ class FailureMonitor:
             await asyncio.to_thread(self.training.save, name, active['id'] if active else job, picture, raw, status)
         except OSError:
             log.warning('Could not save a training picture for %s', name)
-        labels = ', '.join(sorted({d.get('label', '?') for d in detections if d.get('score', 0) >= tuning['threshold']})) or ''
-        message = ('Warming up: the first minutes of a print are not judged.' if verdict == 'warming_up' else
+        threshold = shown['threshold']
+        labels = ', '.join(sorted({d.get('label', '?') for d in detections if d.get('score', 0) >= threshold})) or ''
+        message = ('Warming up: the first minutes of a print are not judged (the AI learns what this plate looks like to it).'
+                   if verdict == 'warming_up' else
                    f"{judge.failing()} of the last {len(judge.frames)} frames look like a failure" + (f' ({labels})' if labels else '')
-                   + (f', {where}' if where else '') + '.')
+                   + (f', {where}' if where else '') + '.' + (' ' + judge.plate_text() if judge.plate_text() else ''))
         if where:
             labels = f'{labels}, {where}' if labels else where
-        threshold = tuning['threshold']
-        result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, hold=tuning['hold'], verdict=verdict, where=where,
+        result = dict(score=round(score, 3), raw=round(raw, 3), threshold=threshold, hold=shown['hold'], verdict=verdict, where=where,
                       detections=detections, failing=judge.failing(), frames=len(judge.frames), acted=False, already=judge.acted,
                       crops=crops, labels=sorted(tuning['labels']))
         if judge.acted:   # already reported (and maybe paused) for this print: keep that status, don't act again
-            self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), **self.overlay(name, detections, tuning))
+            self._set(name, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), **self.overlay(name, detections, shown))
             return result
         if on_request and verdict != 'failure' and score >= threshold:
             verdict = result['verdict'] = 'failure'   # a person asked for a decision: this frame decides
             status = 'failure'
         self._set(name, status=status, score=round(score, 3), failing=judge.failing(), frames=len(judge.frames), message=message, job=job,
-                  **self.overlay(name, detections, tuning))
+                  **self.overlay(name, detections, shown))
         if verdict == 'failure':
             judge.acted = result['acted'] = True
             await self.act(name, job, judge, labels, on_request=on_request, score=score)
@@ -928,7 +986,7 @@ class FailureMonitor:
             return None
         tuning = self.tuning(name)
         _, detections = await self.backend.score(picture, self.crops(name, tuning))
-        return self.overlay(name, detections, tuning)
+        return self.overlay(name, detections, self.effective(name, tuning))
 
     async def live(self, name, frame):
         """The boxes for one live-view frame (live_camera.Cameras.score_frames). With the AI HAT it keeps up with the
@@ -957,6 +1015,13 @@ class FailureMonitor:
             log.info('AI boxes not drawn on a picture for %s (%s)', name, type(exc).__name__)
             return picture
 
+    def effective(self, name, tuning):
+        """tuning with the current print's plate baseline applied (Judge.baseline): the scores that count for it."""
+        judge = self.judges.get(name)
+        if not judge or not judge.raised():
+            return tuning
+        return dict(tuning, threshold=judge.threshold(), hold=judge.hold())
+
     def overlay(self, name, detections, tuning):
         """What the dashboard draws over the camera picture: the boxes the model found in the last checked frame
         (picture fractions), and where it zooms in next."""
@@ -977,7 +1042,7 @@ class FailureMonitor:
     async def act(self, name, job, judge, labels, on_request=False, score=None):
         failing_times = judge.failing_times()
         if on_request and not judge.flagged:
-            detail = (f"Checked on request: this camera frame scored {score:.0%} (threshold {judge.settings['threshold']:.0%})"
+            detail = (f"Checked on request: this camera frame scored {score:.0%} (threshold {judge.threshold():.0%})"
                       + (f' ({labels})' if labels else '') + f" • {job or 'current print'}")
         else:
             minutes = (judge.frames[-1][0] - min(failing_times)) / 60 if failing_times else 0

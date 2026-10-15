@@ -1,8 +1,11 @@
 """Training pictures from your own cameras, for a better failure model.
 
 A model trained on other people's photos struggles with your camera angle, lighting and plates (for example the A1
-mini's low side view of a holographic plate). The fix is training on pictures from your own printers, so while a
-printer prints the monitor keeps:
+mini's low side view of a holographic plate). The fix is training on pictures from your own printers.
+
+**Off unless turned on** (the dashboard's switch, settings.json "ai_collect", or config.json's collect.enabled). These
+pictures never change the AI by themselves: they're only for a person to label and train a new model with. While it's
+on and a printer prints, the monitor keeps:
 - one camera still every `every_minutes` (1), and
 - every frame the AI found suspicious or failing (each check, every 30 s), which are the most useful to label.
 It also keeps a picture of each printer's **empty bed** whenever a queue print is started on a cleared plate, and when
@@ -23,7 +26,7 @@ import time
 import zipfile
 from pathlib import Path
 
-DEFAULTS = dict(enabled=True, every_minutes=1.0, max_pictures=5000, min_free_mb=2048)
+DEFAULTS = dict(enabled=False, every_minutes=1.0, max_pictures=5000, min_free_mb=2048)
 FLAGGED_GAP = 25   # seconds between kept suspicious frames per printer
 HEADROOM = 20   # a tidy-up removes this many extra old pictures, so it lists the folder (slow on an SD card) rarely
 EMPTY_BED = '@empty-bed'   # the folder for empty-bed pictures (safe() never makes an '@', so no print is named this)
@@ -74,13 +77,20 @@ class TrainingPictures:
         self.count = None   # pictures kept, counted once and then kept up to date
         self.lock = threading.Lock()   # saves run in worker threads (one per printer at a time)
 
+    @property
+    def collecting(self):
+        """Whether pictures are kept: the dashboard's choice (settings.json "ai_collect"), else config.json's
+        collect.enabled, which is off by default."""
+        chosen = (getattr(self.core, 'settings', None) or {}).get('ai_collect')
+        return chosen if isinstance(chosen, bool) else self.settings['enabled']
+
     def pictures(self):
         return sorted(self.folder.glob('*/*/*.jpg'), key=lambda p: p.name) if self.folder and self.folder.is_dir() else []
 
     def save(self, name, job, picture, score, status, force=False):
         """Keep this frame when it's time for the periodic still, or when the AI found it suspicious (or force:
         a manual "Check AI now" picture)."""
-        if not self.settings['enabled'] or not picture or not self.folder:
+        if not self.collecting or not picture or not self.folder:
             return None
         now = self.clock()
         flagged = status in ('suspect', 'failure', 'paused')
@@ -99,7 +109,7 @@ class TrainingPictures:
     def save_empty(self, name, picture):
         """Keep a picture of this printer's empty bed (a print was just started on a cleared plate, or someone said
         it's clear). They're the pictures to mark Null: without them a model doesn't know what the plate looks like."""
-        if not self.settings['enabled'] or not picture or not self.folder or not self.room():
+        if not self.collecting or not picture or not self.folder or not self.room():
             return None
         stamp = time.strftime('%Y%m%d-%H%M%S', time.localtime(self.clock()))
         return self.write(self.folder / safe(name) / EMPTY_BED / f'{stamp}_empty.jpg', picture)
@@ -155,7 +165,7 @@ class TrainingPictures:
     def summary(self):
         pictures = self.pictures()
         size = sum(p.stat().st_size for p in pictures)
-        return dict(enabled=self.settings['enabled'], count=len(pictures), mb=round(size / 1024 / 1024, 1),
+        return dict(enabled=self.collecting, count=len(pictures), mb=round(size / 1024 / 1024, 1),
                     every_minutes=self.settings['every_minutes'], problem=self.problem)
 
     def export(self, outcomes, target, thresholds=None):
