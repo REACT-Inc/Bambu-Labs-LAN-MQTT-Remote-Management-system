@@ -2,6 +2,11 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Fixed
+- **A print the printer couldn't save now says what to check.** An upload refused with FTP 553 (*Could not create file*), or 550, 552 or 452, showed only the raw reply. It now names the printer's storage: for example *"The H2D couldn't save the file: it needs a USB flash drive (FAT32 or exFAT) with free space. Plug one in, restart the printer and start again."* The H2D, H2D Pro, H2S and P2S keep network prints on a USB flash drive, which isn't included; the A1, P1 and X1 series use a MicroSD card. The installation and troubleshooting guides say so too.
+
 ## 1.8.1-beta.1
 
 Built on 1.7.7-beta.1, and includes 1.8.0, which wasn't released on its own: a desktop app for Windows laptops, automatic reprints that can use a Swapmod printer by swapping its plate first, and training pictures that teach the AI what isn't spaghetti.

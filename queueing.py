@@ -1,5 +1,6 @@
 """One durable queue shared by Discord and HTTP. Starts require explicit approval; plate-swap completion requires a physical check."""
 import asyncio
+import ftplib
 import json
 import re
 import sqlite3
@@ -238,6 +239,24 @@ def download(printer, remote, dest):
         ftp.close()
 
 
+# FTP replies to the upload that mean the printer couldn't write the file to its storage: 553 could not create,
+# 550 can't open, 552 / 452 out of space, 450 / 451 busy or failed. Usually no storage inserted, or a full,
+# write-protected or unsupported one.
+STORAGE_REPLIES = ('450', '451', '452', '550', '552', '553')
+
+
+def storage_hint(printer):
+    """What to check when a printer can't save an uploaded file, naming its storage (printer_models "storage")."""
+    model = printer_models.info(printer)
+    name = model['name'] if model['key'] else 'printer'
+    if model['storage'] == 'usb':
+        return (f"The {name} couldn't save the file: it needs a USB flash drive (FAT32 or exFAT) with free space. "
+                'Plug one in, restart the printer and start again.')
+    if model['storage'] == 'sd':
+        return f"The {name} couldn't save the file: check its MicroSD card is in, has free space and isn't locked, then start again."
+    return f"The {name} couldn't save the file: check its MicroSD card or USB drive is in and has free space, then start again."
+
+
 def upload(printer, source, remote):
     ftp = ftps_client(printer)
     sent=0;expected=Path(source).stat().st_size;deadline=time.monotonic()+240
@@ -261,6 +280,10 @@ def upload(printer, source, remote):
             raise RuntimeError('Uploaded file size did not match.')
     except Exception as exc:
         detail=str(exc).replace(str(printer['access_code']),'[hidden]')
+        if phase=='transfer / TLS close' and isinstance(exc,ftplib.Error) and detail[:3] in STORAGE_REPLIES:
+            # Said first: the queue keeps the first 250 characters of an error.
+            raise RuntimeError(f"{storage_hint(printer)} (FTPS {detail[:60].strip().rstrip('.')}; {sent}/{expected} bytes sent; "
+                               'print not started.)') from exc
         raise RuntimeError(f'FTPS {phase}: {detail[:120]} • {sent}/{expected} bytes sent; file unverified, print not started.') from exc
     finally:
         ftp.close()
