@@ -2,6 +2,20 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased (1.8.4)
+
+Built on 1.8.1-beta.1.
+
+### Changed
+- **Round numbers everywhere (#42), finished.** 1.7.5 rounded Discord's temperatures and times; now every place uses one set of rules, in Discord, the dashboard and the desktop app's tray:
+  - **Missing values show "—"** instead of "?" in Discord, or "—°" on the dashboard's printer cards.
+  - **Whole percentages** for progress and filament left (45.5% shows as 46%), also in Discord's `/status`.
+  - **A heater that's off** shows `25°C → off` instead of `25°C → 0°C`.
+  - **AMS humidity and temperature are rounded** in Discord's `/filaments` and the dashboard's AMS header. Humidity shows the AMS's level from 1 to 5 (`level 4`), or the percentage when the AMS reports one (AMS 2 Pro, AMS HT).
+  - **Times** read `2 h 5 min` everywhere; Discord and the tray said `2 h 05 min`.
+  - **Halves round up** in Discord as on the dashboard (24.5 → 25), so both always show the same number.
+  - Only what's shown is rounded. Reported values, logs, diagnostic reports and the values sent to printers stay exact.
+
 ## 1.8.1-beta.1
 
 Built on 1.7.7-beta.1, and includes 1.8.0, which wasn't released on its own: a desktop app for Windows laptops, automatic reprints that can use a Swapmod printer by swapping its plate first, and training pictures that teach the AI what isn't spaghetti.

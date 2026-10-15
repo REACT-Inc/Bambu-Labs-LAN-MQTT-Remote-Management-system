@@ -5,6 +5,7 @@ tray icon says, starting with Windows, and making sure only one copy runs. Teste
 import copy
 import hmac
 import json
+import math
 import os
 import secrets
 import socket
@@ -131,19 +132,27 @@ def toast(notes, choice, names=None):
 
 # ---- the tray icon ----
 
-def minutes(value):
+def whole(value):
+    """A reported number rounded as the dashboard and Discord do (halves up, #42), or None when it isn't one."""
     try:
-        total = max(0, round(float(value)))
+        number = float(value)
     except (TypeError, ValueError):
+        return None
+    return math.floor(number + 0.5) if math.isfinite(number) else None
+
+
+def minutes(value):
+    """'45 min' or '2 h 5 min', the same as the dashboard and Discord; '' when not reported."""
+    total = whole(value)
+    if total is None:
         return ''
-    return f'{total // 60} h {total % 60:02d} min' if total >= 60 else f'{total} min'
+    total = max(0, total)
+    return f'{total // 60} h {total % 60} min' if total >= 60 else f'{total} min'
 
 
 def percent(value):
-    try:
-        return f'{max(0, min(100, round(float(value))))}%'
-    except (TypeError, ValueError):
-        return ''
+    number = whole(value)
+    return '' if number is None else f'{max(0, min(100, number))}%'
 
 
 def short(text, limit=70):
