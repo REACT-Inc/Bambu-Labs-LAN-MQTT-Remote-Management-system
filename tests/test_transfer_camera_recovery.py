@@ -26,6 +26,24 @@ class UploadTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as error:upload(self.printer,self.path,'print.3mf')
         message=str(error.exception);self.assertIn('9/9 bytes',message);self.assertIn('426',message);self.assertNotIn('secret',message)
         self.ftp.size.assert_not_called();self.ftp.close.assert_called_once()
+    def test_storage_errors_say_what_to_check(self):
+        # The printer refuses to create the file when it has no storage, or a full or write-protected one.
+        self.ftp.storbinary.side_effect=ftplib.error_perm('553 Could not create file.')
+        hints={'BOB (H2D)':"The H2D couldn't save the file: it needs a USB flash drive (FAT32 or exFAT) with free space.",
+               'A1 Mini':"The A1 mini couldn't save the file: check its MicroSD card is in",
+               'Workshop':"The printer couldn't save the file: check its MicroSD card or USB drive is in"}
+        for name,hint in hints.items():
+            self.printer['name']=name
+            with self.assertRaises(RuntimeError) as error:upload(self.printer,self.path,'print.3mf')
+            message=str(error.exception)
+            self.assertTrue(message.startswith(hint),message)
+            self.assertIn('(FTPS 553 Could not create file; 0/9 bytes sent; print not started.)',message)
+            self.assertLessEqual(len(message),250)   # the queue keeps the first 250 characters of an error
+        self.printer['name']='BOB (H2D)';self.ftp.storbinary.side_effect=ftplib.error_temp('452 Insufficient storage space')
+        with self.assertRaisesRegex(RuntimeError,'^The H2D couldn.t save the file'):upload(self.printer,self.path,'print.3mf')
+    def test_other_errors_keep_the_technical_message(self):
+        self.ftp.login.side_effect=ftplib.error_perm('530 Login incorrect.')   # a wrong access code, not storage
+        with self.assertRaisesRegex(RuntimeError,'^FTPS connect: 530 Login incorrect'):upload(self.printer,self.path,'print.3mf')
     def test_size_mismatch_blocks_success(self):
         self.ftp.size.return_value=4
         with self.assertRaisesRegex(RuntimeError,'size did not match'):upload(self.printer,self.path,'print.3mf')

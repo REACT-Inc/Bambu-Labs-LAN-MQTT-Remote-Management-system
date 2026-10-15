@@ -104,6 +104,21 @@ Other destinations, such as a Discord webhook or email, can be added in `issue_r
   sudo journalctl -u 3d-printer-management --since '5 minutes ago' --no-pager | grep -iE 'camera|snapshot'
   ```
 
+### Upload fails: "couldn't save the file" (FTP 553)
+
+The printer refused to save the file, so nothing was printed. `0/… bytes sent` means none of it reached the printer. Printers save prints sent over the network on storage you supply, and 553 (*Could not create file*) almost always means it's missing, full or unreadable:
+
+| Printers | Storage |
+|---|---|
+| H2D, H2D Pro, H2S, P2S | A USB flash drive (not included) |
+| A1, A1 mini, P1P, P1S, X1, X1 Carbon, X1E | A MicroSD card |
+
+1. **Check it's in:** plug a USB flash drive into the H2D, or insert the MicroSD card. The printer's screen shows its storage.
+2. **Format and space:** FAT32 or exFAT, with free space. Delete old files, or format it on the printer (that erases it). A MicroSD card's lock switch must be off.
+3. **Restart the printer** after inserting a drive, then start the job again: the failed job's **Queue again**.
+
+The queue error says this too, naming the printer's storage. 550, 552 and 452 replies to an upload are treated the same.
+
 ### H2D upload fails with 426
 
 `426` (or `error_temp: 426`) is an **FTP transfer error**, not a temperature.

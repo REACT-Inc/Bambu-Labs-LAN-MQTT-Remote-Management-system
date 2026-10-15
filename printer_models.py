@@ -13,14 +13,14 @@ A printer's model comes from its config.json "model" (e.g. "X1 Carbon", "P1S"), 
 import re
 
 UNKNOWN = dict(key='', name='Unknown model', series='', nozzle=300, bed=80, chamber=0, camera=None,
-               aux_fan=False, chamber_fan=False, dual_nozzle=False, ftp_unwrap=False, tested=False)
+               aux_fan=False, chamber_fan=False, dual_nozzle=False, ftp_unwrap=False, storage='', tested=False)
 
 
 def _model(key, name, series, nozzle, bed, camera, *, chamber=0, aux_fan=False, chamber_fan=False,
-           dual_nozzle=False, ftp_unwrap=False, tested=False, serials=(), studio_ids=(), aliases=()):
+           dual_nozzle=False, ftp_unwrap=False, storage='', tested=False, serials=(), studio_ids=(), aliases=()):
     return dict(UNKNOWN, key=key, name=name, series=series, nozzle=nozzle, bed=bed, chamber=chamber, camera=camera,
-                aux_fan=aux_fan, chamber_fan=chamber_fan, dual_nozzle=dual_nozzle, ftp_unwrap=ftp_unwrap, tested=tested,
-                serials=tuple(serials), studio_ids=tuple(studio_ids), aliases=tuple(aliases))
+                aux_fan=aux_fan, chamber_fan=chamber_fan, dual_nozzle=dual_nozzle, ftp_unwrap=ftp_unwrap, storage=storage,
+                tested=tested, serials=tuple(serials), studio_ids=tuple(studio_ids), aliases=tuple(aliases))
 
 
 # Values from Bambu Studio's resources/printers/<model_id>.json ("sn_prefix", "nozzle_temp_range", "bed_temp_range",
@@ -29,26 +29,32 @@ def _model(key, name, series, nozzle, bed, camera, *, chamber=0, aux_fan=False, 
 # camera: the camera_type to use in config.json ('jpeg_tcp' = TLS JPEG stream on port 6000, 'rtsp' = RTSPS on 322).
 # chamber: highest active chamber-heating target the app sends (set_ctt, 40 °C and up, like the H2D); 0 = not offered.
 # serials: first 3 characters of the serial number. studio_ids: Bambu Studio "printer_model_id" in sliced files.
+# storage: where the printer keeps files sent over the network, which the user has to supply: 'sd' (a MicroSD card)
+# or 'usb' (a USB flash drive: the H2D, H2D Pro, H2S and P2S); '' when not known.
 MODELS = {m['key']: m for m in [
-    _model('a1mini', 'A1 mini', 'A', 300, 80, 'jpeg_tcp', tested=True, serials=['030'], studio_ids=['N1'], aliases=['a1m']),
-    _model('a1', 'A1', 'A', 300, 100, 'jpeg_tcp', tested=True, serials=['039'], studio_ids=['N2S']),
+    _model('a1mini', 'A1 mini', 'A', 300, 80, 'jpeg_tcp', storage='sd', tested=True, serials=['030'], studio_ids=['N1'],
+           aliases=['a1m']),
+    _model('a1', 'A1', 'A', 300, 100, 'jpeg_tcp', storage='sd', tested=True, serials=['039'], studio_ids=['N2S']),
     _model('a2l', 'A2L', 'A', 300, 100, 'jpeg_tcp', serials=['26A'], studio_ids=['N9']),
-    _model('p1p', 'P1P', 'P', 300, 100, 'jpeg_tcp', aux_fan=True, chamber_fan=True, serials=['01S'], studio_ids=['C11']),
-    _model('p1s', 'P1S', 'P', 300, 100, 'jpeg_tcp', aux_fan=True, chamber_fan=True, serials=['01P'], studio_ids=['C12']),
-    _model('p2s', 'P2S', 'P', 300, 110, 'rtsp', aux_fan=True, chamber_fan=True, serials=['22E'], studio_ids=['N7']),
-    _model('x1', 'X1', 'X', 300, 110, 'rtsp', aux_fan=True, chamber_fan=True, serials=['00W'], studio_ids=['BL-P002']),
-    _model('x1c', 'X1 Carbon', 'X', 300, 110, 'rtsp', aux_fan=True, chamber_fan=True, serials=['00M'],
+    _model('p1p', 'P1P', 'P', 300, 100, 'jpeg_tcp', aux_fan=True, chamber_fan=True, storage='sd', serials=['01S'],
+           studio_ids=['C11']),
+    _model('p1s', 'P1S', 'P', 300, 100, 'jpeg_tcp', aux_fan=True, chamber_fan=True, storage='sd', serials=['01P'],
+           studio_ids=['C12']),
+    _model('p2s', 'P2S', 'P', 300, 110, 'rtsp', aux_fan=True, chamber_fan=True, storage='usb', serials=['22E'], studio_ids=['N7']),
+    _model('x1', 'X1', 'X', 300, 110, 'rtsp', aux_fan=True, chamber_fan=True, storage='sd', serials=['00W'],
+           studio_ids=['BL-P002']),
+    _model('x1c', 'X1 Carbon', 'X', 300, 110, 'rtsp', aux_fan=True, chamber_fan=True, storage='sd', serials=['00M'],
            studio_ids=['BL-P001'], aliases=['x1carbon']),
     # The X1E heats its chamber (to 60 °C) but Studio gives no switch-on threshold for it, so the app doesn't send set_ctt.
-    _model('x1e', 'X1E', 'X', 320, 120, 'rtsp', aux_fan=True, chamber_fan=True, serials=['03W'], studio_ids=['C13']),
+    _model('x1e', 'X1E', 'X', 320, 120, 'rtsp', aux_fan=True, chamber_fan=True, storage='sd', serials=['03W'], studio_ids=['C13']),
     _model('x2d', 'X2D', 'X', 300, 120, 'rtsp', chamber=65, aux_fan=True, chamber_fan=True, dual_nozzle=True,
            serials=['20P'], studio_ids=['N6']),
     _model('h2d', 'H2D', 'H', 350, 120, 'rtsp', chamber=65, aux_fan=True, chamber_fan=True, dual_nozzle=True,
-           ftp_unwrap=True, tested=True, serials=['094'], studio_ids=['O1D']),
+           ftp_unwrap=True, storage='usb', tested=True, serials=['094'], studio_ids=['O1D']),
     _model('h2dpro', 'H2D Pro', 'H', 350, 120, 'rtsp', chamber=65, aux_fan=True, chamber_fan=True, dual_nozzle=True,
-           ftp_unwrap=True, serials=['239'], studio_ids=['O1E']),
+           ftp_unwrap=True, storage='usb', serials=['239'], studio_ids=['O1E']),
     _model('h2s', 'H2S', 'H', 350, 120, 'rtsp', chamber=65, aux_fan=True, chamber_fan=True, ftp_unwrap=True,
-           serials=['093'], studio_ids=['O1S']),
+           storage='usb', serials=['093'], studio_ids=['O1S']),
     _model('h2c', 'H2C', 'H', 350, 120, 'rtsp', chamber=65, aux_fan=True, chamber_fan=True, dual_nozzle=True,
            ftp_unwrap=True, serials=['31B'], studio_ids=['O1C']),
 ]}

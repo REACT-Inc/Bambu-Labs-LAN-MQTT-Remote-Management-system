@@ -22,6 +22,9 @@ Built on 1.8.1-beta.1.
   - **Learned again for every print,** and kept nowhere. `plate_baseline` and `plate_margin` under `failure_detection` adjust it.
 - **Training pictures are no longer collected unless you turn it on.** The new **Collect training pictures from the cameras** switch (printer panel → **More → AI failure watch → Training pictures**) turns it on for all printers. The pictures never changed the AI by themselves: they're only for training a new model. Pictures already collected are kept until you delete them, and `collect.enabled` in `config.json` still works.
 
+### Fixed
+- **A print the printer couldn't save now says what to check.** An upload refused with FTP 553 (*Could not create file*), or 550, 552 or 452, showed only the raw reply. It now names the printer's storage: for example *"The H2D couldn't save the file: it needs a USB flash drive (FAT32 or exFAT) with free space. Plug one in, restart the printer and start again."* The H2D, H2D Pro, H2S and P2S keep network prints on a USB flash drive, which isn't included; the A1, P1 and X1 series use a MicroSD card. The installation and troubleshooting guides say so too.
+
 ## 1.8.1-beta.1
 
 Built on 1.7.7-beta.1, and includes 1.8.0, which wasn't released on its own: a desktop app for Windows laptops, automatic reprints that can use a Swapmod printer by swapping its plate first, and training pictures that teach the AI what isn't spaghetti.
