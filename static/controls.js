@@ -77,8 +77,6 @@ const SPEEDS={1:'silent',2:'standard',3:'sport',4:'ludicrous'};
 let jogNote={text:'',until:0};
 let editingTile=null,jogBusy=false,jogStep=null,jogArmTimer=null,jogReadyAt=0;
 const devPrinter=()=>state?.printers.find(p=>p.name===selectedPrinter);
-function num(v){const n=Number(v);return v===null||v===undefined||v===''||!Number.isFinite(n)?null:n;}
-function fmtTemp(v){const n=num(v);return n===null?'—':Math.round(n)+'°';}
 // Newer firmware (bit 38 of the hex "fun" flags) only jogs in fixed 1 / 10 mm steps.
 function axisCtrl(d){try{return ((BigInt('0x'+(d.fun||'0'))>>38n)&1n)===1n;}catch{return false;}}
 async function control(kind,body,label){const r=await api('printers/'+encodeURIComponent(selectedPrinter)+'/'+kind,body);notice(r.message||label||'Submitted.');pollSoon();return r;}
@@ -175,7 +173,7 @@ $('jogHome').onclick=async()=>{const b=$('jogHome');b.classList.add('pending');j
  catch(e){jogNote={text:e.message,until:Date.now()+15000};}finally{jogBusy=false;b.classList.remove('pending');renderJog(devPrinter());}};
 
 function swatch(t,active,ams,slot,waiting,tag=''){const color=/^[0-9a-f]{6}/i.test(t?.tray_color||'')?'#'+t.tray_color.slice(0,6):null,empty=!t||!t.tray_type,remain=num(t?.remain);
- return `<button type="button" class="slot${empty?' is-empty':''}${active?' active':''}${waiting?' pending':''}" data-ams="${esc(ams)}" data-slot="${esc(slot)}" title="${esc((empty?'Empty':t.tray_type+(remain!==null&&remain>=0?' · '+remain+'%':''))+' — click to edit')}"><span class="swatch"${color&&!empty?` data-color="${color}"`:''}></span><strong>${empty?'Empty':esc(t.tray_type)}</strong><small>${empty?'—':remain!==null&&remain>=0?remain+'%':'?'}</small>${!empty&&remain!==null&&remain>=0?`<i class="remain" data-width="${Math.max(0,Math.min(100,remain))}"></i>`:''}${tag}</button>`;}
+ return `<button type="button" class="slot${empty?' is-empty':''}${active?' active':''}${waiting?' pending':''}" data-ams="${esc(ams)}" data-slot="${esc(slot)}" title="${esc((empty?'Empty':t.tray_type+(remain!==null&&remain>=0?' · '+fmtPercent(remain):''))+' — click to edit')}"><span class="swatch"${color&&!empty?` data-color="${color}"`:''}></span><strong>${empty?'Empty':esc(t.tray_type)}</strong><small>${empty?'—':remain!==null&&remain>=0?fmtPercent(remain):'—'}</small>${!empty&&remain!==null&&remain>=0?`<i class="remain" data-width="${Math.max(0,Math.min(100,remain))}"></i>`:''}${tag}</button>`;}
 function exists(bits,unit,slot){try{return bits==null||Number(unit)>=32||((BigInt('0x'+bits)>>BigInt(Number(unit)*4+Number(slot)))&1n)===1n;}catch{return true;}}
 // Dual-nozzle printers (H2D): p.sides (filament_sides.py) says which nozzle each AMS / external spool feeds
 // and what each nozzle has loaded (#5). Nozzle 0 is the right one, 1 the left.
@@ -188,7 +186,7 @@ function renderAms(p){const d=p.data||{},ams=Array.isArray(d.ams)?{ams:d.ams}:(d
  const tag=(a,s)=>{const l=dual&&loadedIn(a,s);return l?`<em class="nozzle-tag">${sideName(l.nozzle)} nozzle</em>`:'';};
  const badge=n=>dual&&sideName(n)?`<span class="side-badge">${sideName(n)}${n==='both'?' nozzles':' nozzle'}</span>`:'';
  let html=dual&&sideName(sides.active)?`<p class="nozzle-now">Nozzle in use: <strong>${sideName(sides.active)}</strong></p>`:'';
- html+=units.map(u=>`<div class="ams-unit"><div class="ams-head"><strong>AMS ${esc(Number(u.id)+1||u.id)} ${badge((sides.ams||{})[String(u.id)])}</strong><small>💧 ${esc(u.humidity??'—')} · ${esc(u.temp??'—')}°C</small></div><div class="slots">${(u.tray||[]).map(t=>swatch(exists(ams.tray_exist_bits,u.id,t.id)?t:null,active(u.id,t.id),u.id,t.id,wait(u.id,t.id),tag(u.id,t.id))).join('')}</div></div>`).join('');
+ html+=units.map(u=>`<div class="ams-unit"><div class="ams-head"><strong>AMS ${esc(Number(u.id)+1||u.id)} ${badge((sides.ams||{})[String(u.id)])}</strong><small>💧 ${esc(fmtHumidity(u))} · ${esc(fmtTemp(u.temp))}</small></div><div class="slots">${(u.tray||[]).map(t=>swatch(exists(ams.tray_exist_bits,u.id,t.id)?t:null,active(u.id,t.id),u.id,t.id,wait(u.id,t.id),tag(u.id,t.id))).join('')}</div></div>`).join('');
  const externals=sides.external||(d.vt_tray?[{ams:255,nozzle:null,tray:d.vt_tray}]:[]);
  html+=externals.map(x=>`<div class="ams-unit external"><div class="ams-head"><strong>External spool ${badge(x.nozzle)}</strong></div><div class="slots">${swatch(x.tray,active(x.ams,0),externalKey(x.ams),0,wait(externalKey(x.ams),0),tag(x.ams,0))}</div></div>`).join('');
  $('amsView').innerHTML=html||'<p class="muted">No filament data reported yet.</p>';applyStyles($('amsView'));}
@@ -234,7 +232,7 @@ $('nozzleForm').onsubmit=e=>{e.preventDefault();const name=selectedPrinter,diame
  $('nozzleForm').dataset.dirty='';setPending(key,20000,p=>num(p.data?.nozzle_diameter)===diameter&&p.data?.nozzle_type===type,printerLabel(name)+' nozzle');renderNozzle(devPrinter());
  sendControl('nozzle_size',{diameter,type}).then(pollSoon,()=>{delete pending[key];renderNozzle(devPrinter());});};
 
-function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},progress=Math.max(0,Math.min(100,num(d.mc_percent)||0)),active=['RUNNING','PAUSE','PREPARE'].includes(p.state);
+function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},progress=Math.round(Math.max(0,Math.min(100,num(d.mc_percent)??0))),active=['RUNNING','PAUSE','PREPARE'].includes(p.state);
  $('detailTitle').textContent=p.display_name||p.name;$('detailModel').textContent=((p.limits||{}).chamber?'H2D · ':'')+(p.connected?'ONLINE':'OFFLINE');
  $('detailSeen').textContent=p.last_seen?'Last report '+new Date(p.last_seen*1000).toLocaleTimeString():'No report yet';
  const st=$('detailState');st.textContent=printerStateText(p);st.title='Printer reports '+(p.state||'nothing yet');st.className='state '+printerClass(p);
@@ -243,7 +241,7 @@ function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},pro
  document.querySelector('#detailDialog .now-card').classList.toggle('idle',!active);
  $('detailProgress').value=progress;$('detailPercent').textContent=progress+'%';$('detailRing').style.setProperty('--p',progress);
  $('detailLayers').textContent=`Layer ${d.layer_num??'—'} / ${d.total_layer_num??'—'}`;
- const left=num(d.mc_remaining_time);$('detailRemaining').textContent=left===null?'— remaining':(left>=60?Math.floor(left/60)+' h '+left%60+' min':left+' min')+' remaining';
+ const left=num(d.mc_remaining_time);$('detailRemaining').textContent=left===null?'— remaining':fmtMinutes(left)+' remaining';
  $('detailError').hidden=!p.error_text;$('detailError').textContent=p.error_text||'';renderAlerts(p);
  $('devPause').hidden=p.state!=='RUNNING'&&p.state!=='PREPARE';$('devResume').hidden=p.state!=='PAUSE';$('devStop').hidden=!active;
  const lt=lightShown(p);$('devLight').setAttribute('aria-pressed',String(lt.on));$('devLight').classList.toggle('pending',lt.busy);

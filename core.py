@@ -37,6 +37,7 @@ import difflib
 import io
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -592,30 +593,81 @@ async def snapshot(name, timeout=25, max_age=60):
         return None
 
 
-def whole(value):
-    """A reported number rounded for display (219.96875 -> '220'), or '?' (#42)."""
-    try:
-        return str(round(float(value)))
-    except (TypeError, ValueError):
-        return '?'
+# ---- numbers for display (#42) ----
+# Printers report more precision than is useful (219.96875°C, 312 min). These only change what's shown: stored values,
+# logs, diagnostic reports and the values sent to printers stay exact. static/app.js has the same rules (fmtTemp,
+# fmtPercent, fmtMinutes, fmtHumidity), so Discord and the dashboard show the same numbers.
+MISSING = '—'   # a value the printer didn't report
 
 
-def duration(minutes):
-    """Minutes for display: '45 min', '5 h 12 min', or '?' (#42)."""
+def number(value):
+    """A reported value as a number, or None when it's missing or isn't one ('', None, 'abc', NaN)."""
     try:
-        total = max(0, round(float(minutes)))
+        result = float(value)
     except (TypeError, ValueError):
-        return '?'
-    return f'{total // 60} h {total % 60:02d} min' if total >= 60 else f'{total} min'
+        return None
+    return result if math.isfinite(result) else None
+
+
+def half_up(value):
+    """Rounded the way the dashboard's Math.round does (2.5 -> 3), not Python's round-half-to-even (2.5 -> 2)."""
+    return math.floor(value + 0.5)
+
+
+def format_temp(value):
+    """A temperature in whole °C: 219.96875 -> '220°C', or '—'."""
+    n = number(value)
+    return MISSING if n is None else f'{half_up(n)}°C'
+
+
+def format_heat(now, target):
+    """Current and target temperature: '220°C → 230°C', '25°C → off' when the target is 0, or just the current one."""
+    goal = number(target)
+    if goal is None:
+        return format_temp(now)
+    return f"{format_temp(now)} → {format_temp(goal) if goal > 0 else 'off'}"
+
+
+def format_minutes(minutes):
+    """A time: '45 min', '2 h 5 min' from 60 minutes on, or '—'."""
+    n = number(minutes)
+    if n is None:
+        return MISSING
+    total = max(0, half_up(n))
+    return f'{total // 60} h {total % 60} min' if total >= 60 else f'{total} min'
+
+
+def format_percent(value):
+    """A whole percentage from 0 to 100 (progress, filament left, fan speed): 45.6 -> '46%', or '—'."""
+    n = number(value)
+    return MISSING if n is None else f'{half_up(max(0.0, min(100.0, n)))}%'
+
+
+def format_count(value):
+    """A whole number such as a layer: '12', or '—'."""
+    n = number(value)
+    return MISSING if n is None else str(half_up(n))
+
+
+def format_humidity(unit):
+    """An AMS unit's humidity: the percentage when it reports one (humidity_raw, from the AMS 2 Pro and AMS HT),
+    otherwise its humidity level from 1 to 5 as reported, or '—'."""
+    raw = number(unit.get('humidity_raw'))
+    if raw is not None:
+        return format_percent(raw)
+    level = number(unit.get('humidity'))
+    if level is None:
+        return MISSING
+    return f'level {half_up(level)}' if 1 <= level <= 5 else format_percent(level)
 
 
 def progress(value):
-    try:
-        percent = max(0, min(100, float(value)))
-    except (TypeError, ValueError):
-        return 'Unknown'
-    filled = round(percent / 10)
-    return '🟦' * filled + '⬜' * (10 - filled) + f' **{percent:g}%**'
+    n = number(value)
+    if n is None:
+        return MISSING
+    percent = max(0.0, min(100.0, n))
+    filled = half_up(percent / 10)
+    return '🟦' * filled + '⬜' * (10 - filled) + f' **{format_percent(percent)}**'
 
 
 def printer_reply(embed, picture):
@@ -635,18 +687,18 @@ def printer_embed(name):
                  RED if error or not connected else STATE_COLORS.get(state, GRAY))
     field(embed, 'File', safe(data.get('subtask_name', 'No file reported')), False)
     field(embed, 'Progress', progress(data.get('mc_percent')), False)
-    field(embed, 'Time remaining', duration(data.get('mc_remaining_time')))
-    field(embed, 'Layer', f"{data.get('layer_num', '?')} / {data.get('total_layer_num', '?')}")
+    field(embed, 'Time remaining', format_minutes(data.get('mc_remaining_time')))
+    field(embed, 'Layer', f"{format_count(data.get('layer_num'))} / {format_count(data.get('total_layer_num'))}")
     sides = filament_sides.nozzles(data)
     if sides:
         # Dual-nozzle printers: each nozzle's temperature, fitted hotend and loaded filament (multi-hotend).
         for n in sides:
-            heat = f"{whole(n['current'])}°C → {whole(n['target']) + '°C' if n['target'] else 'off'}"
+            heat = format_heat(n['current'], n['target'])
             details = [heat, n['hotend']['label'] if n['hotend'] else '', n['filament'] and 'Loaded: ' + n['filament']]
             field(embed, f"{n['side']} nozzle" + (' • in use' if n['active'] else ''), '\n'.join(d for d in details if d))
     else:
-        field(embed, 'Nozzle', f"{whole(data.get('nozzle_temper'))}°C → {whole(data.get('nozzle_target_temper'))}°C")
-    field(embed, 'Bed', f"{whole(data.get('bed_temper'))}°C → {whole(data.get('bed_target_temper'))}°C")
+        field(embed, 'Nozzle', format_heat(data.get('nozzle_temper'), data.get('nozzle_target_temper')))
+    field(embed, 'Bed', format_heat(data.get('bed_temper'), data.get('bed_target_temper')))
     rack = filament_sides.hotends(data)[1]
     if rack:
         field(embed, 'Hotend rack', '\n'.join(f"Slot {h['slot'] + 1}: {h['label']}" for h in rack), False)
@@ -672,11 +724,8 @@ def ai_watch_text(ai):
 def tray_text(tray):
     if not tray or not tray.get('tray_type'):
         return 'Empty / not reported'
-    try:
-        remain = float(tray.get('remain', -1))
-        remaining = f'{remain:g}%' if remain >= 0 else 'unknown'
-    except (TypeError, ValueError):
-        remaining = 'unknown'
+    remain = number(tray.get('remain'))   # -1 when the printer can't tell (no RFID tag)
+    remaining = format_percent(remain) if remain is not None and remain >= 0 else 'unknown'
     return f"{safe(tray['tray_type'])} • #{safe(tray.get('tray_color', '?'))} • {remaining} remaining"
 
 
@@ -709,7 +758,7 @@ def filament_embed(name):
         return f" • ◀ loaded in the {filament_sides.SIDES[nozzle].lower()} nozzle" if nozzle is not None else ''
 
     for unit in units[:24]:
-        text = f"Humidity: {unit.get('humidity', '?')} • Temperature: {whole(unit.get('temp'))}°C\n"
+        text = f"Humidity: {format_humidity(unit)} • Temperature: {format_temp(unit.get('temp'))}\n"
         try:
             unit_id = int(unit.get('id'))
         except (TypeError, ValueError):
@@ -899,7 +948,7 @@ async def status_command(interaction: discord.Interaction):
         state, error, data, connected = state_data(name)
         line = f"{'🟢' if connected else '🔴'} **{safe(name)}** — {display_state(state, error, connected)}"
         if state == 'RUNNING':
-            line += f" • {data.get('mc_percent', '?')}%"
+            line += f" • {format_percent(data.get('mc_percent'))}"
         if error:
             line += ' • ⚠️ ' + safe(printer_error_text(name, error).splitlines()[0][:250])
         lines.append(line)
@@ -1055,9 +1104,9 @@ def progress_description(data):
         f"**File:** {safe(data.get('subtask_name', 'Unknown'))}\n"
         f"**Status:** {safe(data.get('gcode_state', data.get('state', 'Unknown')))}\n"
         f"{progress(data.get('mc_percent'))}\n"
-        f"**Remaining:** {duration(data.get('mc_remaining_time'))} • "
-        f"**Layer:** {safe(data.get('layer_num', '?'))}/{safe(data.get('total_layer_num', '?'))}\n"
-        f"**Nozzle:** {whole(data.get('nozzle_temper'))}°C • **Bed:** {whole(data.get('bed_temper'))}°C"
+        f"**Remaining:** {format_minutes(data.get('mc_remaining_time'))} • "
+        f"**Layer:** {format_count(data.get('layer_num'))}/{format_count(data.get('total_layer_num'))}\n"
+        f"**Nozzle:** {format_temp(data.get('nozzle_temper'))} • **Bed:** {format_temp(data.get('bed_temper'))}"
     )
 
 

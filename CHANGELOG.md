@@ -2,9 +2,19 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## Unreleased (1.8.4)
+
+Built on 1.8.1-beta.1.
 
 ### Changed
+- **Round numbers everywhere (#42), finished.** 1.7.5 rounded Discord's temperatures and times; now every place uses one set of rules, in Discord, the dashboard and the desktop app's tray:
+  - **Missing values show "—"** instead of "?" in Discord, or "—°" on the dashboard's printer cards.
+  - **Whole percentages** for progress and filament left (45.5% shows as 46%), also in Discord's `/status`.
+  - **A heater that's off** shows `25°C → off` instead of `25°C → 0°C`.
+  - **AMS humidity and temperature are rounded** in Discord's `/filaments` and the dashboard's AMS header. Humidity shows the AMS's level from 1 to 5 (`level 4`), or the percentage when the AMS reports one (AMS 2 Pro, AMS HT).
+  - **Times** read `2 h 5 min` everywhere; Discord and the tray said `2 h 05 min`.
+  - **Halves round up** in Discord as on the dashboard (24.5 → 25), so both always show the same number.
+  - Only what's shown is rounded. Reported values, logs, diagnostic reports and the values sent to printers stay exact.
 - **More reliable spaghetti detection when the AI takes the plate for spaghetti.** See [Plate baseline](failureDetection/FAILURE_DETECTION.md#plate-baseline-when-the-model-takes-the-plate-for-spaghetti).
   - **How it works:** each print first learns what the AI scores its empty plate as, while the print starts (warm-up, layer 0 or 1). For the rest of that print, a frame has to score 15 points more than the plate did to count as failing. For example, a plate that scores 50% means frames count from 65% instead of 60%.
   - **What you see:** the plate's boxes are drawn as not counting, **Check AI now** doesn't act on them, and the AI panel and Activity say what the plate scored.
