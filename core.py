@@ -72,6 +72,7 @@ failure_monitor = None   # set by the dashboard (failureDetection, #70)
 notification_view = None   # (printer, title) -> buttons for a notification, set by clear_errors_discord (#34)
 alert_targets = None   # other alert destinations (alert_targets.py, #9), set by the dashboard
 status_center = None   # the dashboard's top-left status icon and its notifications (status_center.py)
+error_triage = None   # whether each printer error needs a person or was cleared by itself (error_triage.py), set by the dashboard
 
 
 def load_settings():
@@ -704,6 +705,9 @@ def printer_embed(name):
         field(embed, 'Hotend rack', '\n'.join(f"Slot {h['slot'] + 1}: {h['label']}" for h in rack), False)
     if error or data.get('hms'):
         field(embed, '⚠️ Printer error', printer_error_text(name, error, data), False)
+    check = error_triage.condition(name, error, data) if error_triage else None
+    if check:
+        field(embed, '🩺 ' + check['title'], check['why'], False)
     ai = failure_monitor.state(name) if failure_monitor else {}
     if ai.get('enabled'):
         field(embed, '🤖 AI failure watch', ai_watch_text(ai), False)
@@ -951,6 +955,9 @@ async def status_command(interaction: discord.Interaction):
             line += f" • {format_percent(data.get('mc_percent'))}"
         if error:
             line += ' • ⚠️ ' + safe(printer_error_text(name, error).splitlines()[0][:250])
+        check = error_triage.condition(name, error, data) if error_triage else None
+        if check:
+            line += ' • 🩺 ' + check['title']
         lines.append(line)
     # Split long inventories into multiple messages.
     text = ''

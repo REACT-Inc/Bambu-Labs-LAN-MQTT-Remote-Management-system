@@ -2,6 +2,19 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+Built on 1.8.4-beta.1.
+
+### Added
+- **Printer errors that clear by themselves when the printer is fine.** When a printer reports an error, the app now works out whether someone has to see to it, from the error's description, how far the print got and the bed check. See [Errors that clear by themselves](docs/printer-controls.md#errors-that-clear-by-themselves).
+  - **Kept:** problems with the filament or AMS, the nozzle or hotend, the bed or build plate, motion, hardware, a door or cover, something the printer's own AI or camera found, storage, or anything not recognised.
+  - **Cleared:** a cancelled print, a file problem, a busy printer or the network.
+    - **Nothing printed:** cleared straight away, unless the bed check sees something on the bed.
+    - **After layer 1:** cleared only once the bed check (the bed check AI, else the picture comparison) says the bed is clear. Otherwise the error stays until someone removes the failed print.
+  - **What you see:** a 🩺 line on the printer's card and in its panel (*Kept*, *Safe to clear* or *Cleared by itself*, and why), the same in Discord's `/printer` and `/status`, an alert when an error is cleared or kept because of parts on the bed, and every decision in Activity.
+  - **Never starts a print:** the next queue job still needs the plate-clear confirmation. **Settings & help → Printers → Clear safe printer errors by themselves** turns the clearing off; the cards still say which errors are safe to clear.
+
 ## 1.8.4-beta.1
 
 Built on 1.8.1-beta.1: more reliable spaghetti detection when the AI takes the plate for spaghetti, training pictures only when you turn them on, rounded numbers everywhere, and a clear message when a printer can't save a print (for example the H2D without its USB drive).

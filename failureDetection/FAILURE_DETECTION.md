@@ -370,6 +370,7 @@ After 3 of each, a new picture is compared with the closest ones of each kind. I
 **Where it's used:**
 - **Swapmod:** after the swap print, if the AI is sure there are still parts on the plate, the next print isn't started. You're told, and you can start it from the queue after checking. When it's unsure or still learning, the queue carries on as before.
 - **Automatic reprint:** a printer is only "available" if its bed is empty, and the AI is asked first. A Swapmod printer whose bed isn't confirmed empty swaps its plate first.
+- **Printer errors:** a cancelled print, a file problem and other errors that don't mean the printer needs fixing are cleared by themselves once the bed is clear. After layer 1 that takes the AI or the picture comparison saying so. See [Errors that clear by themselves](../docs/printer-controls.md#errors-that-clear-by-themselves).
 - **Never on its own:** a "parts" or "not sure" answer never starts a print.
 
 Turn it off under `failure_detection`: `"bed_ai": {"enabled": false}`.
