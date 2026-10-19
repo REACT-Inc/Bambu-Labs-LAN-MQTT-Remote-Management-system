@@ -51,6 +51,45 @@ How it works:
 - **The queue.** A printer left in FAILED by a finished or failed print can start the next queued job normally once its error is cleared, without starting anyway despite the error. Clearing never starts a job, and the next job still needs the plate-clear confirmation.
 - **Logged.** Every clear goes to Activity with who did it, the printer and the error.
 
+### Errors that clear by themselves
+
+When a printer reports an error, the app works out whether someone has to see to it, or the printer itself is fine and the error can be cleared (`error_triage.py`). About 20 seconds after the printer stops, it looks at three things:
+
+1. **What the error is about**, from its description in Bambu's error catalog:
+
+   | Kept: someone has to see to it | Safe: the printer itself is fine |
+   |---|---|
+   | Filament or AMS: ran out, tangled, cutter, feeding | A cancelled print (*The task was canceled.*) |
+   | Nozzle or hotend: clogged, temperature, extrusion | The print file: it couldn't be read, it was sliced for another printer or nozzle, or it didn't download |
+   | Bed or build plate: levelling, no plate, temperature | The printer was busy: updating, drying, loading filament |
+   | Motion: homing, motors, lost steps | The network or Bambu Cloud |
+   | Hardware: fans, sensors, power, temperatures | |
+   | A door or cover | |
+   | Something the printer's own AI or camera found: spaghetti, foreign objects | |
+   | Storage: the MicroSD card or USB drive | |
+   | Anything the app doesn't recognise, such as a fire alarm | |
+
+2. **How far the print got:** the highest layer it reached. Before layer 1 nothing has been printed, so the bed is as clean as when the print started.
+3. **The bed:** the [bed check AI](../failureDetection/FAILURE_DETECTION.md#bed-check-ai-is-the-bed-empty), or, when it can't tell, the comparison with the empty-bed picture taken when a print was last started.
+
+Then:
+- **Kept,** whatever the bed looks like: an error someone has to see to.
+- **Safe, nothing printed** (before layer 1, or no print running): cleared, unless the bed check sees something on the bed.
+- **Safe, after layer 1:** cleared only when the bed check says the bed is clear. Otherwise the failed print is probably still on it, so the error stays until someone removes it and clears the error.
+
+**What you see:**
+- **Dashboard:** a 🩺 line on the printer's card and in its panel, *Kept*, *Safe to clear*, *Cleared by itself* or *Looking into it*, saying why. The panel also shows what the bed check saw.
+- **Discord:** the same in `/printer`, and a note in `/status`.
+- **Alerts:** *✅ Error cleared by itself*, and *🧹 Parts on the bed* when an error is kept because the bed check sees parts.
+- **Activity:** every decision.
+
+**Things to know:**
+- **Clearing never starts a print.** The next queue job still needs someone to confirm the plate is clear. Once cleared, a printer left in FAILED starts its next job normally, as after **Clear error**.
+- **Only errors that appear while the app is watching are cleared.** One that was already there when the app started is only marked *Safe to clear*.
+- **Turning it off:** **Settings & help → Printers → Clear safe printer errors by themselves.** The cards still say which errors are safe to clear.
+- **Health (HMS) alerts aren't covered:** they can only be dismissed in the dashboard.
+- **Without a camera or a bed check,** the bed counts as "can't tell": safe errors from before layer 1 are still cleared, and the rest are kept.
+
 ## Cancelling single objects
 
 Like Bambu Studio and Bambu Handy, you can stop printing one or more objects on the plate while the rest carries on, for example when one part has come loose.

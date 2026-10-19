@@ -21,6 +21,7 @@ from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
 from failureDetection.detection import FailureMonitor
 from printer_alerts import Alerts
+from error_triage import Triage
 from alert_targets import AlertTargets
 from object_skip import ObjectSkip
 from queueing import MAX_UPLOAD, options, validate_archive
@@ -89,6 +90,11 @@ class Dashboard:
         self.cameras.drawer = self.failure.drawn   # ... drawn onto the frames of the raw live stream (/api/live)
         self.snapshots.ai = self.failure.look   # ... and on every dashboard still
         self.app.on_startup.append(self.failure.start);self.app.on_shutdown.append(self.failure.stop)
+        # Printer errors: does each one need a person, or can it be cleared by itself? It looks at the bed with the
+        # bed check AI, else the empty-bed picture comparison (error_triage.py).
+        self.triage = engine.triage = core.error_triage = Triage(core, store, self.alerts,
+                                                                 bed=lambda name: self.failure.reprints.bed_state(name, refresh=True))
+        self.app.on_shutdown.append(self.triage.stop)
         self.app.add_routes([
             web.get('/api/liveframe/{name}',self.cameras.frame_response),
             web.get('/api/snapshot/{name}',self.snapshots.response),
@@ -102,6 +108,7 @@ class Dashboard:
             web.post('/api/ai/{name}/test',self.ai_test),
             web.post('/api/ai/{name}/check',self.ai_check),
             web.post('/api/ai/{name}/tuning',self.ai_tuning),web.post('/api/ai-labels',self.ai_labels),web.post('/api/ai/{name}/bed',self.ai_bed),
+            web.post('/api/printer-errors/auto',self.auto_clear_errors),
             web.get('/api/ai-training',self.ai_training),web.get('/api/ai-training.zip',self.ai_training_zip),web.post('/api/ai-training/clear',self.ai_training_clear),web.post('/api/ai-training/collect',self.ai_training_collect),
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
@@ -240,6 +247,12 @@ class Dashboard:
         if 'labels' in data:self.failure.set_labels(data.get('labels'))
         if 'action' in data:self.failure.set_action(data.get('action'))
         return web.json_response({'ok':True})
+
+    async def auto_clear_errors(self, request):
+        """Settings → Printers: clear safe printer errors by themselves, or only say which are safe (error_triage.py)."""
+        data = await request.json()
+        self.triage.set_enabled(data.get('on'))
+        return web.json_response({'ok': True, 'on': self.triage.enabled})
 
     async def ai_training(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
@@ -395,7 +408,7 @@ class Dashboard:
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),storage=self.storage(name,data,connected),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),condition=self.triage.condition(name,error,data),storage=self.storage(name,data,connected),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,

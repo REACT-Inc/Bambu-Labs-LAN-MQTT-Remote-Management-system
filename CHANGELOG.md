@@ -2,7 +2,7 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## Unreleased (1.8.5)
 
 Built on 1.8.4-beta.1.
 
@@ -13,6 +13,13 @@ Built on 1.8.4-beta.1.
   - **Alerts:** for example *💾 Can't read the USB drive*, then *💾 USB drive ready* once the printer can use it again. A change has to last 15 seconds to count.
   - **Queue:** the printer's jobs wait, saying why, instead of failing during the upload. The AI's automatic reprint picks another printer. `/queueforce` still starts a job, and `"storage_check": false` on a printer's entry in `config.json` turns the check off.
   - **Formatting is still done on the printer:** printers have no network command for it, and Bambu Studio can't do it either. On the H2D, H2D Pro, H2S and H2C: **Settings → USB Storage → Format External Storage**. See [Troubleshooting](docs/troubleshooting.md#cant-read-the-usb-drive-no-usb-drive-or-usb-drive-is-read-only).
+- **Printer errors that clear by themselves when the printer is fine.** When a printer reports an error, the app now works out whether someone has to see to it, from the error's description, how far the print got and the bed check. See [Errors that clear by themselves](docs/printer-controls.md#errors-that-clear-by-themselves).
+  - **Kept:** problems with the filament or AMS, the nozzle or hotend, the bed or build plate, motion, hardware, a door or cover, something the printer's own AI or camera found, storage, or anything not recognised.
+  - **Cleared:** a cancelled print, a file problem, a busy printer or the network.
+    - **Nothing printed:** cleared straight away, unless the bed check sees something on the bed.
+    - **After layer 1:** cleared only once the bed check (the bed check AI, else the picture comparison) says the bed is clear. Otherwise the error stays until someone removes the failed print.
+  - **What you see:** a 🩺 line on the printer's card and in its panel (*Kept*, *Safe to clear* or *Cleared by itself*, and why), the same in Discord's `/printer` and `/status`, an alert when an error is cleared or kept because of parts on the bed, and every decision in Activity.
+  - **Never starts a print:** the next queue job still needs the plate-clear confirmation. **Settings & help → Printers → Clear safe printer errors by themselves** turns the clearing off; the cards still say which errors are safe to clear.
 
 ### Changed
 - **The H2C** is listed as keeping network prints on a USB flash drive, like the rest of the H2 series, so its messages name the drive.

@@ -90,6 +90,7 @@ function render(){if($('jobDialog').open)renderPrintNowOverride();renderStatus()
  }
  renderJobs();
  $('events').innerHTML=state.events.map(e=>`<div class="event"><small>${new Date(e.time*1000).toLocaleString()}</small><div><strong>${esc(e.title)} · ${esc(printerLabel(e.printer)||'System')}</strong><p>${esc(e.detail)}</p></div></div>`).join('')||'<div class="empty">Events will appear here as printers report and jobs change.</div>';
+ if(document.activeElement!==$('autoClearErrors'))$('autoClearErrors').checked=state.settings.auto_clear_errors!==false;
  if(!settingsLoaded){$('notificationChannel').value=state.settings.notification_channel_id||'';$('commandsChannel').value=state.settings.commands_channel_id||'';$('adminIds').value=(state.settings.admin_user_ids||[]).join('\n');$('alertPingUsers').value=(state.settings.alert_ping_users||[]).join('\n');settingsLoaded=true;}
  $('refreshed').textContent='Updated '+new Date().toLocaleTimeString();
  if(selectedPrinter&&$('detailDialog').open)renderDetails();
@@ -126,6 +127,8 @@ function applyStyles(root){root.querySelectorAll('[data-color]').forEach(e=>e.st
 const AI_LABELS={watching:'🤖 AI watching',suspect:'🤖 AI: suspect frames',failure:'🤖 AI: print may be failing',paused:'🤖 AI paused this print',unavailable:'🤖 AI unavailable'};
 function aiLine(ai){if(!ai?.enabled||!ai.watching||!AI_LABELS[ai.status])return '';const bad=['failure','paused'].includes(ai.status);
  return `<p class="ai-line ai-${esc(ai.status)}" title="${esc(ai.message||'')}">${AI_LABELS[ai.status]}${ai.status==='suspect'||bad?` · ${esc(ai.failing??0)}/${esc(ai.frames??0)} frames`:''}</p>`;}
+// What was decided about a printer's error (error_triage.py): kept and why, safe to clear, or cleared by itself.
+function conditionLine(x){const c=x.condition;return c?`<p class="condition-line condition-${esc(c.decision)}" title="${esc(c.message||'')}">🩺 ${esc(c.title)}: ${esc(c.why)}</p>`:'';}
 // A printer's MicroSD card or USB drive that stops prints (printer_storage.py): what's wrong, and on hover how to fix it.
 function driveLine(x){const s=x.storage;return s?`<p class="drive-line" title="${esc(s.detail)}">💾 ${esc(s.title)}</p>`:'';}
 function printerCard(x){
@@ -144,7 +147,7 @@ ${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
-${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${(x.alerts||[]).length?`<div class="pc-clear">${actionButton('clearerrors','Clear error…',n,'ghost small-btn')}</div>`:''}${driveLine(x)}${aiLine(x.ai)}
+${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${conditionLine(x)}${(x.alerts||[]).length?`<div class="pc-clear">${actionButton('clearerrors','Clear error…',n,'ghost small-btn')}</div>`:''}${driveLine(x)}${aiLine(x.ai)}
 <div class="pc-actions">${actions}<span class="spacer"></span>${actionButton('printerQueue',waiting?`${waiting} queued →`:'Queue →',n,'ghost')}</div></article>`;}
 async function downloadFileListing(printer,button){if(button)button.disabled=true;notice('Reading printer storage…');
  try{const r=await api('files/'+encodeURIComponent(printer),undefined,'GET'),url=URL.createObjectURL(new Blob([r.text],{type:'text/plain'})),a=document.createElement('a');
@@ -294,6 +297,10 @@ $('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarg
  catch(e){$('sendToReason').textContent=e.message;}finally{$('sendToSubmit').classList.remove('pending');}};
 // pm-doctor (#43) runs separately on port 8081 of the same host.
 $('doctorLink').href=`${location.protocol}//${location.hostname}:8081/`;
+// Printer errors (error_triage.py): clear the safe ones by themselves, or only say which are safe to clear.
+$('autoClearErrors').onchange=async e=>{const on=e.target.checked;
+ try{await api('printer-errors/auto',{on});notice(on?'Safe printer errors now clear by themselves.':'Printer errors no longer clear by themselves; the cards still say which are safe to clear.');await refresh();}
+ catch(err){e.target.checked=!on;notice(err.message);}};
 // Other alerts (#9): Home Assistant, ntfy, webhooks. Tokens never come back from the server; blank keeps the saved one.
 const ALERT_TYPES={ntfy:'ntfy',home_assistant:'Home Assistant',webhook:'Webhook (JSON)',discord_webhook:'Discord webhook'};
 let alertTargets=[];

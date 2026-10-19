@@ -377,6 +377,9 @@ class Engine:
             await self.core.notify(job['printer'], '⚠️ Queue job needs attention', job['label']+' • check queue details', self.core.RED)
 
     async def telemetry(self, printer, data):
+        triage = getattr(self, 'triage', None)   # printer errors: kept, or cleared by themselves (error_triage.py)
+        if triage:
+            triage.observe(printer, data)
         job = self.store.active(printer)
         if not job or job['status'] in ('staging','needs_review'):
             return
