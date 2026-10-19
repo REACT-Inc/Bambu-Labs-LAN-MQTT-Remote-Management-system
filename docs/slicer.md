@@ -32,30 +32,63 @@ The Pi itself never slices: OrcaSlicer is too heavy for it, and its official Lin
 
 ## Setting up a worker
 
-**Requirements:** an x86_64 computer running **Ubuntu 24.04 or newer, or Debian 13 or newer** (OrcaSlicer's Linux build needs their newer system libraries; Ubuntu 22.04 works only if the OrcaSlicer release has a 22.04 build, and the installer's test slice tells you). A desktop isn't needed: Ubuntu Server is fine. It needs 4 GB of RAM or more (8 GB for big plates) and a few GB of disk, on the same network as the Pi.
+### 1. Prepare the computer
+
+Any x86_64 (Intel or AMD) laptop or PC will do. ARM computers such as a Raspberry Pi won't work, because OrcaSlicer only publishes Linux builds for x86_64.
+
+- **Linux:** **Ubuntu Server 24.04 LTS** (recommended), or Debian 13. A desktop isn't needed. OrcaSlicer's Linux build needs these newer system libraries, so on Ubuntu 22.04 it only works if the OrcaSlicer release has a 22.04 build. The installer's test slice tells you.
+- **Memory and disk:** 4 GB of RAM or more (8 GB for big plates), and about 3 GB of free disk.
+- **Network:** the same network as the Pi (or the same VPN, such as Tailscale). The worker only connects out to the Pi and to GitHub, so no ports need opening.
+- **When installing Ubuntu Server:** choose **Install OpenSSH server** so you can run the rest from another computer. Then sign in and run `sudo apt update && sudo apt install -y curl`.
+
+### 2. Run the installer
 
 1. In the dashboard, open **Slicer → Workers → Add a worker**. You get a command with a one-time setup code that is valid for 24 hours.
-2. Run that command on the worker computer. It looks like this:
+2. Run that command on the worker computer:
 
    ```bash
    curl -fsSL http://PI-ADDRESS:8080/slicer/worker/install.sh | sudo bash -s -- --server http://PI-ADDRESS:8080 --code SETUP-CODE
    ```
 
-The installer:
+   Without `--server` or `--code`, it asks for them. Add options to the end of the command:
 
-- installs the packages OrcaSlicer needs, including `xvfb`, because OrcaSlicer's command line still needs a virtual display;
-- downloads **OrcaSlicer 2.4.2** from its official GitHub release (the Linux AppImage) and unpacks it in `/opt/orcaslicer`;
-- downloads the worker from the Pi into `/opt/orca-worker` and registers it with the setup code;
-- **slices a 20 mm test cube** to prove OrcaSlicer works on that computer;
-- installs the `orca-worker` service. It runs as its own `orcaworker` user, is limited to 6 GB of memory (`--memory-max 8G` changes that), can only write to `/var/lib/orca-worker`, and is restarted if it stops.
+   | Option | What it does |
+   |---|---|
+   | `--name "Laptop 3"` | The name shown in the dashboard (default: the computer's hostname) |
+   | `--memory-max 12G` | The most memory the worker may use (default 6G). Leave about 2 GB for the system. |
+   | `--auto-update` | Updates the worker from the Pi every night at about 04:30, only while it isn't slicing |
+   | `--no-keep-awake` | Doesn't stop a laptop from sleeping when its lid is closed |
+   | `--orca-url URL` | Downloads the OrcaSlicer Linux AppImage from this link instead of GitHub |
+   | `--yes` | Never asks anything, for scripted installs |
+
+It takes a few minutes and shows each step:
+
+1. **Checks the computer:** x86_64, Ubuntu or Debian version, memory, disk, and that it can reach the dashboard.
+2. **Installs the packages** OrcaSlicer needs. These include `xvfb`, because OrcaSlicer's command line still needs a virtual display.
+3. **Downloads OrcaSlicer 2.4.2** from its official GitHub release (the Linux AppImage) and unpacks it in `/opt/orcaslicer`.
+4. **Downloads the worker** from the Pi into `/opt/orca-worker`, and adds the `slicer-worker` command.
+5. **Registers** with the setup code. The worker's token is kept in `/etc/orca-worker/config.json`, readable only by root and the worker.
+6. **Slices a 20 mm test cube** to prove OrcaSlicer works on that computer.
+7. **Installs the `orca-worker` service.** It starts on boot, runs as its own `orcaworker` user, has its memory limited, can only write to `/var/lib/orca-worker`, and is restarted if it stops.
+8. **Keeps a laptop awake:** it ignores the lid switch and turns off sleep and suspend, so the worker keeps going with the lid closed.
 
 The worker then shows under **Slicer → Workers**, and its presets appear in the Slicer tab within a few seconds.
 
-**Updating:** run the same command again without `--code`. It updates the worker from the Pi and, when this app moves to a newer OrcaSlicer version, OrcaSlicer too.
+### 3. Managing a worker: `slicer-worker`
 
-Other options: `--name "Laptop 3"` (the name shown in the dashboard), `--orca-url URL` (a different download of the Linux AppImage, if GitHub can't be reached).
+| Command | What it does |
+|---|---|
+| `sudo slicer-worker status` | Running or not, registration, OrcaSlicer and worker versions, slicing now, memory limit, the last log lines |
+| `sudo slicer-worker logs` | Follows the worker's log (Ctrl+C stops it) |
+| `sudo slicer-worker test` | Slices the test cube again |
+| `sudo slicer-worker doctor` | Checks the system, memory, disk, the dashboard, GitHub, OrcaSlicer's libraries and the service, and says what to fix |
+| `sudo slicer-worker update` | Updates the worker from the Pi and, when this app moves to a newer OrcaSlicer version, OrcaSlicer too. Keeps the computer's options (memory limit, keep-awake, nightly updates). |
+| `sudo slicer-worker restart` | Restarts the service |
+| `sudo slicer-worker uninstall` | Removes the service, the worker and OrcaSlicer, and lets the laptop sleep again. `--purge` also removes its registration and data. |
 
-**Removing a worker:** **Remove** in the dashboard, then on the computer run `sudo systemctl disable --now orca-worker`.
+**Moving the Pi to a new address:** `sudo slicer-worker update --server http://NEW-ADDRESS:8080`.
+
+**Removing a worker:** `sudo slicer-worker uninstall --purge` on the computer, then **Remove** in the dashboard.
 
 ## Slicing a plate
 
@@ -108,8 +141,9 @@ This is the first part of the slicer. Not there yet:
 | Problem | What to do |
 |---|---|
 | *No slicing worker has reported its presets yet* | Set up a worker. If one is set up, check that it's online under **Workers** (`sudo systemctl status orca-worker` on it). |
-| Worker shows 🔴 offline | On the worker: `sudo journalctl -u orca-worker -n 50`. Check it can reach the Pi's address and port. |
-| The installer's test slice fails | Its output shows OrcaSlicer's error. Usually a missing library: run the installer again; on unusual distributions install `libwebkit2gtk-4.1-0` and `libgtk-3-0` by hand. |
+| Worker shows 🔴 offline | On the worker: `sudo slicer-worker doctor`, then `sudo slicer-worker logs`. Check it can reach the Pi's address and port; if the Pi moved, `sudo slicer-worker update --server http://NEW-ADDRESS:8080`. |
+| The installer's test slice fails | Its output shows OrcaSlicer's error. Run `sudo slicer-worker doctor`: it lists missing libraries. Usually `sudo slicer-worker update` fixes it; on unusual distributions install `libwebkit2gtk-4.1-0` and `libgtk-3-0` by hand. |
+| A laptop worker goes offline when its lid is closed | It was installed with `--no-keep-awake`. Run the installer again without it. |
 | A job fails with *OrcaSlicer: …* | That's OrcaSlicer's own message, for example objects outside the plate or too close together. Fix the plate or the settings and slice again. |
 | A job keeps going back in the queue | The worker is crashing or running out of memory: see its log, lower **Jobs at once**, or give it more memory with `--memory-max`. |
 | *Less than 1 GB of free disk space on the Pi* | Uploaded models and sliced plates are in the app's data folder under `slicer/`. Free some space. |

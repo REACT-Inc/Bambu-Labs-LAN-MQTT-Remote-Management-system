@@ -6,7 +6,7 @@ OrcaSlicer itself isn't run here: FAKE_ORCA below is a stand-in that takes the s
 OrcaSlicer 2.4.2 writes (result.3mf with Metadata/plate_1.gcode and slice_info.config, or result.json on an error).
 The installer's test slice runs the real OrcaSlicer on each worker. The presets are a small made-up tree shaped like
 OrcaSlicer's resources/profiles (vendor index, inherits, OrcaFilamentLibrary)."""
-import asyncio,io,json,os,shutil,struct,subprocess,sys,tarfile,tempfile,threading,time,unittest,zipfile
+import asyncio,io,json,os,re,shutil,struct,subprocess,sys,tarfile,tempfile,threading,time,unittest,zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock,patch
@@ -495,7 +495,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_worker_setup_files(self):
         r=await self.client.get('/slicer/worker/install.sh');text=await r.text()
-        self.assertEqual(r.status,200);self.assertIn(f'ORCA_VERSION="{installer.ORCA_VERSION}"',text)
+        self.assertEqual(r.status,200);self.assertIn(f'ORCA_VERSION_DEFAULT="{installer.ORCA_VERSION}"',text)
         r=await self.client.get('/slicer/worker/bundle.tar.gz')
         with tarfile.open(fileobj=io.BytesIO(await r.read())) as archive:
             self.assertEqual(sorted(archive.getnames()),['meshes.py','profiles.py','worker.py'])
@@ -522,8 +522,29 @@ class BundleTests(unittest.TestCase):
         with tempfile.NamedTemporaryFile('w',suffix='.sh',delete=False) as f:f.write(script)
         try:self.assertEqual(subprocess.run(['bash','-n',f.name],capture_output=True).returncode,0)
         finally:os.unlink(f.name)
-        for needed in ('--appimage-extract','MemoryMax=$MEMORY_MAX','test-slice','ProtectSystem=strict','User=orcaworker','chmod 0640'):
+        for needed in ('--appimage-extract','MemoryMax=$MEMORY_MAX','test-slice','ProtectSystem=strict','User=orcaworker','chmod 0640',
+                       'HandleLidSwitch=ignore','slicer-worker-update.timer','ln -sfn "$APP/slicer-worker" /usr/local/bin/slicer-worker'):
             self.assertIn(needed,script)
+        self.assertNotIn('\n  . /etc/os-release',script)   # it sets NAME, VERSION...: only read in a subshell (os_field)
+
+    def run_script(self,*args):
+        return subprocess.run(['bash','-s','--',*args],input=installer.install_script(),capture_output=True,text=True,timeout=60)
+
+    def test_installer_commands(self):
+        out=self.run_script('help')
+        self.assertEqual(out.returncode,0)
+        for command in ('install','status','logs','test','update','restart','doctor','uninstall','--auto-update','--no-keep-awake'):
+            self.assertIn(command,out.stdout)
+        out=self.run_script('--frobnicate');self.assertEqual(out.returncode,2);self.assertIn('Unknown option',out.stderr)
+        out=self.run_script('install','--memory-max','lots');self.assertEqual(out.returncode,1);self.assertIn('--memory-max',out.stderr)
+        out=self.run_script('install','--orca-version','latest;rm');self.assertEqual(out.returncode,1);self.assertIn('release tag',out.stderr)
+
+    def test_installer_helpers(self):
+        script=installer.install_script()
+        functions='\n'.join(re.search(rf'^{name}\(\) \{{.*?^\}}$|^{name}\(\) \{{.*$',script,re.M|re.S).group(0) for name in ('normalise_server','os_field'))
+        test=functions+'\nNAME=mine; for s in 192.168.1.10 pi.local:9000 http://10.0.0.2:8080/ https://pi.example; do normalise_server "$s"; done; os_field ID >/dev/null; echo "$NAME"'
+        out=subprocess.run(['bash','-c',test],capture_output=True,text=True,timeout=30)
+        self.assertEqual(out.stdout.split(),['http://192.168.1.10:8080','http://pi.local:9000','http://10.0.0.2:8080','https://pi.example:8080','mine'])
 
 
 class PageTests(unittest.TestCase):
