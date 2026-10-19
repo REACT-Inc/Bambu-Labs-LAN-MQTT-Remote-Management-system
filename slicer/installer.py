@@ -120,13 +120,48 @@ check_server() {
   ok "Dashboard reachable at $SERVER"
 }
 
+server_time() {   # the dashboard's clock (its HTTP Date header) as seconds since 1970, or nothing
+  local date
+  date=$(curl -fsSI -m 15 "$SERVER/slicer/worker/install.sh" 2>/dev/null | tr -d '\r' | sed -n 's/^[Dd]ate: //p' | head -n1)
+  [ -n "$date" ] && date -u -d "$date" +%s 2>/dev/null || true
+}
+
+clock_offset() {   # seconds this computer's clock is behind (+) or ahead (-) of the dashboard's, or nothing
+  local server
+  server=$(server_time)
+  [ -n "$server" ] && echo $(( server - $(date -u +%s) )) || true
+}
+
+check_clock() {   # A wrong clock makes apt refuse Ubuntu's package lists ("not valid yet") and HTTPS fail.
+  local offset waited=0
+  offset=$(clock_offset)
+  if [ -z "$offset" ]; then warn "Couldn't read the dashboard's clock: skipping the clock check."; return; fi
+  if [ "${offset#-}" -le 120 ]; then ok "Clock is right"; return; fi
+  say "This computer's clock is $(( ${offset#-} / 60 )) minutes $( [ "$offset" -gt 0 ] && echo behind || echo ahead ): fixing it"
+  timedatectl set-ntp true >/dev/null 2>&1 || true   # automatic time sync (systemd-timesyncd)
+  while [ "$waited" -lt 30 ]; do
+    [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = yes ] && break
+    sleep 2; waited=$((waited + 2))
+  done
+  offset=$(clock_offset)
+  if [ -n "$offset" ] && [ "${offset#-}" -gt 120 ]; then   # no time server reachable: take the dashboard's time
+    date -u -s "@$(server_time)" >/dev/null
+    command -v hwclock >/dev/null && hwclock --systohc >/dev/null 2>&1 || true
+    warn "Time sync didn't work here (are time servers blocked?): set the clock from the dashboard's instead."
+  else
+    ok "Clock fixed by automatic time sync"
+  fi
+}
+
 # ---- install / update ----
 
 install_packages() {
   say "Installing packages"
   export DEBIAN_FRONTEND=noninteractive
   local apt="apt-get -o DPkg::Lock::Timeout=600 -qq"
-  $apt update
+  if ! $apt update; then
+    fail "apt-get update failed (see above). Check this computer's clock (timedatectl), its internet access and /etc/apt/sources.list, then run this again."
+  fi
   pick() { for p in "$@"; do if apt-cache show "$p" >/dev/null 2>&1; then echo "$p"; return; fi; done; }
   local packages="python3 curl ca-certificates xvfb xauth libgl1 libegl1 libglu1-mesa libmspack0 libgstreamer1.0-0 gstreamer1.0-plugins-base"
   packages="$packages $(pick libgtk-3-0t64 libgtk-3-0) $(pick libwebkit2gtk-4.1-0) $(pick libfuse2t64 libfuse2)"
@@ -302,8 +337,9 @@ cmd_install() {
   fi
   [ -n "$NAME" ] || NAME="$(hostname)"
   check_system
-  install_packages        # curl and python3 are needed for the rest
   check_server
+  check_clock             # before apt: a wrong clock makes it refuse the package lists
+  install_packages
   install_orca
   install_worker
   register
@@ -359,7 +395,13 @@ cmd_doctor() {
   local server
   check_system || true
   server=$(config_value server)
-  if [ -n "${SERVER:-$server}" ]; then SERVER=$(normalise_server "${SERVER:-$server}"); check_server; else warn "Not registered with a dashboard yet."; fi
+  if [ -n "${SERVER:-$server}" ]; then
+    SERVER=$(normalise_server "${SERVER:-$server}"); check_server
+    local offset; offset=$(clock_offset)
+    if [ -n "$offset" ] && [ "${offset#-}" -gt 120 ]; then warn "The clock is ${offset#-} seconds off the dashboard's: run sudo timedatectl set-ntp true"; else ok "Clock is right"; fi
+  else
+    warn "Not registered with a dashboard yet."
+  fi
   if curl -fs -m 15 -o /dev/null https://api.github.com/; then ok "GitHub reachable (for OrcaSlicer downloads)"; else warn "Can't reach GitHub: updating OrcaSlicer needs --orca-url."; fi
   if [ -x /opt/orcaslicer/AppRun ]; then ok "OrcaSlicer $(cat /opt/orcaslicer/.orca-version 2>/dev/null) installed"; else warn "OrcaSlicer isn't installed."; fi
   for lib in libwebkit2gtk-4.1.so.0 libgtk-3.so.0 libEGL.so.1; do
