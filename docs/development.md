@@ -32,6 +32,7 @@ How the code is organised, how to run it locally, and how changes are tested and
 | `issue_reports.py` | Problem reports sent as GitHub issues, `/reportissue` |
 | `configure.py` | Creates `config.json` at install time (imports the old bot) and the initial password |
 | `discord_Intergration/` | Discord commands: queue (`discord_queue.py`), controls, team tools, DMs/rename/file browsing (`extra_discord.py`) |
+| `slicer/` | The Slicer tab ([slicer.md](slicer.md)): STL checks and placement (`meshes.py`), OrcaSlicer preset flattening (`profiles.py`), the changeable settings (`settings.py`), the slicing queue with leases (`jobs.py`), its web API (`web.py`), and the worker (`worker.py`) and installer (`installer.py`) for the OrcaSlicer computers |
 | `swapMod/` | Swapmod A1m plate-swap logic and its Discord commands |
 | `laptopManagement_Intergration/` | MeshCentral client and [LAPTOPS.md](../laptopManagement_Intergration/LAPTOPS.md) |
 | `Updater/` | Version (`version.py`), GitHub and ZIP updates, package validation, the root-owned worker, `update.sh`, `install-web-updater.sh` |

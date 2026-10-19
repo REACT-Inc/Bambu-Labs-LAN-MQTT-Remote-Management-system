@@ -22,6 +22,7 @@ from camera_snapshots import SnapshotRotation
 from failureDetection.detection import FailureMonitor
 from printer_alerts import Alerts
 from error_triage import Triage
+from slicer.web import Slicer
 from alert_targets import AlertTargets
 from object_skip import ObjectSkip
 from queueing import MAX_UPLOAD, options, validate_archive
@@ -95,6 +96,10 @@ class Dashboard:
         self.triage = engine.triage = core.error_triage = Triage(core, store, self.alerts,
                                                                  bed=lambda name: self.failure.reprints.bed_state(name, refresh=True))
         self.app.on_shutdown.append(self.triage.stop)
+        # The Slicer tab: models sliced by OrcaSlicer on worker computers (slicer/, docs/slicer.md).
+        self.slicer = Slicer(core, self)
+        self.app.add_routes(self.slicer.routes())
+        self.app.on_startup.append(self.slicer.start);self.app.on_shutdown.append(self.slicer.stop)
         self.app.add_routes([
             web.get('/api/liveframe/{name}',self.cameras.frame_response),
             web.get('/api/snapshot/{name}',self.snapshots.response),
@@ -130,6 +135,11 @@ class Dashboard:
     @web.middleware
     async def guard(self, request, handler):
         try:
+            # Slicing workers sign in with their own token (slicer/web.py), not the dashboard password.
+            if request.path.startswith(('/api/slicer/worker/', '/slicer/worker/')):
+                response = await handler(request)
+                response.headers.setdefault('Cache-Control','no-store')
+                return response
             if request.method != 'GET':
                 origin = request.headers.get('Origin')
                 if request.headers.get('X-PM') != '1' or (origin and origin != f'{request.scheme}://{request.host}'):
@@ -323,7 +333,7 @@ class Dashboard:
 
     async def asset(self, request):
         name=request.match_info['name']
-        if name not in ('app.js','team.js','controls.js','updates.js','style.css'): raise web.HTTPNotFound()
+        if name not in ('app.js','team.js','controls.js','updates.js','style.css','slicer.js','three.module.min.js','OrbitControls.js','TransformControls.js','STLLoader.js'): raise web.HTTPNotFound()
         return web.FileResponse(Path(__file__).parent/'static'/name)
 
     async def login(self, request):

@@ -19,6 +19,7 @@ The dashboard and the bot share the same printer connections, print queues, file
 
 - **Printers:** live status, temperatures, progress, AMS/external spool, HMS and print errors (official Bambu descriptions), camera snapshots and low-frame-rate live view.
 - **Shared print queue:** one queue per printer, fed from the dashboard (or Discord). Jobs are sliced `.3mf` uploads or files already on the printer.
+- **Slicer (new, first version):** add STL files, arrange them on a 3D plate, pick OrcaSlicer's Bambu Lab presets and change common settings, then slice on worker computers running OrcaSlicer (spare Ubuntu laptops) and send the plate to a print queue. See [Slicer](docs/slicer.md).
 - **Printer controls:** pause/resume/stop, light, nozzle/bed/chamber temperatures, speed profile, fans, and axis jogging.
 - **Discord (optional):** about 50 slash commands and progress notifications with camera snapshots at every 10%. Printer and queue actions are open to every member with confirmation and logging, and admins can choose who may use each command.
 - **Team tools:** shared notes, DM reminders, report-writer assignment and practice schedules, channel archiving, MeshCentral laptop commands, and Pi status/reboot.
@@ -56,6 +57,7 @@ The guides below are in the `docs/` folder of the [GitHub repository](https://gi
 | [Discord bot](docs/discord.md) *(optional)* | Connecting a bot, all commands, reply visibility, notifications |
 | [Commands and permissions](docs/commands.md) | Every command's default permission, changing permissions in the dashboard, logging |
 | [Print queue](docs/print-queue.md) | Supported files, job states, starting prints safely, review and recovery |
+| [Slicer](docs/slicer.md) | Slicing STL files from the dashboard on OrcaSlicer worker computers: setting up workers, building a plate, limits |
 | [Printer controls & camera](docs/printer-controls.md) | Temperatures, speed, fans, chamber, movement, lights, live view |
 | [Swapmod A1m](docs/swapmod.md) | Plate-swap batches for equipped A1 minis |
 | [AI failure detection](failureDetection/FAILURE_DETECTION.md) *(in release)* | Watching prints with an AI model (on the CPU or a Pi 5 AI HAT), pausing failed prints |
