@@ -104,13 +104,36 @@ Other destinations, such as a Discord webhook or email, can be added in `issue_r
   sudo journalctl -u 3d-printer-management --since '5 minutes ago' --no-pager | grep -iE 'camera|snapshot'
   ```
 
+### "Can't read the USB drive", "No USB drive" or "USB drive is read-only"
+
+Printers report the state of their storage (a USB flash drive or a MicroSD card) in their status updates. The app reads it the way Bambu Studio does and shows when it stops prints:
+
+- **Dashboard:** a 💾 line on the printer's card and in its panel, and an entry under the status icon.
+- **Discord:** a 💾 field in `/printer`, and a note in `/status`.
+- **Alerts:** for example *💾 Can't read the USB drive* when it goes wrong, and *💾 USB drive ready* when the printer can use it again. A change has to last 15 seconds to count, so a drive mounting after a restart doesn't send alerts.
+- **Queue:** the printer's jobs wait instead of failing during the upload. **Start next**, **Print now**, Swapmod's next job and the AI's automatic reprint say why, and the automatic reprint picks another printer.
+
+| Message | What it means | What to do |
+|---|---|---|
+| **No USB drive** / **No MicroSD card** | Nothing is inserted | Plug in a USB flash drive (FAT32 or exFAT) or insert a MicroSD card, then restart the printer |
+| **Can't read the USB drive** | The printer can't read it; it usually needs formatting | Format it on the printer (below). If it still can't be read, try another drive |
+| **USB drive is read-only** | The printer made it read-only after a save failed, often during a timelapse | Format it on the printer. If it happens again, try a faster drive |
+
+**The app can't format the drive.** Bambu printers have no command to format their storage over the network (Bambu Studio can't do it either), so it's done on the printer's screen, and it erases the drive:
+- **H2D, H2D Pro, H2S, H2C:** **Settings → USB Storage → Format External Storage**.
+- **Other printers:** format it on the printer's screen, or on a computer as FAT32 or exFAT.
+
+**If the printer keeps asking to format it**, even after formatting it itself, the drive is the problem: try another one. Bambu asks for drives that keep writing faster than 10 MB/s, and slow, very large or worn-out drives cause this.
+
+**Turning the check off:** a printer that reports its storage wrongly can skip it with `"storage_check": false` on its entry in `config.json` (see [Configuration](configuration.md#printer-entries)). `/queueforce` in Discord also starts a job without it. A printer that doesn't report its storage is never held.
+
 ### Upload fails: "couldn't save the file" (FTP 553)
 
-The printer refused to save the file, so nothing was printed. `0/… bytes sent` means none of it reached the printer. Printers save prints sent over the network on storage you supply, and 553 (*Could not create file*) almost always means it's missing, full or unreadable:
+The printer refused to save the file, so nothing was printed. `0/… bytes sent` means none of it reached the printer. Printers save prints sent over the network on storage you supply, and 553 (*Could not create file*) almost always means it's missing, full or unreadable. When the printer reports that, the queue now says so before uploading ([above](#cant-read-the-usb-drive-no-usb-drive-or-usb-drive-is-read-only)); a full drive is only found out by the upload.
 
 | Printers | Storage |
 |---|---|
-| H2D, H2D Pro, H2S, P2S | A USB flash drive (not included) |
+| H2D, H2D Pro, H2S, H2C, P2S | A USB flash drive (not included) |
 | A1, A1 mini, P1P, P1S, X1, X1 Carbon, X1E | A MicroSD card |
 
 1. **Check it's in:** plug a USB flash drive into the H2D, or insert the MicroSD card. The printer's screen shows its storage.

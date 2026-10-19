@@ -30,7 +30,7 @@ def _model(key, name, series, nozzle, bed, camera, *, chamber=0, aux_fan=False, 
 # chamber: highest active chamber-heating target the app sends (set_ctt, 40 °C and up, like the H2D); 0 = not offered.
 # serials: first 3 characters of the serial number. studio_ids: Bambu Studio "printer_model_id" in sliced files.
 # storage: where the printer keeps files sent over the network, which the user has to supply: 'sd' (a MicroSD card)
-# or 'usb' (a USB flash drive: the H2D, H2D Pro, H2S and P2S); '' when not known.
+# or 'usb' (a USB flash drive: the H2D, H2D Pro, H2S, H2C and P2S); '' when not known.
 MODELS = {m['key']: m for m in [
     _model('a1mini', 'A1 mini', 'A', 300, 80, 'jpeg_tcp', storage='sd', tested=True, serials=['030'], studio_ids=['N1'],
            aliases=['a1m']),
@@ -56,7 +56,7 @@ MODELS = {m['key']: m for m in [
     _model('h2s', 'H2S', 'H', 350, 120, 'rtsp', chamber=65, aux_fan=True, chamber_fan=True, ftp_unwrap=True,
            storage='usb', serials=['093'], studio_ids=['O1S']),
     _model('h2c', 'H2C', 'H', 350, 120, 'rtsp', chamber=65, aux_fan=True, chamber_fan=True, dual_nozzle=True,
-           ftp_unwrap=True, serials=['31B'], studio_ids=['O1C']),
+           ftp_unwrap=True, storage='usb', serials=['31B'], studio_ids=['O1C']),
 ]}
 _ALIASES = {alias: m['key'] for m in MODELS.values() for alias in m['aliases']}
 _SERIALS = {s: m['key'] for m in MODELS.values() for s in m['serials']}

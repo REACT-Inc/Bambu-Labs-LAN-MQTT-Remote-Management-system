@@ -243,6 +243,7 @@ function renderDevice(){const p=devPrinter();if(!p)return;const d=p.data||{},pro
  $('detailLayers').textContent=`Layer ${d.layer_num??'—'} / ${d.total_layer_num??'—'}`;
  const left=num(d.mc_remaining_time);$('detailRemaining').textContent=left===null?'— remaining':fmtMinutes(left)+' remaining';
  $('detailError').hidden=!p.error_text;$('detailError').textContent=p.error_text||'';renderAlerts(p);
+ const drive=p.storage;$('detailDrive').hidden=!drive;$('detailDrive').textContent=drive?`💾 ${drive.title}. ${drive.detail}`:'';
  $('devPause').hidden=p.state!=='RUNNING'&&p.state!=='PREPARE';$('devResume').hidden=p.state!=='PAUSE';$('devStop').hidden=!active;
  const lt=lightShown(p);$('devLight').setAttribute('aria-pressed',String(lt.on));$('devLight').classList.toggle('pending',lt.busy);
  for(const a of ['pause','resume','stop'])$('dev'+a[0].toUpperCase()+a.slice(1)).classList.toggle('pending',isPending(a+'|'+p.name,p));

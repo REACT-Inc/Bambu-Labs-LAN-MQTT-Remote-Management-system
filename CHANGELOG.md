@@ -2,6 +2,21 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+Built on 1.8.4-beta.1.
+
+### Added
+- **The printer's USB drive or MicroSD card, from its own reports.** Printers report whether their storage is in, readable and writable, and the app now reads that the way Bambu Studio does. When it stops prints (no drive, a drive the printer can't read, which usually needs formatting, or one the printer made read-only after a failed save):
+  - **Dashboard:** a 💾 line on the printer's card and in its panel saying what to do, and an entry under the status icon. The desktop app's tray icon turns yellow too.
+  - **Discord:** a 💾 field in `/printer`, and a note in `/status`.
+  - **Alerts:** for example *💾 Can't read the USB drive*, then *💾 USB drive ready* once the printer can use it again. A change has to last 15 seconds to count.
+  - **Queue:** the printer's jobs wait, saying why, instead of failing during the upload. The AI's automatic reprint picks another printer. `/queueforce` still starts a job, and `"storage_check": false` on a printer's entry in `config.json` turns the check off.
+  - **Formatting is still done on the printer:** printers have no network command for it, and Bambu Studio can't do it either. On the H2D, H2D Pro, H2S and H2C: **Settings → USB Storage → Format External Storage**. See [Troubleshooting](docs/troubleshooting.md#cant-read-the-usb-drive-no-usb-drive-or-usb-drive-is-read-only).
+
+### Changed
+- **The H2C** is listed as keeping network prints on a USB flash drive, like the rest of the H2 series, so its messages name the drive.
+
 ## 1.8.4-beta.1
 
 Built on 1.8.1-beta.1: more reliable spaghetti detection when the AI takes the plate for spaghetti, training pictures only when you turn them on, rounded numbers everywhere, and a clear message when a printer can't save a print (for example the H2D without its USB drive).

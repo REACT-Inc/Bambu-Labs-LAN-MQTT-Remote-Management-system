@@ -16,6 +16,7 @@ from printer_controls import Controls, limits
 import job_transfer
 import sliced_file
 import filament_sides
+import printer_storage
 from live_camera import Cameras
 from camera_snapshots import SnapshotRotation
 from failureDetection.detection import FailureMonitor
@@ -367,14 +368,22 @@ class Dashboard:
         items = []
         for name in self.core.names():
             state, error, data, connected = self.core.state_data(name)
+            label = self.core.display_name(name) if hasattr(self.core, 'display_name') else name
             if error and connected:
                 text = self.core.printer_error_text(name, error, data) if hasattr(self.core, 'printer_error_text') else describe_error(error, data)
-                items.append(dict(key=f'printer:{name}', title=f"{self.core.display_name(name) if hasattr(self.core, 'display_name') else name} reports an error",
+                items.append(dict(key=f'printer:{name}', title=f"{label} reports an error",
                                   detail=text or '', level='warn', printer=name))
+            drive = self.storage(name, data, connected)
+            if drive:
+                items.append(dict(key=f'storage:{name}', title=f"{label}: {drive['title']}", detail=drive['detail'], level='warn', printer=name))
         if getattr(self.core, 'DISCORD_BOT_TOKEN', '') and not self.core.EXAMPLE_MODE and not self.core.bot.is_ready():
             items.append(dict(key='discord', title='Discord is offline', level='warn',
                               detail='The bot is reconnecting. The dashboard and the other alerts keep working.'))
         return items
+
+    def storage(self, name, data, connected):
+        """What stops the printer printing from its MicroSD card or USB drive, or None (printer_storage.py)."""
+        return printer_storage.for_printer(self.core, name, data) if connected else None
 
     def error_text(self, name, error, data):
         if not (error or data.get('hms')):
@@ -386,7 +395,7 @@ class Dashboard:
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),storage=self.storage(name,data,connected),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,

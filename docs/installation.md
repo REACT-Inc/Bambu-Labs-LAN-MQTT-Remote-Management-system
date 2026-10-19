@@ -22,7 +22,7 @@ This guide installs 3D Printer Management as a systemd service on a Raspberry Pi
 | Python | 3.11 or newer (installed by the installer from the OS packages) |
 | Network to printers | The Pi must reach each printer on the LAN: MQTT over TLS on **8883**, FTPS on **990** (plus its data connection), and the camera port (**6000** for A1-family JPEG cameras, **322** for RTSP cameras such as the H2D) |
 | Printer settings | LAN mode / developer mode as required by your firmware, and each printer's **IP address, serial number and access code** |
-| Printer storage | Prints sent from the app are saved on the printer first, as with Bambu Studio: a **USB flash drive** in the H2D, H2D Pro, H2S and P2S (not included), a **MicroSD card** in the A1, A1 mini, P1 and X1 series |
+| Printer storage | Prints sent from the app are saved on the printer first, as with Bambu Studio: a **USB flash drive** in the H2D, H2D Pro, H2S, H2C and P2S (not included), a **MicroSD card** in the A1, A1 mini, P1 and X1 series |
 | Internet (during install) | To download OS packages and Python packages from PyPI |
 | Discord (optional) | Not needed: everything is done in the dashboard. To add the bot later, you need a bot token and your server ID, entered in the dashboard. |
 

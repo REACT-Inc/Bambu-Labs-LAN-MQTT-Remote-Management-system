@@ -67,6 +67,7 @@ The start is refused if:
 - the printer is offline, or hasn't reported in the last 90 seconds
 - the printer isn't IDLE or FINISH
 - the printer reports an error
+- the printer reports its MicroSD card or USB drive missing, unreadable or read-only ([what to do](troubleshooting.md#cant-read-the-usb-drive-no-usb-drive-or-usb-drive-is-read-only))
 - the printer already has an active or unresolved job
 - a software update is in progress
 

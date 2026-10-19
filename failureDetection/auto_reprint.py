@@ -206,7 +206,7 @@ class AutoReprint:
                 try:
                     self.engine.ready(name)
                 except ValueError as exc:
-                    row['reason'] = str(exc).split('.')[0].lower()
+                    row['reason'] = getattr(exc, 'short', None) or str(exc).split('.')[0].lower()
             if not row['reason'] and job.get('asset'):
                 row['use_ams'], row['mapping'], row['reason'] = self._plate_mapping(job, job['asset'], name, closest=bool(marked))
                 row['can_mark'] = row['reason'] == 'the loaded filament does not match'
