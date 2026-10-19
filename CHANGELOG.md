@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.9.1-beta.1
+
+Built on 1.8.5-beta.1: a Slicer tab that turns STL files into printable plates without Bambu Studio, with OrcaSlicer running on spare Ubuntu laptops set up by a one-line installer.
 
 ### Added
 - **Slicer tab: slice STL files from the dashboard.** This is the first version. See [Slicer](docs/slicer.md).
