@@ -2,9 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased (1.8.5)
+## 1.8.5-beta.1
 
-Built on 1.8.4-beta.1.
+Built on 1.8.4-beta.1: the printer's USB drive or MicroSD card shown on the dashboard and in Discord, with the queue waiting instead of failing the upload when the printer can't use it (for example an H2D drive that needs formatting), and printer errors that clear by themselves when the printer is fine, such as a cancelled print, while the ones that need a person (filament, nozzle, bed and so on) are kept.
 
 ### Added
 - **The printer's USB drive or MicroSD card, from its own reports.** Printers report whether their storage is in, readable and writable, and the app now reads that the way Bambu Studio does. When it stops prints (no drive, a drive the printer can't read, which usually needs formatting, or one the printer made read-only after a failed save):
