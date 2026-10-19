@@ -73,6 +73,10 @@ Clicking a printer card opens its **printer panel**. It slides in from the right
 
 Queue rules and job states are explained in [Print queue](print-queue.md).
 
+## Slicer
+
+Build a plate from STL files in a 3D view, choose OrcaSlicer presets and settings, and slice it on a worker computer. Sliced plates can be downloaded or sent to a printer's print queue. Workers are set up and managed at the bottom of the tab. See [Slicer](slicer.md).
+
 ## Activity
 
 A feed of recent events, newest first:

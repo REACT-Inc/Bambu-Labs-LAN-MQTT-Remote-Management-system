@@ -16,7 +16,7 @@ async function api(path,body,method='POST'){
 }
 function showLogin(){ $('app').hidden=true;$('loginScreen').hidden=false;state=null;settingsLoaded=false; }
 function notice(text){$('notice').textContent=text;$('notice').hidden=false;setTimeout(()=>$('notice').hidden=true,7000);}
-function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.'}[name];}
+function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.',slicer:'Slice it here, print it there.'}[name];window.dispatchEvent(new CustomEvent('tab',{detail:name}));}
 function printerLabel(name){return state?.printers.find(p=>p.name===name)?.display_name||name;}
 // Printer badges use the server's display_state (Ready / Printing / Paused / Error / Offline), not the raw state.
 function printerClass(p){const d=p.display_state||p.state;return !p.connected||d==='Error'||d==='Offline'?'bad':['Paused','Preparing'].includes(d)?'warn':d==='Printing'?'blue':'';}

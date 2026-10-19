@@ -2,6 +2,17 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Added
+- **Slicer tab: slice STL files from the dashboard.** This is the first version. See [Slicer](docs/slicer.md).
+  - **Plate:** add STL files, then move, rotate and scale them in a 3D view, or type exact numbers. Duplicate, drop to bed and arrange. Objects off the plate, too tall or overlapping turn red.
+  - **Presets and settings:** OrcaSlicer's Bambu Lab printer, process and filament presets, only matching ones offered. 28 common settings can be changed (layer height, walls, infill, speeds, supports, brim, temperatures, flow, fan), each checked against its limits.
+  - **Slicing on worker computers:** OrcaSlicer 2.4.2 runs on x86_64 Ubuntu or Debian computers, such as spare laptops, not on the Pi. **Slicer → Workers → Add a worker** gives a one-line install command with a one-time setup code. It checks the computer, installs OrcaSlicer and the worker service, slices a test cube to prove it works, and keeps a laptop awake with its lid closed. The `slicer-worker` command on the worker then shows its status and logs, runs a test slice or `doctor` check, updates it (optionally every night when idle) and uninstalls it.
+  - **Queue:** jobs go to free workers, with live progress and status. A job whose worker disappears goes back in the queue for another worker, up to 3 tries. Workers can be turned off or drained, and set to slice more than one job at once.
+  - **Results:** print time, filament, weight and OrcaSlicer's warnings. **Download** the `.gcode.3mf`, or **Send to print queue**, where it still waits for **Start** with a clear plate.
+  - **Not yet:** 3MF/OBJ/STEP import, toolpath preview, multi-colour plates and saved presets.
+
 ## 1.8.5-beta.1
 
 Built on 1.8.4-beta.1: the printer's USB drive or MicroSD card shown on the dashboard and in Discord, with the queue waiting instead of failing the upload when the printer can't use it (for example an H2D drive that needs formatting), and printer errors that clear by themselves when the printer is fine, such as a cancelled print, while the ones that need a person (filament, nozzle, bed and so on) are kept.
