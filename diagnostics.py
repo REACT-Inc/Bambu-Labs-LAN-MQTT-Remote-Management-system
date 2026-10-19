@@ -14,6 +14,8 @@ import time
 import zipfile
 from pathlib import Path
 
+import printer_storage
+
 LOG_NAME = 'management.log'
 LOG_BYTES, LOG_BACKUPS = 2 * 1024 * 1024, 5
 FORMAT = '%(asctime)s %(levelname)s [%(name)s] %(message)s'
@@ -147,7 +149,7 @@ def printer_summary(core):
             'name': name, 'model': config.get('model'), 'ip': config.get('ip'), 'serial': config.get('serial'),
             'connected': connected, 'state': state, 'print_error': error,
             'seconds_since_report': round(time.time() - seen, 1) if seen else None,
-            'hms': data.get('hms'), 'latest_report': data,
+            'hms': data.get('hms'), 'storage': printer_storage.state(data), 'latest_report': data,
         })
     return printers
 

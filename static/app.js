@@ -129,6 +129,8 @@ function aiLine(ai){if(!ai?.enabled||!ai.watching||!AI_LABELS[ai.status])return 
  return `<p class="ai-line ai-${esc(ai.status)}" title="${esc(ai.message||'')}">${AI_LABELS[ai.status]}${ai.status==='suspect'||bad?` · ${esc(ai.failing??0)}/${esc(ai.frames??0)} frames`:''}</p>`;}
 // What was decided about a printer's error (error_triage.py): kept and why, safe to clear, or cleared by itself.
 function conditionLine(x){const c=x.condition;return c?`<p class="condition-line condition-${esc(c.decision)}" title="${esc(c.message||'')}">🩺 ${esc(c.title)}: ${esc(c.why)}</p>`:'';}
+// A printer's MicroSD card or USB drive that stops prints (printer_storage.py): what's wrong, and on hover how to fix it.
+function driveLine(x){const s=x.storage;return s?`<p class="drive-line" title="${esc(s.detail)}">💾 ${esc(s.title)}</p>`:'';}
 function printerCard(x){
  const d=x.data||{},n=`data-printer="${esc(x.name)}"`,progress=Math.round(Math.max(0,Math.min(100,num(d.mc_percent)??0))),active=['RUNNING','PAUSE','PREPARE'].includes(x.state);
  const waiting=state.jobs.filter(v=>v.printer===x.name&&v.status==='queued').length,left=fmtMinutes(d.mc_remaining_time);
@@ -145,7 +147,7 @@ ${x.has_camera?`<div class="pc-cam">${x.snapshot?.time?`<img src="/api/snapshot/
 <div class="pc-file">${esc(d.subtask_name||(active?'Unknown file':'Ready for the next job'))}</div>
 ${active?`<div class="progress"><progress value="${progress}" max="100"></progress></div><div class="pc-meta"><span>${progress}%</span><span>${d.layer_num!=null?`Layer ${esc(d.layer_num)}/${esc(d.total_layer_num??'?')}`:''}</span><span>${left?esc(left)+' left':''}</span></div>`:''}
 <div class="pc-stats"><span><small>Nozzle</small>${temp(d.nozzle_temper,d.nozzle_target_temper)}</span><span><small>Bed</small>${temp(d.bed_temper,d.bed_target_temper)}</span><span class="pc-ams">${miniSwatches(d)}</span></div>
-${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${conditionLine(x)}${(x.alerts||[]).length?`<div class="pc-clear">${actionButton('clearerrors','Clear error…',n,'ghost small-btn')}</div>`:''}${aiLine(x.ai)}
+${x.error_text?`<p class="printer-error">${esc(x.error_text)}</p>`:''}${conditionLine(x)}${(x.alerts||[]).length?`<div class="pc-clear">${actionButton('clearerrors','Clear error…',n,'ghost small-btn')}</div>`:''}${driveLine(x)}${aiLine(x.ai)}
 <div class="pc-actions">${actions}<span class="spacer"></span>${actionButton('printerQueue',waiting?`${waiting} queued →`:'Queue →',n,'ghost')}</div></article>`;}
 async function downloadFileListing(printer,button){if(button)button.disabled=true;notice('Reading printer storage…');
  try{const r=await api('files/'+encodeURIComponent(printer),undefined,'GET'),url=URL.createObjectURL(new Blob([r.text],{type:'text/plain'})),a=document.createElement('a');

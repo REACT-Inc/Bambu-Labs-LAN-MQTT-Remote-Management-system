@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 
 import printer_models
+import printer_storage
 
 ACTIVE = ('staging', 'awaiting_start', 'printing', 'paused', 'needs_review')
 TERMINAL = ('finished', 'failed', 'cancelled')
@@ -315,6 +316,10 @@ class Engine:
             raise ValueError(f'Printer reports {state}. Stop any current print and wait until it is ready.')
         if error and not override_error:
             raise ValueError(f'Printer reports error {error}. Inspect the printer, then use Clear error, or start anyway if appropriate.')
+        # Its MicroSD card or USB drive missing, unreadable or read-only: the upload would fail (printer_storage.py).
+        found = None if override_error else printer_storage.for_printer(self.core, printer, data)
+        if found:
+            raise printer_storage.StorageProblem(found)
 
     async def start(self, job_id, confirmed, author, override_error=False):
         if type(override_error) is not bool:

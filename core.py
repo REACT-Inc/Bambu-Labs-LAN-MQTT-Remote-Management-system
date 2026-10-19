@@ -89,7 +89,10 @@ settings = load_settings()
 public_channels = {}
 from printer_errors import describe as describe_error, errors as decode_errors
 import filament_sides
+import printer_models
+import printer_storage
 from diagnostics import log_error
+storage_watch = printer_storage.Watch()   # alerts when a printer's MicroSD card / USB drive goes wrong or comes right
 
 # What the printer's raw state means for people. Bambu printers keep reporting FINISH or FAILED (FAILED also after a
 # cancelled print) until the next print starts, while they sit idle and ready, so those read as Ready.
@@ -681,6 +684,12 @@ def printer_reply(embed, picture):
     return dict(embed=embed)
 
 
+def storage_problem(name, data):
+    """What stops the printer printing from its MicroSD card or USB drive, or None (printer_storage.py)."""
+    config = printer_config(name) or {}
+    return printer_storage.problem(printer_models.info(config, name), data, config)
+
+
 def printer_embed(name):
     state, error, data, connected = state_data(name)
     note = last_print_note(state, error)
@@ -708,6 +717,9 @@ def printer_embed(name):
     check = error_triage.condition(name, error, data) if error_triage else None
     if check:
         field(embed, '🩺 ' + check['title'], check['why'], False)
+    drive = storage_problem(name, data) if connected else None
+    if drive:
+        field(embed, '💾 ' + drive['title'], drive['detail'], False)
     ai = failure_monitor.state(name) if failure_monitor else {}
     if ai.get('enabled'):
         field(embed, '🤖 AI failure watch', ai_watch_text(ai), False)
@@ -958,6 +970,9 @@ async def status_command(interaction: discord.Interaction):
         check = error_triage.condition(name, error, data) if error_triage else None
         if check:
             line += ' • 🩺 ' + check['title']
+        drive = storage_problem(name, data) if connected else None
+        if drive:
+            line += ' • 💾 ' + drive['title']
         lines.append(line)
     # Split long inventories into multiple messages.
     text = ''
@@ -1221,6 +1236,10 @@ def connect_printer(printer):
                 baseline['hms'] = signature
                 if new['hms'] and signature != previous_hms:
                     queue_notification(name, '⚠️ Printer health alert', printer_error_text(name, 0, report_copy), YELLOW, False)
+            # Its MicroSD card or USB drive going wrong or coming right again (printer_storage.py)
+            drive = storage_watch.update(name, printer_models.info(printer, name), report_copy, printer)
+            if drive:
+                queue_notification(name, drive[0], drive[1], YELLOW if drive[2] == 'warn' else GREEN)
             error = new.get('print_error')
             if error is not None:
                 previous_error = baseline.get('error')

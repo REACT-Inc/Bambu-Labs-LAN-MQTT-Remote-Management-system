@@ -84,6 +84,7 @@ The easiest way is **Settings & help → Printers** in the dashboard: it asks fo
 | `limits` | no | Override the nozzle / bed maximums, e.g. `{"nozzle": 300, "bed": 100}` (up to 400 / 150 °C). Useful for a model the app doesn't know, or if a default is wrong for your printer. |
 | `error_model` | no | Forces which Bambu error catalog to use. Normally the first 3 characters of the serial pick it. |
 | `ftp_tls_unwrap` | no | `true`/`false` overrides how FTPS uploads close their data connection. It's enabled automatically for H2-series printers. See [Troubleshooting](troubleshooting.md#h2d-upload-fails-with-426). |
+| `storage_check` | no | `false` stops the queue holding this printer's jobs when it reports its MicroSD card or USB drive missing, unreadable or read-only. See [Troubleshooting](troubleshooting.md#cant-read-the-usb-drive-no-usb-drive-or-usb-drive-is-read-only). |
 
 ## Supported printers
 

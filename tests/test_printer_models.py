@@ -84,7 +84,7 @@ class UsedByTests(unittest.TestCase):
 
     def test_where_each_printer_keeps_network_prints(self):   # named in the upload error when it can't save the file
         storage={key:pm.MODELS[key]['storage'] for key in pm.MODELS}
-        self.assertEqual({k for k,v in storage.items() if v=='usb'},{'h2d','h2dpro','h2s','p2s'})
+        self.assertEqual({k for k,v in storage.items() if v=='usb'},{'h2d','h2dpro','h2s','h2c','p2s'})
         self.assertEqual({k for k,v in storage.items() if v=='sd'},{'a1mini','a1','p1p','p1s','x1','x1c','x1e'})
         self.assertEqual(pm.UNKNOWN['storage'],'')
 
