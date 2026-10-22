@@ -268,3 +268,9 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 .slice-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:flex-end}.slice-actions button,.slice-actions .button{font-size:12px;padding:8px 10px}.slice-actions select{width:auto;margin:0;padding:7px}.slice-actions label{margin:0;font-size:12px}.slice-actions .checkbox input{margin-top:2px}
 .slicer-command{white-space:pre-wrap;word-break:break-all;background:#111815;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:12px;user-select:all}
 @media(max-width:1050px){.slicer-layout{grid-template-columns:1fr}}@media(max-width:720px){.slicer-list li{flex-direction:column;align-items:stretch}.slice-actions{justify-content:flex-start}.slicer-xyz{grid-template-columns:70px repeat(3,1fr)}.slicer-view{height:55vh}}
+.slicer-copies{display:flex;align-items:center;gap:4px;margin:0;color:var(--muted);font-size:12px}.slicer-copies input{width:58px;margin:0;padding:6px 8px}
+.slicer-preview{margin-bottom:10px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.slicer-preview-bar{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.slicer-preview-bar input[type=range]{flex:1;min-width:160px;margin:0;padding:0;accent-color:var(--green)}.slicer-legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px}
+.slicer-legend .checkbox{margin:0;font-size:12px;align-items:center}.slicer-legend .checkbox input{margin-top:0}.legend-chip{display:inline-block;width:12px;height:12px;border-radius:3px}
+.slicer-mine{display:flex;align-items:flex-end;gap:6px}.slicer-mine label{flex:1;margin:8px 0}.slicer-mine button{margin-bottom:8px}
+.slice-actions button.on{border-color:var(--green);color:var(--green)}

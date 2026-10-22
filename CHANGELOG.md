@@ -2,6 +2,22 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Added
+- **More slicer features.** See [Slicer](docs/slicer.md).
+  - **OBJ and 3MF files**, as well as STL. A 3MF with several objects, such as a Bambu Studio or OrcaSlicer project, adds each of them.
+  - **Preview the sliced plate** layer by layer in the 3D view, coloured by feature like OrcaSlicer (walls, infill, top and bottom surfaces, supports…). A layer slider looks inside, and the legend hides kinds of lines. See [Preview](docs/slicer.md#preview).
+  - **Lay on face** (key F): click the face that should lie on the plate.
+  - **Mirror** left to right or front to back.
+  - **Copies:** **Duplicate** makes several copies at once and arranges the plate.
+  - **Auto-orient** and **Let OrcaSlicer arrange the plate** options. They need the updated worker: `sudo slicer-worker update` on each worker (worker 1.1.0).
+  - **My settings:** save the presets, changed settings and options under a name, and put them back in one click.
+
+### Fixed
+- **Slicer tab:** opened before a worker had sent its presets, the 3D plate stayed empty until the page was refreshed. A default plate is now shown straight away, and the presets load as soon as a worker comes online.
+- **Slicer tab:** the object list could show an object in red for a problem that was already fixed, for example after **Arrange**.
+
 ## 1.9.1-beta.1
 
 Built on 1.8.5-beta.1: a Slicer tab that turns STL files into printable plates without Bambu Studio, with OrcaSlicer running on spare Ubuntu laptops set up by a one-line installer.

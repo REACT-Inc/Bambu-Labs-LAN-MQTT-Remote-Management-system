@@ -10,9 +10,10 @@ sliced 3MF it wrote, and send it back with its statistics. The temporary folder 
 Nothing from a job is ever run: OrcaSlicer only gets file paths, in an argument list (no shell).
 
 The command line used (OrcaSlicer 2.4.2's documented options, src/libslic3r/PrintConfig.cpp CLIActionsConfigDef):
-    orca-slicer --arrange 0 --slice 0 --load-settings "machine.json;process.json" --load-filaments filament.json
+    orca-slicer --arrange 0 --orient 0 --slice 0 --load-settings "machine.json;process.json" --load-filaments filament.json
                 --outputdir OUT --export-3mf result.3mf object_1.stl object_2.stl ...
---arrange 0 keeps the objects where they were placed (STL coordinates are bed coordinates in millimetres).
+--arrange 0 keeps the objects where they were placed (STL coordinates are bed coordinates in millimetres); the job's
+options can ask OrcaSlicer to arrange them (--arrange 1) and to turn them to print better (--orient 1) instead.
 
 Standard library only (plus meshes.py and profiles.py next to it), so it runs on a plain Ubuntu / Debian server.
 """
@@ -39,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import meshes  # noqa: E402
 import profiles  # noqa: E402
 
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 CONFIG = Path(os.environ.get('ORCA_WORKER_CONFIG', '/etc/orca-worker/config.json'))
 DEFAULTS = dict(
     server='', worker_id='', token='',
@@ -171,9 +172,10 @@ def write_presets(job, config, folder):
     return files
 
 
-def orca_command(config, presets, objects, out):
+def orca_command(config, presets, objects, out, options=None):
+    options = options or {}
     command = list(config['orca']) + [
-        '--arrange', '0', '--slice', '0',
+        '--arrange', '1' if options.get('arrange') else '0', '--orient', '1' if options.get('orient') else '0', '--slice', '0',
         '--load-settings', f"{presets['machine']};{presets['process']}",
         '--load-filaments', str(presets['filament']),
         '--outputdir', str(out), '--export-3mf', 'result.3mf'] + [str(p) for p in objects]
@@ -304,7 +306,7 @@ def slice_job(job, config, fetch, progress, alive=lambda: True):
             if time.monotonic() - last[0] > 20:
                 last[0] = time.monotonic()
                 progress('slicing', 'OrcaSlicer is slicing')
-        code, output = run_orca(orca_command(config, presets, objects, out), config['timeout'], alive, report, cwd=folder)
+        code, output = run_orca(orca_command(config, presets, objects, out, job.get('options')), config['timeout'], alive, report, cwd=folder)
         if code != 0:
             raise SliceError(orca_error(out, code, output), output, retry=code < 0)
         progress('processing', 'Checking the sliced file')

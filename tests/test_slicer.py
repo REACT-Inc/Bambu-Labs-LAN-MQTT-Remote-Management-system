@@ -284,7 +284,7 @@ class WorkerTests(unittest.TestCase):
                                     warnings=['bridge_without_support']))
         self.assertEqual(self.stages,['preparing','slicing','processing'])
         seen=json.loads(self.log.read_text())
-        args=seen['args'];self.assertEqual(args[:4],['--arrange','0','--slice','0'])
+        args=seen['args'];self.assertEqual(args[:6],['--arrange','0','--orient','0','--slice','0'])
         self.assertEqual(args[args.index('--export-3mf')+1],'result.3mf')
         self.assertEqual((seen['process']['wall_loops'],seen['process']['inherits'],seen['filament']['nozzle_temperature']),('4',PROCESS,['230']))
         self.assertEqual((seen['machine']['inherits'],seen['machine']['printable_height']),('','180'))
@@ -316,7 +316,7 @@ class WorkerTests(unittest.TestCase):
 
     def test_command_line(self):
         command=worker.orca_command(dict(self.config,xvfb=False),dict(machine='m.json',process='p.json',filament='f.json'),['a.stl'],'out')
-        self.assertEqual(command[2:],['--arrange','0','--slice','0','--load-settings','m.json;p.json','--load-filaments','f.json',
+        self.assertEqual(command[2:],['--arrange','0','--orient','0','--slice','0','--load-settings','m.json;p.json','--load-filaments','f.json',
                                       '--outputdir','out','--export-3mf','result.3mf','a.stl'])
         with patch.object(worker.shutil,'which',return_value='/usr/bin/xvfb-run'):
             self.assertEqual(worker.orca_command(dict(self.config,xvfb=True),dict(machine='m',process='p',filament='f'),[],'o')[:2],['xvfb-run','-a'])
@@ -386,7 +386,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         auth=await self.enroll()
         r=await self.client.post('/api/slicer/jobs',json=self.plate('0'*64),headers=self.headers)
         self.assertEqual(r.status,400)   # no presets yet, unknown model
-        model=await (await self.upload()).json()
+        model=(await (await self.upload()).json())['models'][0]
         self.assertEqual((model['triangles'],model['size'],len(model['id'])),(12,[20.0,20.0,20.0],64))
         r=await self.client.post('/api/slicer/jobs',json=self.plate(model['id']),headers=self.headers)
         self.assertIn('No slicing worker has reported its presets',(await r.json())['error'])
@@ -430,7 +430,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failed_slice_shows_why(self):
         auth=await self.enroll();bot=worker.Worker(self.worker_config);await asyncio.to_thread(bot.heartbeat)
-        model=await (await self.upload()).json()
+        model=(await (await self.upload()).json())['models'][0]
         job=await (await self.client.post('/api/slicer/jobs',json=self.plate(model['id']),headers=self.headers)).json()
         claimed=(await (await self.client.post('/api/slicer/worker/claim',json={},headers=auth)).json())['job']
         os.environ['FAKE_ORCA_MODE']='error'
@@ -448,7 +448,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/api/slicer/worker/heartbeat',json=dict(running=[]),headers=auth)   # no dashboard session or X-PM needed
         self.assertEqual(r.status,200);self.assertEqual((await r.json())['concurrency'],1)
         self.assertEqual((await self.client.post('/api/slicer/worker/claim',json={},headers=auth)).status,200)
-        model=await (await self.upload()).json()
+        model=(await (await self.upload()).json())['models'][0]
         self.slicer.jobs.save_catalog('v2.4.2',profiles.Profiles(self.profiles).catalog())
         job=await (await self.client.post('/api/slicer/jobs',json=self.plate(model['id']),headers=self.headers)).json()
         claimed=(await (await self.client.post('/api/slicer/worker/claim',json={},headers=auth)).json())['job']
@@ -474,8 +474,8 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_uploads_and_admin(self):
         self.assertEqual((await self.upload(b'not an stl at all, sorry')).status,400)
-        self.assertEqual((await self.upload(name='cube.obj')).status,400)
-        first,second=await (await self.upload()).json(),await (await self.upload()).json()
+        self.assertEqual((await self.upload(name='cube.step')).status,400)
+        first=(await (await self.upload()).json())['models'][0];second=(await (await self.upload()).json())['models'][0]
         self.assertEqual(first['id'],second['id']);self.assertEqual(len(list(self.slicer.models.iterdir())),1)
         await self.enroll()
         workers=(await (await self.client.get('/api/slicer/workers')).json())['workers'];wid=workers[0]['id']
