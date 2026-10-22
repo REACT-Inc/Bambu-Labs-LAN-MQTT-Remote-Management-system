@@ -3,6 +3,7 @@
 - inspect(): the sliced plates (name, print time, weight, filaments, thumbnail) and the printer model it was
   sliced for, from Metadata/slice_info.config, Metadata/model_settings.config and Metadata/plate_N.gcode.
 - plate_thumbnail(): Metadata/plate_N.png for the plate picker.
+- ams_slots(): every AMS slot (AMS and AMS HT units), named and numbered like Bambu Studio, for the dashboard's tray picker.
 - suggest_mapping(): match a plate's filaments to the printer's loaded AMS trays by material and colour.
 
 AMS mapping format (as Bambu Studio sends it): one entry per project filament, in filament order; the entry is
@@ -111,22 +112,56 @@ def _distance(a, b):
     return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5 if a and b else 999
 
 
-def loaded_trays(data):
-    """[{'tray': global number, 'label': 'AMS 1 slot 2', 'type', 'colour'}] for the printer's loaded AMS slots."""
+HT_FIRST, HT_LAST = 128, 135   # AMS HT units (one slot each), as Bambu Studio numbers them
+
+
+def _letter(index):
+    return chr(ord('A') + index) if 0 <= index < 26 else str(index + 1)
+
+
+def ams_slots(data):
+    """Every AMS slot the printer reports, loaded or empty, named and numbered the way Bambu Studio and the printer's
+    screen do: AMS units are A, B, C... with slots 1-4 (mapping number = unit * 4 + slot), an AMS HT is HT-A, HT-B...
+    (mapping number = its id, 128-135; DevMapping / GUI_App::transition_tridid).
+
+    [{'tray', 'unit', 'slot', 'short': 'B3' / 'HT-A', 'unit_name': 'AMS B' / 'AMS HT-A', 'label', 'loaded', 'type',
+      'colour', 'brand', 'remain': 0-100 or None, 'nozzle': 'Left' / 'Right' / 'Both' / None (single nozzle)}]
+    """
+    import filament_sides
     ams = data.get('ams')
     units = ams if isinstance(ams, list) else (ams or {}).get('ams', []) if isinstance(ams, dict) else []
-    trays = []
+    dual = filament_sides.is_dual(data)
+    slots = []
     for unit in units:
-        unit_id = _number((unit or {}).get('id'), int)
-        if unit_id is None or unit_id > 63:
+        if not isinstance(unit, dict):
             continue
+        unit_id = _number(unit.get('id'), int)
+        if unit_id is None:
+            continue
+        ht = HT_FIRST <= unit_id <= HT_LAST
+        if not ht and not 0 <= unit_id <= 63:
+            continue
+        side = filament_sides.ams_nozzle(unit) if dual else None
+        nozzle = 'Both' if side == 'both' else filament_sides.SIDES.get(side) if side is not None else None
         for tray in unit.get('tray') or []:
             slot = _number((tray or {}).get('id'), int)
-            if slot is None or not tray.get('tray_type'):
+            if slot is None or not 0 <= slot <= 3 or (ht and slot != 0):
                 continue
-            trays.append(dict(tray=unit_id * 4 + slot, label=f'AMS {unit_id + 1} slot {slot + 1}',
-                              type=str(tray['tray_type']).upper(), colour=_colour(tray.get('tray_color'))))
-    return trays
+            remain = _number(tray.get('remain'), int)
+            name = f'HT-{_letter(unit_id - HT_FIRST)}' if ht else _letter(unit_id)
+            slots.append(dict(
+                tray=unit_id if ht else unit_id * 4 + slot, unit=unit_id, slot=slot,
+                short=name if ht else f'{name}{slot + 1}', unit_name=f'AMS {name}',
+                label=f'AMS {name}' if ht else f'AMS {unit_id + 1} slot {slot + 1}',
+                loaded=bool(tray.get('tray_type')), type=str(tray.get('tray_type') or '').upper()[:20],
+                colour=_colour(tray.get('tray_color')), brand=str(tray.get('tray_sub_brands') or '')[:40],
+                remain=remain if remain is not None and 0 <= remain <= 100 else None, nozzle=nozzle))
+    return slots
+
+
+def loaded_trays(data):
+    """The printer's loaded AMS slots (see ams_slots())."""
+    return [slot for slot in ams_slots(data) if slot['loaded']]
 
 
 def suggest_mapping(plate, data):
@@ -136,11 +171,14 @@ def suggest_mapping(plate, data):
     {'mapping': '0,-1,2' or '', 'rows': [...], 'complete': bool, 'message': text}.
     """
     filaments = [f for f in plate.get('filaments', []) if f.get('id')]
-    trays = loaded_trays(data)
+    slots = ams_slots(data)
+    trays = [slot for slot in slots if slot['loaded']]
     if not filaments:
-        return dict(mapping='', rows=[], complete=False, message="The file doesn't list the plate's filaments; enter the mapping yourself.")
+        return dict(mapping='', rows=[], complete=False, slots=slots, message="The file doesn't list the plate's filaments; enter the mapping yourself.")
     if not trays:
-        return dict(mapping='', rows=[], complete=False, message='No loaded AMS slots reported by this printer.')
+        return dict(mapping='', rows=[dict(filament=f['id'], type=f.get('type'), colour=f.get('colour'), used_g=f.get('used_g'), tray=None,
+                                           tray_label='', tray_colour='', match='none') for f in sorted(filaments, key=lambda f: f['id'])],
+                    complete=False, slots=slots, message='No loaded AMS slots reported by this printer.')
     rows, mapping = [], [-1] * max(f['id'] for f in filaments)
     for filament in sorted(filaments, key=lambda f: f['id']):
         same = [t for t in trays if t['type'] == str(filament.get('type') or '').upper()]
@@ -148,12 +186,12 @@ def suggest_mapping(plate, data):
         if best:
             mapping[filament['id'] - 1] = best['tray']
             close = _distance(best['colour'], filament.get('colour')) < 60
-        rows.append(dict(filament=filament['id'], type=filament.get('type'), colour=filament.get('colour'),
-                         tray=best['tray'] if best else None, tray_label=best['label'] if best else '',
+        rows.append(dict(filament=filament['id'], type=filament.get('type'), colour=filament.get('colour'), used_g=filament.get('used_g'),
+                         tray=best['tray'] if best else None, tray_label=best['label'] if best else '', tray_short=best['short'] if best else '',
                          tray_colour=best['colour'] if best else '',
                          match='exact' if best and close else 'material' if best else 'none'))
     complete = all(r['tray'] is not None for r in rows)
     message = ('Matched every filament to a loaded AMS slot.' if complete and all(r['match'] == 'exact' for r in rows) else
                'Matched by material; check the colours.' if complete else
                'Some filaments have no loaded slot of the same material. Load them or enter the mapping yourself.')
-    return dict(mapping=','.join(str(t) for t in mapping) if complete else '', rows=rows, complete=complete, message=message)
+    return dict(mapping=','.join(str(t) for t in mapping) if complete else '', rows=rows, complete=complete, slots=slots, message=message)

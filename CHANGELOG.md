@@ -2,6 +2,18 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Added
+- **Choose AMS slots from pictures.** In **Queue a print** and **Print on another printer**, each filament the plate uses is shown with its colour, material and weight, next to the AMS slot it will print from. Click it to see the printer's AMS units with every slot's colour, material, brand and how much is left, then pick one. The slot numbers are no longer needed. See [Choosing AMS slots](docs/print-queue.md#choosing-ams-slots).
+  - **Several AMS units, and AMS HT:** slots are named like the printer's screen (A1-D4, HT-A…). On two-nozzle printers such as the H2D, each unit says which nozzle it feeds.
+  - **Material check:** slots with the filament's material are outlined. Choosing another material warns you, and every filament needs a slot before the job can be added.
+  - Typing the numbers is still possible, folded under the picker.
+
+### Fixed
+- **AMS HT units** weren't offered in the AMS suggestion. They are now, with the number Bambu Studio uses (HT-A = 128).
+- **Slicer tab:** opened before a worker had sent its presets, the 3D plate stayed empty until the page was refreshed. A default plate is now shown straight away, and the presets load as soon as a worker comes online.
+
 ## 1.9.1-beta.1
 
 Built on 1.8.5-beta.1: a Slicer tab that turns STL files into printable plates without Bambu Studio, with OrcaSlicer running on spare Ubuntu laptops set up by a one-line installer.

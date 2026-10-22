@@ -171,12 +171,43 @@ $('logout').onclick=async()=>{try{await api('logout',{});showLogin();}catch(e){n
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>tab(b.dataset.tab));
 document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>closeDialog($(b.dataset.close)));
 $('queueFilter').onchange=renderJobs;
+// ---- AMS slot picker: each filament of the plate gets a slot picked from pictures of the printer's AMS units (A1-D4,
+// HT-A...), with colour, material, brand and how much is left. The mapping input stays the value that's sent; the
+// picker writes it, and typing in it redraws the picker. info: a suggestion ({rows, slots}) from the server.
+function slotText(s){return [s.short,s.brand||s.type,s.remain!=null?s.remain+'%':''].filter(Boolean).join(' · ');}
+function amsPicker(root,input,info){
+ const slots=info.slots||[];let rows=(info.rows||[]).length?info.rows:null,open=null;const known=!!rows;
+ const current=()=>input.value.split(',').map(x=>x.trim()).filter(x=>x!=='').map(Number);
+ if(!rows)rows=Array.from({length:Math.max(1,current().length)},(_,i)=>({filament:i+1,type:'',colour:''}));
+ function tiles(row,chosen){const units=[];slots.forEach(s=>{let u=units.find(x=>x.unit===s.unit);if(!u)units.push(u={unit:s.unit,name:s.unit_name,nozzle:s.nozzle,slots:[]});u.slots.push(s);});
+  return `<div class="tray-picker">${units.map(u=>`<div class="ams-unit"><div class="ams-head"><strong>${esc(u.name)}</strong>${u.nozzle?`<small>${esc(u.nozzle)} nozzle</small>`:''}</div><div class="ams-slots">`+
+   u.slots.map(s=>{const same=!row.type||s.type===String(row.type).toUpperCase();
+    return `<button type="button" class="tray-tile${s.tray===chosen?' chosen':''}${s.loaded&&same?' match':''}${s.loaded&&!same?' other':''}" data-tray="${s.tray}"${s.loaded?'':' disabled'} title="${esc(s.loaded?slotText(s)+(same?'':' (a different material from the file)'):s.short+': empty')}">`+
+     `<i class="spool${s.loaded?'':' empty'}"${s.colour?` data-color="${esc(s.colour)}"`:''}></i><b>${esc(s.short)}</b><small>${esc(s.loaded?(s.brand||s.type):'Empty')}</small>`+
+     (s.remain!=null?`<span class="remain"><i data-width="${s.remain}"></i></span>`:'')+`</button>`;}).join('')+`</div></div>`).join('')}</div>`;}
+ function render(){const map=current();
+  root.innerHTML=(slots.length?'':'<p class="muted">This printer reports no AMS slots. Is it on, with its AMS connected?</p>')+rows.map(r=>{const t=map[r.filament-1],s=slots.find(x=>x.tray===t);
+   const differs=s&&r.type&&s.type!==String(r.type).toUpperCase();
+   return `<div class="fil-row"><span class="fil-from"><i class="spool"${r.colour?` data-color="${esc(r.colour)}"`:''}></i><span><b>Filament ${r.filament}</b><small>${esc([r.type,r.used_g!=null?Math.round(r.used_g)+' g':''].filter(Boolean).join(' · ')||'from the file')}</small></span></span>`+
+    `<span class="fil-arrow" aria-hidden="true">→</span><button type="button" class="fil-to${s?'':' unset'}${differs?' differs':''}" data-pick="${r.filament}" aria-expanded="${open===r.filament}">`+
+    (s?`<i class="spool"${s.colour?` data-color="${esc(s.colour)}"`:''}></i><span><b>${esc(s.short)}</b><small>${esc([s.brand||s.type,s.remain!=null?s.remain+'% left':''].filter(Boolean).join(' · '))}</small></span>`:t>=0&&!Number.isNaN(t)&&t!==undefined?`<span><b>Slot ${t}</b><small>not reported by the printer</small></span>`:'<span><b>Choose an AMS slot</b></span>')+
+    `</button>${differs?`<small class="fil-warn">⚠ ${esc(s.short)} has ${esc(s.type)}, the file wants ${esc(r.type)}.</small>`:''}</div>`+(open===r.filament?tiles(r,t):'');}).join('')+
+   (known?'':'<button type="button" class="ghost small-btn" data-add-filament>+ Another filament</button>');
+  applyStyles(root);}
+ root.onclick=e=>{const pick=e.target.closest('[data-pick]');if(pick){open=open===Number(pick.dataset.pick)?null:Number(pick.dataset.pick);render();return;}
+  if(e.target.closest('[data-add-filament]')){rows.push({filament:rows.length+1,type:'',colour:''});open=rows.length;render();return;}
+  const tile=e.target.closest('[data-tray]');if(!tile||tile.disabled||open===null)return;
+  const map=current(),out=Array.from({length:Math.max(map.length,...rows.map(r=>r.filament))},(_,i)=>Number.isFinite(map[i])?map[i]:-1);
+  out[open-1]=Number(tile.dataset.tray);input.value=out.join(',');open=null;render();};
+ input.oninput=render;render();
+ return {missing:()=>{const map=current();return rows.filter(r=>!(map[r.filament-1]>=0)).map(r=>r.filament);}};}
+function pickerError(picker,on){const missing=on&&picker?picker.missing():[];if(missing.length)throw new Error(`Choose an AMS slot for filament ${missing.join(', ')}.`);}
 // ---- Queue a print (#7): the file is uploaded and checked as soon as it's picked; plates are chosen from cards,
 // the AMS mapping is suggested from the printer's loaded trays, and Print now skips the queue.
-let jobUpload=null,jobPlate=null;
-function resetJobUpload(){jobUpload=null;jobPlate=null;$('jobPlates').hidden=true;$('jobPlates').innerHTML='';$('jobFileNote').textContent='';$('jobAmsHint').textContent='';}
+let jobUpload=null,jobPlate=null,jobPicker=null;
+function resetJobUpload(){jobUpload=null;jobPlate=null;jobPicker=null;$('jobFilaments').innerHTML='';$('jobFilaments').hidden=true;$('jobPlates').hidden=true;$('jobPlates').innerHTML='';$('jobFileNote').textContent='';$('jobAmsHint').textContent='';}
 $('addJob').onclick=()=>{$('jobError').textContent='';$('jobDialog').showModal();renderPrintNowOverride();};
-$('source').onchange=()=>{const upload=$('source').value==='upload';$('uploadLabel').hidden=!upload;$('remoteLabel').hidden=upload;$('jobPlateLabel').hidden=upload;
+$('source').onchange=()=>{const upload=$('source').value==='upload';if(!upload||!jobUpload){jobPicker=null;$('jobFilaments').innerHTML='';jobRemoteSlots();showJobFilaments();}$('uploadLabel').hidden=!upload;$('remoteLabel').hidden=upload;$('jobPlateLabel').hidden=upload;
  $('jobPlates').hidden=!upload||!jobUpload;$('jobFileNote').hidden=!upload;$('jobAmsHint').hidden=!upload;};
 $('jobFile').onchange=async()=>{const f=$('jobFile').files[0];resetJobUpload();$('jobError').textContent='';if(!f)return;
  if(!$('jobLabel').value)$('jobLabel').value=f.name.replace(/\.gcode\.3mf$|\.3mf$/i,'').slice(0,120);
@@ -203,10 +234,20 @@ async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUploa
  try{const r=await api(`uploads/${encodeURIComponent(asset)}/suggest?printer=${encodeURIComponent(printer)}&plate=${jobPlate}`,undefined,'GET');
   if(jobUpload?.asset!==asset||$('jobPrinter').value!==printer)return;
   $('jobError').textContent=r.model_warning||'';
-  if(r.complete){$('jobAms').checked=true;$('jobMapping').value=r.mapping;}
-  $('jobAmsHint').textContent=r.message+(r.rows.length?' '+r.rows.map(x=>`Filament ${x.filament} (${x.type||'?'}) → ${x.tray_label||'no matching slot'}`).join(' · '):'');}
+  if(r.complete){$('jobAms').checked=true;$('jobMapping').value=r.mapping;}else $('jobMapping').value='';
+  if(r.slots.length&&r.rows.length)$('jobAms').checked=true;
+  jobPicker=amsPicker($('jobFilaments'),$('jobMapping'),r);showJobFilaments();$('jobAmsHint').textContent=r.message;}
  catch(e){$('jobAmsHint').textContent=e.message;}}
-function jobData(){const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value,priority:Number($('jobPriority').value)};
+// A file already on the printer: its filaments aren't known, so the picker starts with one filament and can add more.
+async function jobRemoteSlots(){const printer=$('jobPrinter').value;if($('source').value==='upload'||!$('jobAms').checked)return;
+ try{const r=await api('ams/'+encodeURIComponent(printer),undefined,'GET');if($('jobPrinter').value!==printer)return;
+  jobPicker=amsPicker($('jobFilaments'),$('jobMapping'),{slots:r.slots,rows:[]});showJobFilaments();
+  $('jobAmsHint').textContent="The file is on the printer, so the dashboard can't read its filaments: choose a slot for each one, in the file's order.";}
+ catch(e){$('jobAmsHint').textContent=e.message;}}
+function showJobFilaments(){$('jobFilaments').hidden=!$('jobAms').checked||!jobPicker;}
+$('jobAms').addEventListener('change',()=>{if($('jobAms').checked&&!jobPicker)jobRemoteSlots();showJobFilaments();});
+$('jobPrinter').addEventListener('change',()=>{if($('source').value!=='upload'){jobPicker=null;jobRemoteSlots();showJobFilaments();}});
+function jobData(){pickerError(jobPicker,$('jobAms').checked&&!$('jobFilaments').hidden);const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value,priority:Number($('jobPriority').value)};
  if($('source').value==='upload'){if(!jobUpload)throw new Error($('jobFile').files[0]?'Wait for the file check to finish.':'Select a sliced .3mf file.');if(!jobPlate)throw new Error('Choose a plate.');data.asset=jobUpload.asset;data.plate=jobPlate;}
  else{data.remote=$('jobRemote').value;data.plate=Number($('jobPlate').value);}
  return data;}
@@ -274,7 +315,7 @@ $('printers').addEventListener('keydown',e=>{const card=e.target.closest?.('.pri
 
 // ---- Send a finished print to another printer's queue (#57) -----------------------------------
 // The server decides which printers suit the file (same model it was sliced for); unknown models need a tick.
-let sendJob=null,sendTargets=[],sendFrom=null;
+let sendJob=null,sendTargets=[],sendFrom=null,sendPicker=null;
 async function openSendTo(id){const j=state.jobs.find(x=>x.id===id);if(!j)return;sendJob=id;sendTargets=[];sendFrom=null;
  $('sendToText').textContent=`${j.label} — printed on ${printerLabel(j.printer)}.`;$('sendToSliced').textContent='Checking the file…';
  $('sendToTarget').innerHTML='';$('sendToAms').checked=!!j.options.use_ams;$('sendToMapping').value=(j.options.ams_mapping||[]).join(',');
@@ -283,14 +324,23 @@ async function openSendTo(id){const j=state.jobs.find(x=>x.id===id);if(!j)return
   sendFrom=r.remote?r.from:null;
   $('sendToSliced').textContent=(r.sliced_for?r.how+': '+r.sliced_for+'.':"The file doesn't say which printer it was sliced for.")+(r.remote?` The file is on ${printerLabel(r.from)}; it's copied over when you send it, so that printer must be on.`:'');
   $('sendToTarget').innerHTML=r.targets.map(t=>`<option value="${esc(t.name)}"${t.compatible===false?' disabled':''}>${esc(t.display)}${t.model?' ('+esc(t.model)+')':''}${t.compatible===false?' — not compatible':t.compatible===null?' — check first':''}</option>`).join('');
-  const first=r.targets.find(t=>t.compatible===true)||r.targets.find(t=>t.compatible===null);if(first)$('sendToTarget').value=first.name;updateSendTo();}
+  const first=r.targets.find(t=>t.compatible===true)||r.targets.find(t=>t.compatible===null);if(first)$('sendToTarget').value=first.name;updateSendTo();sendToSlots();}
  catch(e){$('sendToSliced').textContent='';$('sendToReason').textContent=e.message;}}
 function updateSendTo(){const t=sendTargets.find(x=>x.name===$('sendToTarget').value&&x.compatible!==false);
  $('sendToReason').textContent=t?t.reason:(sendTargets.length?'No printer can take this file: '+(sendTargets[0]?.reason||''):'');
  $('sendToCheckRow').hidden=!(t&&t.compatible===null);$('sendToCheckLabel').textContent=t?`I checked this file was sliced for ${t.display}.`:'';
  $('sendToSubmit').disabled=!t;$('sendToMapping').disabled=!$('sendToAms').checked;}
-$('sendToTarget').onchange=updateSendTo;$('sendToAms').onchange=updateSendTo;
-$('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarget').value;$('sendToSubmit').classList.add('pending');
+// The new printer's AMS: its slots, and the slots that suit the job's filaments.
+async function sendToSlots(){const job=sendJob,target=$('sendToTarget').value;sendPicker=null;$('sendToFilaments').hidden=true;$('sendToAmsHint').textContent='';
+ if(!target||!$('sendToAms').checked)return;$('sendToAmsHint').textContent="Checking that printer's AMS…";
+ try{const r=await api(`jobs/${encodeURIComponent(job)}/suggest?printer=${encodeURIComponent(target)}`,undefined,'GET');if(sendJob!==job||$('sendToTarget').value!==target)return;
+  if(r.complete)$('sendToMapping').value=r.mapping;
+  sendPicker=amsPicker($('sendToFilaments'),$('sendToMapping'),r);$('sendToFilaments').hidden=false;$('sendToAmsHint').textContent=r.message;}
+ catch(e){$('sendToAmsHint').textContent=e.message;}}
+$('sendToTarget').onchange=()=>{updateSendTo();sendToSlots();};$('sendToAms').onchange=()=>{updateSendTo();sendToSlots();};
+$('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarget').value;
+ try{pickerError(sendPicker,$('sendToAms').checked&&!$('sendToFilaments').hidden);}catch(err){$('sendToReason').textContent=err.message;return;}
+ $('sendToSubmit').classList.add('pending');
  if(sendFrom)$('sendToReason').textContent=`Copying the file from ${printerLabel(sendFrom)}…`;
  try{await api('jobs/'+encodeURIComponent(sendJob)+'/sendto',{printer:target,use_ams:$('sendToAms').checked,mapping:$('sendToAms').checked?$('sendToMapping').value:'',checked:$('sendToChecked').checked});
   $('sendToDialog').close();notice(`Added to ${printerLabel(target)}'s queue. Start it from the queue when that printer is ready.`);await refresh();}

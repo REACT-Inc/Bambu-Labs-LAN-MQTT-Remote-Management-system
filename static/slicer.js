@@ -13,7 +13,7 @@ async function openSlicer(){
  if(!S.ready){
   try{[THREE,{OrbitControls},{TransformControls},{STLLoader}]=await Promise.all([import('./three.module.min.js'),import('./OrbitControls.js'),import('./TransformControls.js'),import('./STLLoader.js')]);}
   catch(e){el('slicerMessage').textContent='The 3D view could not load: '+e.message;return;}
-  setupView();setupControls();S.ready=true;
+  setupView();setupControls();drawPlate();S.ready=true;   // a default plate until a worker sends the presets
  }
  await loadCatalog();openEvents();resize();
 }
@@ -196,6 +196,7 @@ function renderJobs(){
 }
 function bytes(n){return n?(n/1073741824).toFixed(1)+' GB':'—';}
 function renderWorkers(){
+ if(!S.catalog&&!S.loadingCatalog&&S.workers.some(w=>w.online)){S.loadingCatalog=true;loadCatalog().finally(()=>{S.loadingCatalog=false;});}   // a worker just came online
  el('slicerWorkerCount').textContent=(()=>{const n=S.workers.filter(w=>w.online&&w.enabled).length;return n?`${n} worker${n>1?'s':''} ready`:'No worker online';})();
  el('slicerWorkers').innerHTML=S.workers.map(w=>{const i=w.info||{};return `<li><div><strong>${w.online?'🟢':'🔴'} ${h(w.name)}</strong>
   <small>${h(i.cpu||'')} · ${h(i.cores||'?')} cores · RAM ${bytes(i.ram_free)} free of ${bytes(i.ram_total)} · load ${h(i.load??'—')} · disk ${bytes(i.disk_free)} free</small>
