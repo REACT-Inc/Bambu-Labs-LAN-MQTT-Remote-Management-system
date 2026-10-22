@@ -11,6 +11,7 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - Typing the numbers is still possible, folded under the picker.
 
 ### Fixed
+- **Slicing worker installer on a computer with a wrong clock.** apt refused Ubuntu's package lists (*Release file … is not valid yet*) and the installer stopped. It now checks the clock against the dashboard's first. If it's more than 2 minutes off, it turns on automatic time sync, or sets the clock from the dashboard's if no time server can be reached. `slicer-worker doctor` checks the clock too, and a failed package-list update now says what to check.
 - **AMS HT units** weren't offered in the AMS suggestion. They are now, with the number Bambu Studio uses (HT-A = 128).
 - **Slicer tab:** opened before a worker had sent its presets, the 3D plate stayed empty until the page was refreshed. A default plate is now shown straight away, and the presets load as soon as a worker comes online.
 
