@@ -54,6 +54,8 @@ class Jobs:
               created REAL NOT NULL, last_seen REAL, catalog_version TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS slice_enroll (
               token TEXT PRIMARY KEY, created REAL NOT NULL, expires REAL NOT NULL, used REAL);
+            CREATE TABLE IF NOT EXISTS slice_presets (
+              name TEXT PRIMARY KEY, data TEXT NOT NULL, updated REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS slice_catalog (
               version TEXT PRIMARY KEY, data TEXT NOT NULL, updated REAL NOT NULL);
         ''')
@@ -268,6 +270,19 @@ class Jobs:
             raise ValueError('This worker is slicing; drain it first, or wait.')
         with self.lock, self.db:
             self.db.execute('DELETE FROM slice_workers WHERE id=?', (worker_id,))
+
+    # ---- saved settings ----
+
+    def presets(self):
+        return [dict(json.loads(r['data']), name=r['name']) for r in self.db.execute('SELECT name,data FROM slice_presets ORDER BY name COLLATE NOCASE')]
+
+    def save_preset(self, name, data):
+        with self.lock, self.db:
+            self.db.execute('INSERT OR REPLACE INTO slice_presets(name,data,updated) VALUES(?,?,?)', (name, json.dumps(data), self.clock()))
+
+    def delete_preset(self, name):
+        with self.lock, self.db:
+            self.db.execute('DELETE FROM slice_presets WHERE name=?', (name,))
 
     # ---- presets ----
 

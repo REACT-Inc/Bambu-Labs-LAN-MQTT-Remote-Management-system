@@ -9,11 +9,20 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Several AMS units, and AMS HT:** slots are named like the printer's screen (A1-D4, HT-A…). On two-nozzle printers such as the H2D, each unit says which nozzle it feeds.
   - **Material check:** slots with the filament's material are outlined. Choosing another material warns you, and every filament needs a slot before the job can be added.
   - Typing the numbers is still possible, folded under the picker.
+- **More slicer features.** See [Slicer](docs/slicer.md).
+  - **OBJ and 3MF files**, as well as STL. A 3MF with several objects, such as a Bambu Studio or OrcaSlicer project, adds each of them.
+  - **Preview the sliced plate** layer by layer in the 3D view, coloured by feature like OrcaSlicer (walls, infill, top and bottom surfaces, supports…). A layer slider looks inside, and the legend hides kinds of lines. See [Preview](docs/slicer.md#preview).
+  - **Lay on face** (key F): click the face that should lie on the plate.
+  - **Mirror** left to right or front to back.
+  - **Copies:** **Duplicate** makes several copies at once and arranges the plate.
+  - **Auto-orient** and **Let OrcaSlicer arrange the plate** options. They need the updated worker: `sudo slicer-worker update` on each worker (worker 1.1.0).
+  - **My settings:** save the presets, changed settings and options under a name, and put them back in one click.
 
 ### Fixed
 - **Slicing worker installer on a computer with a wrong clock.** apt refused Ubuntu's package lists (*Release file … is not valid yet*) and the installer stopped. It now checks the clock against the dashboard's first. If it's more than 2 minutes off, it turns on automatic time sync, or sets the clock from the dashboard's if no time server can be reached. `slicer-worker doctor` checks the clock too, and a failed package-list update now says what to check.
 - **AMS HT units** weren't offered in the AMS suggestion. They are now, with the number Bambu Studio uses (HT-A = 128).
 - **Slicer tab:** opened before a worker had sent its presets, the 3D plate stayed empty until the page was refreshed. A default plate is now shown straight away, and the presets load as soon as a worker comes online.
+- **Slicer tab:** the object list could show an object in red for a problem that was already fixed, for example after **Arrange**.
 
 ## 1.9.1-beta.1
 

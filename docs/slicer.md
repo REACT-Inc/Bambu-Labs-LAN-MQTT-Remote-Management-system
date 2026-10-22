@@ -92,11 +92,15 @@ The worker then shows under **Slicer → Workers**, and its presets appear in th
 
 ## Slicing a plate
 
-1. **Add STL files** with the button, or drop them on the plate.
+1. **Add models** with the button, or drop them on the plate: **STL**, **OBJ** or **3MF** files, up to 200 MB and 3 million triangles.
+   - A 3MF can hold several objects, for example a Bambu Studio or OrcaSlicer project: each becomes an object on the plate. Only their shapes are read (not painted colours, modifiers or plate settings).
+   - OBJ files have no units, so millimetres are assumed, as slicers do.
 2. **Arrange them:**
    - Click an object to select it. Drag the arrows to move it, or use the **Move / Rotate / Scale** buttons (keys **G**, **R**, **S**).
    - Type exact numbers under **Selected**: position in mm, rotation in degrees, scale in %. **Keep proportions** scales all three axes together.
-   - **Duplicate** (Ctrl+D), **Delete**, **Reset** (back to where it was added), **Drop to bed**, and **Arrange**, which lays all the objects out in rows.
+   - **⤓ Lay on face** (key **F**): click the toggle, then the face of an object that should lie on the plate. The object turns so that face is on the plate, for example a part's flat side.
+   - **⇋ / ⇵ Mirror:** mirrors the selected object left to right or front to back. Typing a negative scale does the same.
+   - **Duplicate** (Ctrl+D) with **×** copies: makes that many copies and arranges the plate. Then **Delete**, **Reset** (back to where it was added), **Drop to bed**, and **Arrange**, which lays all the objects out in rows.
    - Objects off the plate, taller than the printer, or overlapping another object turn red and are listed under the plate.
 3. **Choose presets.** The printer, process and filament lists are OrcaSlicer's own Bambu Lab presets, and only matching ones are offered. The printer starts on the model of your first printer.
 4. **Change settings** if you need to (blank means "as in the preset"):
@@ -110,10 +114,26 @@ The worker then shows under **Slicer → Workers**, and its presets appear in th
    | **Material** | nozzle temperatures, plate temperatures, flow ratio, max volumetric speed, max fan speed |
 
    Every value is checked on the Pi against its limits, so a worker only ever gets known settings.
-5. **Slice plate.** The job appears under **Sliced plates** with its place in line and its progress: *Waiting for a worker*, *Preparing*, *Slicing* or *Checking the result*. You can leave the page while it slices.
-6. **When it's sliced**, the job shows the print time, filament and weight, and any warnings from OrcaSlicer.
+5. **Options** (under the settings):
+   - **Auto-orient:** OrcaSlicer turns each object to the way it prints best (less support, more stable), instead of how you placed it.
+   - **Let OrcaSlicer arrange the plate:** OrcaSlicer places the objects itself. Off, they stay exactly where you put them.
+   - Both need the worker from this version or newer: `sudo slicer-worker update` on each worker.
+6. **My settings:** **Save…** keeps the presets, changed settings and options under a name, such as *Strong PETG*. Choosing it from **My settings** puts them all back; **Delete** removes it. They're kept on the Pi, for everyone using the dashboard.
+7. **Slice plate.** The job appears under **Sliced plates** with its place in line and its progress: *Waiting for a worker*, *Preparing*, *Slicing* or *Checking the result*. You can leave the page while it slices.
+8. **When it's sliced**, the job shows the print time, filament and weight, and any warnings from OrcaSlicer.
+   - **Preview** shows the sliced plate in the 3D view, as OrcaSlicer would print it. See [Preview](#preview).
    - **Download** saves the `.gcode.3mf`.
    - **Send to print queue** puts it in the chosen printer's queue, just like an upload. It still waits there until you press **Start** with a clear plate, and the usual check that the file was sliced for that printer's model applies.
+
+## Preview
+
+**Preview** on a sliced plate loads its G-code and draws every printed move, coloured by what it is, like OrcaSlicer: outer wall, inner wall, infill, top and bottom surfaces, bridges, supports, brim and so on.
+
+- **The layer slider** shows the plate up to that layer, with its number and height, for example *Layer 40 of 100 · Z 8.00 mm*. Drag it to look inside the print.
+- **The legend** turns each kind of line on or off, for example to hide the walls and see the infill.
+- **Back to the plate** returns to your objects.
+
+Travel moves aren't drawn, and lines are thin (not the real line width). A very large plate shows its first 4 million moves.
 
 ## Workers
 
@@ -126,14 +146,13 @@ Each worker shows whether it is online, its CPU, free memory, load, free disk, o
 
 ## What it can't do yet
 
-This is the first part of the slicer. Not there yet:
+Not there yet:
 
-- **STL only:** no 3MF, OBJ or STEP import.
-- **No toolpath preview:** the sliced plate can be checked in Bambu Studio or OrcaSlicer if needed.
+- **No STEP import**, and only the shapes from a 3MF (no painted colours, modifiers or per-object settings).
 - **No supports painting, seams or modifiers, and no cutting.**
-- **One plate per job.** You arrange the objects yourself (or use **Arrange**); OrcaSlicer's own arrange isn't used, so objects stay where you put them.
+- **One plate per job.**
 - **Single filament:** one filament preset per plate, so no multi-colour AMS plates.
-- **Bambu Lab printer presets only**, and no saved presets of your own. Changed settings are kept per job.
+- **Bambu Lab printer presets only.** Your own settings can be saved under **My settings**.
 - **One dashboard login**, like the rest of the dashboard, so there are no per-user jobs or roles.
 
 ## Troubleshooting

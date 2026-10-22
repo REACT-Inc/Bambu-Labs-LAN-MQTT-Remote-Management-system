@@ -2,7 +2,9 @@
 
 Dashboard (signed in, like the rest of /api/):
     GET  /api/slicer/catalog                 presets the workers have, the settings that can be changed, worker count
-    POST /api/slicer/models                  upload an STL (checked, kept by content hash)
+    POST /api/slicer/models                  upload an STL, OBJ or 3MF (checked, kept as STL by content hash); GET .../models/{id}
+    GET/POST /api/slicer/presets, POST /api/slicer/presets/delete   saved settings ("My settings")
+    GET  /api/slicer/jobs/{id}/gcode         the sliced plate's G-code, for the layer preview
     POST /api/slicer/jobs                    queue a slicing job: objects with transforms, presets, changed settings
     GET  /api/slicer/jobs, /api/slicer/jobs/{id}, POST /api/slicer/jobs/{id}/cancel
     GET  /api/slicer/jobs/{id}/result        download the sliced 3MF
@@ -24,12 +26,13 @@ import secrets
 import shutil
 import tarfile
 import time
+import zipfile
 from pathlib import Path
 
 from aiohttp import web
 
 from slicer import jobs as jobs_module
-from slicer import meshes, settings as slicing_settings
+from slicer import imports, meshes, settings as slicing_settings
 from slicer.installer import install_script
 
 HERE = Path(__file__).resolve().parent
@@ -52,6 +55,10 @@ class Slicer:
     def routes(self):
         return [
             web.get('/api/slicer/catalog', self.catalog), web.post('/api/slicer/models', self.upload),
+            web.get('/api/slicer/models/{id}', self.model),
+            web.get('/api/slicer/presets', self.presets), web.post('/api/slicer/presets', self.save_preset),
+            web.post('/api/slicer/presets/delete', self.delete_preset),
+            web.get('/api/slicer/jobs/{id}/gcode', self.gcode),
             web.get('/api/slicer/jobs', self.list_jobs), web.post('/api/slicer/jobs', self.add_job),
             web.get('/api/slicer/jobs/{id}', self.job), web.post('/api/slicer/jobs/{id}/cancel', self.cancel),
             web.get('/api/slicer/jobs/{id}/result', self.result), web.post('/api/slicer/jobs/{id}/queue', self.to_queue),
@@ -103,26 +110,81 @@ class Slicer:
         return model['name'] if model['key'] else ''
 
     async def upload(self, request):
+        """An STL, OBJ or 3MF: checked, and kept as one binary STL per object (by content hash). A 3MF can hold several."""
         reader = await request.multipart()
         part = await reader.next()
-        if not part or part.name != 'file' or not (part.filename or '').lower().endswith('.stl'):
-            raise ValueError('Choose an .stl file.')
+        name = Path((part.filename or '').replace('\\', '/')).name[:100] if part else ''
+        if not part or part.name != 'file' or not name.lower().endswith(('.stl', '.obj', '.3mf')):
+            raise ValueError('Choose an .stl, .obj or .3mf file.')
         if shutil.disk_usage(self.models).free < 1024 ** 3:
             raise ValueError('Less than 1 GB of free disk space on the Pi: free some space first.')
         data = bytearray()
         while chunk := await part.read_chunk(1 << 16):
             data += chunk
             if len(data) > meshes.MAX_BYTES:
-                raise ValueError(f'The STL is larger than {meshes.MAX_BYTES // 1048576} MB.')
-        info = await asyncio.to_thread(meshes.summary, bytes(data))
-        model_id = hashlib.sha256(data).hexdigest()
+                raise ValueError(f'The file is larger than {meshes.MAX_BYTES // 1048576} MB.')
+        if name.lower().endswith('.stl'):   # kept as uploaded, read as a stream (no copy of every triangle in memory)
+            info = await asyncio.to_thread(meshes.summary, bytes(data))
+            return web.json_response(dict(models=[dict(info, id=self.keep(bytes(data)), name=name)]))
+        objects = await asyncio.to_thread(imports.read, name, bytes(data))
+        del data
+        models = []
+        for object_name, values in objects:
+            stream = io.BytesIO()
+            meshes.write_binary_stl(values, stream, object_name)
+            models.append(dict(imports.summary(values), id=self.keep(stream.getvalue()), name=object_name if len(objects) > 1 else name))
+        return web.json_response(dict(models=models))
+
+    def keep(self, stl):
+        model_id = hashlib.sha256(stl).hexdigest()
         path = self.models / f'{model_id}.stl'
         if not path.exists():
-            temporary = path.with_suffix('.tmp')
-            temporary.write_bytes(data)
+            temporary = path.with_suffix(f'.{secrets.token_hex(4)}.tmp')
+            temporary.write_bytes(stl)
             temporary.replace(path)
-        name = Path(part.filename.replace('\\', '/')).name[:100]
-        return web.json_response(dict(info, id=model_id, name=name))
+        return model_id
+
+    async def model(self, request):
+        """A stored model as a binary STL, so the 3D view shows exactly what will be sliced."""
+        model_id = request.match_info['id']
+        if not MODEL.fullmatch(model_id) or not (self.models / f'{model_id}.stl').is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(self.models / f'{model_id}.stl', headers={'Content-Type': 'model/stl', 'Cache-Control': 'private, max-age=86400'})
+
+    # ---- saved settings ("My settings") ----
+
+    async def presets(self, request):
+        return web.json_response(dict(presets=self.jobs.presets()))
+
+    async def save_preset(self, request):
+        data = await request.json()
+        name = str(data.get('name') or '').strip()
+        if not 1 <= len(name) <= 60:
+            raise ValueError('Give the settings a name (up to 60 characters).')
+        chosen = data.get('settings') if isinstance(data.get('settings'), dict) else {}
+        changes = data.get('changes') if isinstance(data.get('changes'), dict) else {}
+        slicing_settings.check(changes)   # only known settings, within their limits
+        preset = dict(settings={k: str(chosen.get(k) or '')[:120] for k in ('machine', 'process', 'filament')}, changes=changes,
+                      options=self.check_options(data.get('options')))
+        if len(self.jobs.presets()) >= 100 and name not in {p['name'] for p in self.jobs.presets()}:
+            raise ValueError('There are 100 saved settings already: delete some first.')
+        self.jobs.save_preset(name, preset)
+        self.event('Slicer settings saved', name)
+        return web.json_response(dict(presets=self.jobs.presets()))
+
+    async def delete_preset(self, request):
+        data = await request.json()
+        self.jobs.delete_preset(str(data.get('name') or ''))
+        return web.json_response(dict(presets=self.jobs.presets()))
+
+    @staticmethod
+    def check_options(options):
+        """How OrcaSlicer treats the plate: arrange the objects itself, and turn them to print better (both off by default)."""
+        options = options if isinstance(options, dict) else {}
+        for key in ('arrange', 'orient'):
+            if key in options and type(options[key]) is not bool:
+                raise ValueError(f'{key} must be true or false.')
+        return dict(arrange=options.get('arrange') is True, orient=options.get('orient') is True)
 
     def check_request(self, data):
         """A job request from the Slicer tab, checked against the presets the workers have and the settings schema."""
@@ -153,7 +215,7 @@ class Slicer:
             if machine not in entry['printers']:
                 raise ValueError(f'The {kind} preset "{entry["name"]}" is not for the {machine}.')
         return dict(objects=clean, settings=dict(machine=machine, process=chosen['process'], filament=chosen['filament']),
-                    changes=slicing_settings.check(data.get('changes')), catalog_version=version)
+                    changes=slicing_settings.check(data.get('changes')), options=self.check_options(data.get('options')), catalog_version=version)
 
     async def add_job(self, request):
         data = await request.json()
@@ -195,6 +257,23 @@ class Slicer:
         name = re.sub(r'[^A-Za-z0-9_.-]+', '_', job['label']).strip('._') or 'plate'
         return web.FileResponse(path, headers={'Content-Disposition': f'attachment; filename="{name}.gcode.3mf"',
                                                'Content-Type': 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml'})
+
+    async def gcode(self, request):
+        """The sliced plate's G-code, for the layer preview (compressed on the way: G-code shrinks about tenfold)."""
+        job = self.jobs.get(self.job_id(request))
+        path = self.result_path(job)
+        response = web.StreamResponse(headers={'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'private, max-age=3600'})
+        response.enable_compression()
+        with zipfile.ZipFile(path) as archive:
+            names = sorted(n for n in archive.namelist() if re.fullmatch(r'Metadata/plate_\d+\.gcode', n))
+            if not names:
+                raise ValueError('This sliced file has no G-code.')
+            await response.prepare(request)
+            with archive.open(names[0]) as stream:
+                while chunk := await asyncio.to_thread(stream.read, 1 << 20):
+                    await response.write(chunk)
+        await response.write_eof()
+        return response
 
     async def to_queue(self, request):
         """The sliced 3MF goes in a printer's print queue, as if it was uploaded there. It still needs Start."""
@@ -307,7 +386,7 @@ class Slicer:
         self.event('Slicing job started', f"{job['label']} • {job['id']} on {worker['name']}")
         request_data = job['request']
         return web.json_response(dict(job=dict(id=job['id'], lease=job['lease'], label=job['label'], settings=request_data['settings'],
-                                               changes=request_data['changes'],
+                                               changes=request_data['changes'], options=request_data.get('options') or {},
                                                objects=[dict(name=o['name'], matrix=o['matrix']) for o in request_data['objects']])))
 
     def held(self, request, worker, lease):
