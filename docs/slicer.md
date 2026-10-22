@@ -162,6 +162,7 @@ Not there yet:
 | *No slicing worker has reported its presets yet* | Set up a worker. If one is set up, check that it's online under **Workers** (`sudo systemctl status orca-worker` on it). |
 | Worker shows 🔴 offline | On the worker: `sudo slicer-worker doctor`, then `sudo slicer-worker logs`. Check it can reach the Pi's address and port; if the Pi moved, `sudo slicer-worker update --server http://NEW-ADDRESS:8080`. |
 | The installer's test slice fails | Its output shows OrcaSlicer's error. Run `sudo slicer-worker doctor`: it lists missing libraries. Usually `sudo slicer-worker update` fixes it; on unusual distributions install `libwebkit2gtk-4.1-0` and `libgtk-3-0` by hand. |
+| *Release file … is not valid yet* during the install | The computer's clock is wrong. Newer installers fix it by themselves; otherwise run `sudo timedatectl set-ntp true` and try again. |
 | A laptop worker goes offline when its lid is closed | It was installed with `--no-keep-awake`. Run the installer again without it. |
 | A job fails with *OrcaSlicer: …* | That's OrcaSlicer's own message, for example objects outside the plate or too close together. Fix the plate or the settings and slice again. |
 | A job keeps going back in the queue | The worker is crashing or running out of memory: see its log, lower **Jobs at once**, or give it more memory with `--memory-max`. |

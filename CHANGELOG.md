@@ -5,6 +5,10 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased
 
 ### Added
+- **Choose AMS slots from pictures.** In **Queue a print** and **Print on another printer**, each filament the plate uses is shown with its colour, material and weight, next to the AMS slot it will print from. Click it to see the printer's AMS units with every slot's colour, material, brand and how much is left, then pick one. The slot numbers are no longer needed. See [Choosing AMS slots](docs/print-queue.md#choosing-ams-slots).
+  - **Several AMS units, and AMS HT:** slots are named like the printer's screen (A1-D4, HT-A…). On two-nozzle printers such as the H2D, each unit says which nozzle it feeds.
+  - **Material check:** slots with the filament's material are outlined. Choosing another material warns you, and every filament needs a slot before the job can be added.
+  - Typing the numbers is still possible, folded under the picker.
 - **More slicer features.** See [Slicer](docs/slicer.md).
   - **OBJ and 3MF files**, as well as STL. A 3MF with several objects, such as a Bambu Studio or OrcaSlicer project, adds each of them.
   - **Preview the sliced plate** layer by layer in the 3D view, coloured by feature like OrcaSlicer (walls, infill, top and bottom surfaces, supports…). A layer slider looks inside, and the legend hides kinds of lines. See [Preview](docs/slicer.md#preview).
@@ -15,6 +19,8 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **My settings:** save the presets, changed settings and options under a name, and put them back in one click.
 
 ### Fixed
+- **Slicing worker installer on a computer with a wrong clock.** apt refused Ubuntu's package lists (*Release file … is not valid yet*) and the installer stopped. It now checks the clock against the dashboard's first. If it's more than 2 minutes off, it turns on automatic time sync, or sets the clock from the dashboard's if no time server can be reached. `slicer-worker doctor` checks the clock too, and a failed package-list update now says what to check.
+- **AMS HT units** weren't offered in the AMS suggestion. They are now, with the number Bambu Studio uses (HT-A = 128).
 - **Slicer tab:** opened before a worker had sent its presets, the 3D plate stayed empty until the page was refreshed. A default plate is now shown straight away, and the presets load as soon as a worker comes online.
 - **Slicer tab:** the object list could show an object in red for a problem that was already fixed, for example after **Arrange**.
 

@@ -33,14 +33,28 @@ What you can't queue:
 | Plate | **Upload:** pick a plate card (see below). **Path on the printer:** type the plate number, 1–100. |
 | Bed type | Textured PEI, Smooth/high temperature, Cool plate, or Engineering plate |
 | Reprint priority | 1–5: if the AI pauses this print as failed, how long it waits before it's reprinted on another printer. 1 = 5 minutes (urgent), 2 = 1 hour, 3 = 1.5 hours, 4 = 2 hours, 5 = 2.5 hours (default). See [Automatic reprint](../failureDetection/FAILURE_DETECTION.md#automatic-reprint-on-another-printer). |
-| Use AMS / AMS mapping | Off = external spool. On = a comma-separated list with one entry per filament in the project: the AMS tray (`0` = AMS 1 slot 1, `1` = AMS 1 slot 2, … `4` = AMS 2 slot 1) or `-1` for a filament this plate doesn't use. For uploads it's filled in for you (see below). |
+| Use AMS / filaments | Off = the external spool. On = choose an AMS slot for each filament the plate uses: see [Choosing AMS slots](#choosing-ams-slots). |
 
 **What happens when you pick a file (dashboard):**
 - **It's checked straight away:** the file uploads and is read right away, before you submit anything.
   - **Unsliced project:** you're told to slice it and use **File → Export → Export plate sliced file** in Bambu Studio.
   - **Wrong model:** a file sliced for a different printer model (say an A1 mini file for the H2D) is flagged, and adding it is refused.
 - **Plate picker:** each plate in the file is shown as a card with its thumbnail, name, print time, weight and filament colours. Plates that weren't sliced are greyed out. A file with one sliced plate picks it for you.
-- **AMS suggestion:** for the chosen plate and printer, each filament is matched to a loaded AMS slot of the same material with the closest colour. **Use AMS** and the mapping are filled in, and the matches are listed, for example "Filament 2 (PETG) → AMS 1 slot 3". If something has no loaded slot of that material, the mapping is left for you. You can always edit it.
+- **AMS suggestion:** for the chosen plate and printer, each filament is matched to a loaded AMS slot of the same material with the closest colour, and **Use AMS** is ticked. See [Choosing AMS slots](#choosing-ams-slots).
+
+### Choosing AMS slots
+
+With **Use AMS** ticked, each filament the plate uses has a row: its colour, material and weight from the file, then the AMS slot it will print from.
+
+1. Click the slot on the right of a filament. Pictures of the printer's AMS units open: **AMS A** to **AMS D** with slots 1-4, and **AMS HT-A**, **HT-B**… for AMS HT units.
+2. Each slot shows the spool's colour, material and brand (for example *PLA Basic*), and a bar for how much is left. On printers with two nozzles, such as the H2D, each unit says which nozzle it feeds.
+   - Slots with the same material as the filament are outlined. Others are dimmed but can still be chosen, with a warning (*⚠ A2 has PLA, the file wants PETG*).
+   - Empty slots can't be chosen.
+3. Click a slot. Every filament needs one before the job can be added.
+
+The slot names are the printer screen's and Bambu Studio's: **A1** is AMS A slot 1, **HT-A** the first AMS HT. For a file that's already on the printer, the dashboard can't read its filaments, so you add one row per filament, in the file's order, with **+ Another filament**.
+
+**Type the AMS slot numbers instead** (folded under the picker) still takes the numbers: AMS A slots 1-4 are `0`-`3`, AMS B `4`-`7`, AMS C `8`-`11`, AMS D `12`-`15`; AMS HT-A is `128`, HT-B `129`; and `-1` means the plate doesn't use that filament.
 
 **Print now (dashboard):** **Print now** instead of **Add to shared queue** prints straight away, without waiting in the queue.
 - **Same checks as Start next:** it asks the same "plate is clear" confirmation, and the printer must be idle with no active job.
@@ -116,7 +130,7 @@ Until it's resolved, no other job can start on that printer. **Uncertain starts 
   - On the dashboard, **Queue again** on any job in history (finished, failed or cancelled) copies it back into the queue with the same file and options.
   - **Print on another printer…** (dashboard only) copies a history job into a **different printer's** queue.
     - **Which printers:** only printers of the model the file was sliced for. The app reads the model from the `.3mf`, and the printer's model from its `"model"` in config.json or its serial number. Other models are greyed out with "Re-slice it for the … in Bambu Studio". If either model is unknown, you have to tick that you checked the file suits that printer.
-    - **What carries over:** plate and bed type. Choose the AMS mapping again for the new printer's trays (the old one is pre-filled).
+    - **What carries over:** plate and bed type. The new printer's AMS slots are suggested for the job's filaments and shown as pictures, as in [Choosing AMS slots](#choosing-ams-slots).
     - **Starting:** the new job waits in that printer's queue for the normal **Start next** confirmation. The history entry stays as it was, and the Activity feed records the move.
     - **Files on the printer's storage** (`remote:` jobs from `/queueadd`): the app copies the file from the original printer to the Pi over FTPS when you send it, then uploads it to the new printer when the job starts. The original printer must be on and reachable. Which printers are offered is based on the original printer's model, and the copied file is checked again before it's queued.
   - In Discord, `/reprint` does the same for the most recent finished job.

@@ -123,6 +123,7 @@ class Dashboard:
             web.get('/api/jobs/{id}/targets', self.job_targets),
             web.get('/api/uploads/{asset}/plate/{index}', self.upload_thumbnail),
             web.get('/api/uploads/{asset}/suggest', self.upload_suggest),
+            web.get('/api/jobs/{id}/suggest', self.job_suggest), web.get('/api/ams/{name}', self.ams_slots),
             web.post('/api/printers/{name}/{action}', self.control),
             web.get('/api/camera/{name}', self.camera), web.post('/api/settings', self.settings),
             web.get('/api/permissions', self.permissions), web.post('/api/permissions', self.save_permissions),
@@ -496,6 +497,24 @@ class Dashboard:
         mismatch=bool(info['model'] and printer_key and info['model']!=printer_key)
         return web.json_response(dict(suggestion,model_warning=f"This file was sliced for the {job_transfer.label(info['model'])}, not the "
             f"{job_transfer.label(printer_key)}. Re-slice it for this printer." if mismatch else ''))
+
+    async def ams_slots(self,request):
+        """Every AMS slot of a printer, for the tray picker when the file's filaments aren't known (a file on the printer)."""
+        name=request.match_info['name']
+        if name not in self.core.names(): raise ValueError('Unknown printer.')
+        return web.json_response(dict(slots=sliced_file.ams_slots(self.core.state_data(name)[2])))
+
+    async def job_suggest(self,request):
+        """Suggested AMS slots for a queued job's plate on a printer (Print on another printer…), like upload_suggest."""
+        job=self.store.get(request.match_info['id']);printer=request.query.get('printer','')
+        if printer not in self.core.names(): raise ValueError('Unknown printer.')
+        data=self.core.state_data(printer)[2]
+        if job.get('asset') and Path(job['asset']).is_file():
+            info=await asyncio.to_thread(sliced_file.inspect,job['asset'])
+            plate=next((p for p in info['plates'] if p['index']==job['options'].get('plate',1)),None)
+            if plate:return web.json_response(sliced_file.suggest_mapping(plate,data))
+        return web.json_response(dict(mapping='',rows=[],complete=False,slots=sliced_file.ams_slots(data),
+            message="The file is on the printer, so the dashboard can't read its filaments: choose a slot for each one."))
 
     def add(self, data, author):
         printer=data.get('printer')
