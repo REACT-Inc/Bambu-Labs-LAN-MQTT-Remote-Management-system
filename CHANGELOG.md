@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.9.15-beta.1
+
+Built on 1.9.1-beta.1: AMS slots chosen from pictures of the printer's AMS units, and more slicer features (OBJ and 3MF files, a layer-by-layer preview of the sliced plate, saved settings, lay on face, mirror, copies, auto-orient), plus a slicing worker installer that fixes a wrong clock.
 
 ### Added
 - **Choose AMS slots from pictures.** In **Queue a print** and **Print on another printer**, each filament the plate uses is shown with its colour, material and weight, next to the AMS slot it will print from. Click it to see the printer's AMS units with every slot's colour, material, brand and how much is left, then pick one. The slot numbers are no longer needed. See [Choosing AMS slots](docs/print-queue.md#choosing-ams-slots).
