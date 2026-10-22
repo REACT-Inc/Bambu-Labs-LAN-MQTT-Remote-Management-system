@@ -2,6 +2,11 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Fixed
+- **Slicing worker installer on a computer with a wrong clock.** apt refused Ubuntu's package lists (*Release file … is not valid yet*) and the installer stopped. It now checks the clock against the dashboard's first. If it's more than 2 minutes off, it turns on automatic time sync, or sets the clock from the dashboard's if no time server can be reached. `slicer-worker doctor` checks the clock too, and a failed package-list update now says what to check.
+
 ## 1.9.1-beta.1
 
 Built on 1.8.5-beta.1: a Slicer tab that turns STL files into printable plates without Bambu Studio, with OrcaSlicer running on spare Ubuntu laptops set up by a one-line installer.

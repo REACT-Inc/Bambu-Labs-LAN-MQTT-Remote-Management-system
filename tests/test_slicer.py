@@ -547,6 +547,53 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(out.stdout.split(),['http://192.168.1.10:8080','http://pi.local:9000','http://10.0.0.2:8080','https://pi.example:8080','mine'])
 
 
+class InstallerClockTests(unittest.TestCase):
+    """A worker whose clock is wrong: apt refuses Ubuntu's package lists ("not valid yet"), so the installer sets the
+    clock first, by time sync or else from the dashboard's own clock (its HTTP Date header)."""
+    def setUp(self):
+        import email.utils,http.server
+        self.tmp=tempfile.TemporaryDirectory();d=Path(self.tmp.name);self.log=d/'log'
+        offset=self.offset=[0]
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def date_time_string(self,timestamp=None):return email.utils.formatdate(time.time()+offset[0],usegmt=True)
+            def do_HEAD(self):self.send_response(200);self.end_headers()
+            def log_message(self,*args):pass
+        self.server=http.server.HTTPServer(('127.0.0.1',0),Handler)
+        threading.Thread(target=self.server.serve_forever,daemon=True).start()
+        (d/'stubs').mkdir()
+        (d/'stubs'/'timedatectl').write_text('#!/bin/sh\necho "timedatectl $*" >> "$LOG"; [ "$1" = show ] && echo no; exit 0\n')
+        (d/'stubs'/'date').write_text('#!/bin/sh\nfor a in "$@"; do [ "$a" = -s ] && { echo "date $*" >> "$LOG"; exit 0; }; done\nexec /bin/date "$@"\n')
+        for stub in (d/'stubs').iterdir():stub.chmod(0o755)
+        script=installer.install_script()
+        functions='\n'.join(re.search(rf'^{name}\(\) \{{.*?^\}}$',script,re.M|re.S).group(0) for name in ('server_time','clock_offset','check_clock'))
+        (d/'run.sh').write_text('set -euo pipefail\nWARNINGS=0\nsay(){ echo "-> $*"; }; ok(){ echo "ok $*"; }; warn(){ echo "! $*"; }; sleep(){ :; }\n'
+                                +functions+'\ncheck_clock\n')
+        self.env=dict(os.environ,PATH=f"{d/'stubs'}:{os.environ['PATH']}",LOG=str(self.log),no_proxy='*',NO_PROXY='*',
+                      SERVER=f'http://127.0.0.1:{self.server.server_port}')
+        self.run_sh=d/'run.sh'
+    def tearDown(self):self.server.shutdown();self.server.server_close();self.tmp.cleanup()
+    def check(self):
+        out=subprocess.run(['bash',str(self.run_sh)],env=self.env,capture_output=True,text=True,timeout=60)
+        self.assertEqual(out.returncode,0,out.stderr)
+        return out.stdout,self.log.read_text() if self.log.exists() else ''
+
+    def test_a_right_clock_is_left_alone(self):
+        self.offset[0]=30
+        self.assertEqual(self.check(),('ok Clock is right\n',''))
+
+    def test_a_clock_90_minutes_behind_is_fixed(self):
+        self.offset[0]=5400
+        out,log=self.check()
+        self.assertIn("clock is 90 minutes behind",out);self.assertIn('timedatectl set-ntp true',log)
+        expected=time.time()+5400
+        stamp=int(re.search(r'date -u -s @(\d+)',log).group(1))   # no time sync here: the dashboard's time
+        self.assertLess(abs(stamp-expected),30)
+
+    def test_no_dashboard_clock(self):
+        self.env['SERVER']='http://127.0.0.1:1'
+        out,log=self.check();self.assertIn("Couldn't read the dashboard's clock",out);self.assertEqual(log,'')
+
+
 class PageTests(unittest.TestCase):
     def test_every_element_the_script_uses_is_on_the_page(self):
         import re
