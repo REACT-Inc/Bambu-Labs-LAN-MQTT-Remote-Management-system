@@ -2,6 +2,16 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Added
+- **Every OrcaSlicer setting in the Slicer tab.** **All settings** opens all of OrcaSlicer's process and filament settings (about 425 instead of 28), on OrcaSlicer's own pages and groups (Quality, Strength, Speed, Support, Multimaterial, Others; Filament, Cooling, Setting Overrides). Each has OrcaSlicer's name, unit, limits, choices and explanation. See [Slicer](docs/slicer.md).
+  - **Find a setting** searches them all, **Changed only** lists what you changed, and **↺** puts a setting back to the preset.
+  - **The presets' own values** are shown greyed next to each setting, sent by the workers. Update each worker to see them: `sudo slicer-worker update` (worker 1.2.0).
+  - Lengths can also be given as a percentage (a line width of `110%`), the filament can override the printer's retraction, z-hop and wipe, and the bed type can be chosen.
+  - Text settings (custom G-code, scripts, notes) are still left out, and every value is checked against OrcaSlicer's limits before a job reaches a worker.
+  - The list is generated from OrcaSlicer 2.4.2's own source (`tools/make_slicer_options.py`), so it matches the OrcaSlicer the workers run.
+
 ## 1.9.15-beta.1
 
 Built on 1.9.1-beta.1: AMS slots chosen from pictures of the printer's AMS units, and more slicer features (OBJ and 3MF files, a layer-by-layer preview of the sliced plate, saved settings, lay on face, mirror, copies, auto-orient), plus a slicing worker installer that fixes a wrong clock.

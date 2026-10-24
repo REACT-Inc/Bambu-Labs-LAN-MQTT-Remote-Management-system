@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import meshes  # noqa: E402
 import profiles  # noqa: E402
 
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 CONFIG = Path(os.environ.get('ORCA_WORKER_CONFIG', '/etc/orca-worker/config.json'))
 DEFAULTS = dict(
     server='', worker_id='', token='',
@@ -335,11 +335,21 @@ class Worker:
                     self.running[job_id] = False   # the job's thread kills OrcaSlicer
         if answer.get('catalog_wanted'):
             self.send_catalog()
+        if answer.get('values_wanted'):
+            self.send_values(answer['values_wanted'])
 
     def send_catalog(self):
         library = profiles.Profiles(self.config['profiles'], self.config.get('vendors') or ['BBL'])
         version = self.config.get('orca_version') or 'unknown'
         self.server.request('POST', '/api/slicer/worker/catalog', dict(version=version, catalog=library.catalog()), timeout=120)
+
+    def send_values(self, keys):
+        """The presets' values for the settings the Pi asks for (shown in the Slicer tab), gzip-compressed."""
+        import gzip
+        library = profiles.Profiles(self.config['profiles'], self.config.get('vendors') or ['BBL'])
+        body = gzip.compress(json.dumps(library.values(keys), separators=(',', ':')).encode())
+        version = urllib.parse.quote(self.config.get('orca_version') or 'unknown')
+        self.server.request('POST', f'/api/slicer/worker/values?version={version}', body, headers={'Content-Type': 'application/gzip'}, timeout=120)
 
     def work(self, job):
         job_id, lease = job['id'], job['lease']

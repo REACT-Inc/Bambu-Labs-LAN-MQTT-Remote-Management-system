@@ -6,7 +6,7 @@ ROOT=Path(__file__).parents[1]
 # Installed separately (root-owned updater) or only used to build releases.
 NOT_COPIED={'build_release.py','Updater/update_worker.py'}
 # Not part of the Pi's installation: the desktop app for laptops is built into its own .exe.
-NOT_ON_THE_PI=('desktop',)
+NOT_ON_THE_PI=('desktop','tools')   # tools/: for developers (tools/make_slicer_options.py)
 
 
 def runtime_python():

@@ -129,6 +129,25 @@ class Profiles:
                     filaments=sorted(filaments, key=lambda f: f['name']))
 
 
+    def values(self, keys):
+        """Each selectable process and filament preset's own values (inherits filled in) for `keys` ({kind: [key]}), so the
+        Slicer tab can show them: {kind: {'keys': [...], 'rows': [[value or None]], 'presets': {name: row}}}. Identical rows
+        are kept once (many filaments only differ in name), and a list value is its first entry (the first extruder)."""
+        catalog, out = self.catalog(), {}
+        for kind, listing in (('process', 'processes'), ('filament', 'filaments')):
+            wanted = [str(k) for k in keys.get(kind) or []]
+            rows, index, presets = [], {}, {}
+            for preset in catalog[listing]:
+                flat = self.flat(kind, preset['name'])
+                row = tuple(_first(flat[k]) if k in flat and _first(flat[k]) != 'nil' else None for k in wanted)   # nil: not set
+                if row not in index:
+                    index[row] = len(rows)
+                    rows.append(list(row))
+                presets[preset['name']] = index[row]
+            out[kind] = dict(keys=wanted, rows=rows, presets=presets)
+        return out
+
+
 def _first(value):
     return (value[0] if value else '') if isinstance(value, list) else (value or '')
 
