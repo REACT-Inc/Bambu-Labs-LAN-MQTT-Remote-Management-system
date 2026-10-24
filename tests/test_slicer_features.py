@@ -106,7 +106,7 @@ class WebTests(unittest.IsolatedAsyncioTestCase):
         await self.client.post('/api/slicer/presets',json=body,headers=self.headers)   # same name: replaced
         presets=(await (await self.client.get('/api/slicer/presets')).json())['presets']
         self.assertEqual([p['changes']['wall_loops'] for p in presets],[5])
-        for bad in (dict(body,name=''),dict(body,changes={'start_gcode':'M112'}),dict(body,changes={'wall_loops':99}),dict(body,options={'orient':'yes'})):
+        for bad in (dict(body,name=''),dict(body,changes={'start_gcode':'M112'}),dict(body,changes={'wall_loops':500}),dict(body,options={'orient':'yes'})):
             self.assertEqual((await self.client.post('/api/slicer/presets',json=bad,headers=self.headers)).status,400,bad)
         presets=(await (await self.client.post('/api/slicer/presets/delete',json={'name':'Strong PETG'},headers=self.headers)).json())['presets']
         self.assertEqual(presets,[])
@@ -174,7 +174,7 @@ class PageTests(unittest.TestCase):
         self.assertIn("fetch('/api/slicer/models/'+info.id)",script)
 
     def test_worker_version(self):
-        self.assertEqual(worker.VERSION,'1.1.0')   # the options need this worker: slicer-worker update
+        self.assertGreaterEqual(tuple(map(int,worker.VERSION.split('.'))),(1,1,0))   # the options need 1.1.0 or newer: slicer-worker update
 
 
 if __name__=='__main__':

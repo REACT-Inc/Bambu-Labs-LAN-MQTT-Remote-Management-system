@@ -287,3 +287,16 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 .slicer-legend .checkbox{margin:0;font-size:12px;align-items:center}.slicer-legend .checkbox input{margin-top:0}.legend-chip{display:inline-block;width:12px;height:12px;border-radius:3px}
 .slicer-mine{display:flex;align-items:flex-end;gap:6px}.slicer-mine label{flex:1;margin:8px 0}.slicer-mine button{margin-bottom:8px}
 .slice-actions button.on{border-color:var(--green);color:var(--green)}
+.slicer-all-open{width:100%;margin-top:6px}
+.slicer-all{width:min(1100px,calc(100% - 24px));max-width:none;height:min(86vh,900px);padding:20px 22px;display:none;flex-direction:column}.slicer-all[open]{display:flex}
+.slicer-all-head{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.slicer-all-head h2{margin:0;flex:0 0 auto}.slicer-all-head input[type=search]{flex:1;min-width:200px;margin:0}.slicer-all-head .checkbox{margin:0}
+.slicer-all>p{margin:8px 0 10px;font-size:12px}.slicer-all-body{flex:1;min-height:0;display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px}
+.slicer-all-nav{overflow:auto;display:flex;flex-direction:column;gap:3px}.slicer-all-nav strong{margin:10px 0 4px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+.slicer-all-nav button{text-align:left;padding:8px 10px;border:0;background:none;color:var(--text);border-radius:8px;font-size:14px}.slicer-all-nav button.on{background:#293725;color:var(--green)}.slicer-all-nav small{color:var(--yellow)}
+.slicer-all-list{overflow:auto;padding-right:6px}.slicer-all-list section{margin-bottom:14px}.slicer-all-list h3{font-size:14px;margin:12px 0 6px;color:var(--green)}
+.slicer-all-list .set-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:2px 8px;padding:6px 0;border-bottom:1px solid #222b27}
+.slicer-all-list .set-row label{display:grid;grid-template-columns:minmax(0,1fr) 220px;align-items:center;gap:12px;margin:0;font-size:13px}.slicer-all-list .set-row input,.slicer-all-list .set-row select{margin:0;padding:7px 9px}
+.set-row.changed label>span{color:var(--yellow)}.set-row input.bad{border-color:var(--red)}.set-reset{padding:4px 8px;font-size:12px;border-radius:6px}
+.set-help{grid-column:1/-1;font-size:11px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.slicer-settings .set-row{display:flex;align-items:flex-end;gap:6px}.slicer-settings .set-row label{flex:1}
+@media(max-width:720px){.slicer-all{padding:14px}.slicer-all-body{grid-template-columns:1fr}.slicer-all-nav{flex-direction:row;flex-wrap:nowrap;overflow-x:auto;align-items:center;padding-bottom:4px}.slicer-all-nav strong{margin:0 4px 0 8px;flex:0 0 auto}.slicer-all-nav button{flex:0 0 auto}.slicer-all-list .set-row label{grid-template-columns:1fr}}
