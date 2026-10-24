@@ -2,7 +2,7 @@
 // Everything here is millimetres, Z up, in the printer's bed coordinates, like OrcaSlicer. Moving objects never slices:
 // only "Slice" sends the plate (each object's model and 4x4 transform, the presets and the changed settings).
 // A sliced plate can be previewed layer by layer from its G-code (in the same 3D view).
-const S={ready:false,catalog:null,schema:[],objects:[],selected:null,changes:{},jobs:[],workers:[],events:null,mine:[],layFlat:false,preview:null};
+const S={ready:false,catalog:null,schema:[],objects:[],selected:null,changes:{},jobs:[],workers:[],events:null,mine:[],layFlat:false,preview:null,quick:[],values:{process:{},filament:{}},allPage:'process|Quality'};
 let THREE,OrbitControls,TransformControls,STLLoader,renderer,scene,camera,orbit,gizmo,plateGroup,raf=0;
 const el=id=>document.getElementById(id);
 const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -57,11 +57,15 @@ function setupControls(){
  view.addEventListener('dragleave',()=>view.classList.remove('drop'));
  view.addEventListener('drop',e=>{e.preventDefault();view.classList.remove('drop');addFiles([...e.dataTransfer.files]);});
  el('slicerMachine').onchange=()=>{fillPresets(true);drawPlate();};
- el('slicerProcess').onchange=el('slicerFilament').onchange=()=>{};
+ el('slicerProcess').onchange=el('slicerFilament').onchange=()=>loadValues();
  document.querySelectorAll('[data-gizmo]').forEach(b=>b.onclick=()=>{gizmo.setMode(b.dataset.gizmo);document.querySelectorAll('[data-gizmo]').forEach(x=>x.classList.toggle('on',x===b));});
  el('slicerDuplicate').onclick=duplicate;el('slicerDelete').onclick=removeSelected;el('slicerReset').onclick=resetSelected;
  el('slicerLayFlat').onclick=()=>{S.layFlat=!S.layFlat;el('slicerLayFlat').classList.toggle('on',S.layFlat);el('slicerMessage').textContent=S.layFlat?'Click the face of an object that should lie on the plate.':'';};
  el('slicerMirrorX').onclick=()=>mirror('x');el('slicerMirrorY').onclick=()=>mirror('y');
+ for(const box of [el('slicerSettings'),el('slicerAllList')]){box.addEventListener('change',changeSetting);box.addEventListener('click',resetSetting);}
+ el('slicerAllOpen').onclick=openAll;el('slicerAllClose').onclick=()=>{el('slicerAll').close();renderAllNav();};
+ el('slicerAllSearch').oninput=renderAll;el('slicerAllChanged').onchange=renderAll;
+ el('slicerAllNav').onclick=e=>{const b=e.target.closest('[data-page]');if(!b)return;S.allPage=b.dataset.page;el('slicerAllSearch').value='';renderAllNav();renderAll();el('slicerAllList').scrollTop=0;};
  el('slicerMine').onchange=()=>{const p=S.mine.find(x=>x.name===el('slicerMine').value);if(p)applyMine(p);el('slicerDeleteMine').disabled=!p;};
  el('slicerSaveMine').onclick=saveMine;el('slicerDeleteMine').onclick=deleteMine;
  el('slicerLayer').oninput=()=>showLayers();el('slicerPreviewClose').onclick=closePreview;
@@ -162,7 +166,7 @@ function applyTransformInputs(e){const o=S.selected;if(!o)return;const f=el('sli
 
 // ---- presets and settings ----
 async function loadCatalog(){
- try{const r=await api('slicer/catalog',undefined,'GET');S.schema=r.schema;S.printers=r.printers;
+ try{const r=await api('slicer/catalog',undefined,'GET');S.schema=r.schema;S.quick=r.quick||[];S.byKey=Object.fromEntries(S.schema.map(x=>[x.key,x]));S.printers=r.printers;
   el('slicerWorkerCount').textContent=r.workers?`${r.workers} worker${r.workers>1?'s':''} ready`:'No worker online';
   if(!r.catalog){el('slicerPresetNote').textContent='No slicing worker has reported its presets yet. Add a worker below.';return;}
   const fresh=!S.catalog||S.catalogVersion!==r.version;S.catalog=r.catalog;S.catalogVersion=r.version;el('slicerPresetNote').textContent='OrcaSlicer '+(r.version||'')+' presets';
@@ -174,17 +178,60 @@ function fillPresets(defaults){const m=machine();if(!m)return;
  for(const [id,list,def] of [['slicerProcess',S.catalog.processes,m.default_process],['slicerFilament',S.catalog.filaments,m.default_filament]]){
   const select=el(id),keep=select.value,fits=list.filter(p=>p.printers.includes(m.name));
   const chosen=(!defaults&&fits.some(p=>p.name===keep))?keep:(fits.find(p=>p.name===def)||fits[0])?.name;
-  select.innerHTML=fits.map(p=>`<option${p.name===chosen?' selected':''}>${h(p.name)}</option>`).join('');}}
-function buildSettings(){const groups={};S.schema.forEach(s=>(groups[s.group]=groups[s.group]||[]).push(s));
- el('slicerSettings').innerHTML=Object.entries(groups).map(([g,list])=>`<details${g==='Quality'?' open':''}><summary>${h(g)}</summary>${list.map(s=>{
-  const input=s.type==='bool'?`<select data-key="${s.key}"><option value="">Preset</option><option value="true">On</option><option value="false">Off</option></select>`
-   :s.type==='enum'?`<select data-key="${s.key}"><option value="">Preset</option>${s.options.map(o=>`<option>${h(o)}</option>`).join('')}</select>`
-   :`<input data-key="${s.key}" type="number" inputmode="decimal" placeholder="Preset" min="${s.min}" max="${s.max}" step="${s.step||1}">`;
-  return `<label>${h(s.label)}${s.unit?` <small>${h(s.unit)}</small>`:''}${input}</label>`;}).join('')}</details>`).join('');
- el('slicerSettings').onchange=e=>{const k=e.target.dataset.key;if(!k)return;const s=S.schema.find(x=>x.key===k),v=e.target.value;
-  if(v==='')delete S.changes[k];else S.changes[k]=s.type==='bool'?v==='true':s.type==='enum'?v:Number(v);
-  el('slicerChanged').textContent=Object.keys(S.changes).length?`${Object.keys(S.changes).length} changed from the presets`:'';};}
-
+  select.innerHTML=fits.map(p=>`<option${p.name===chosen?' selected':''}>${h(p.name)}</option>`).join('');}
+ loadValues();}
+// ---- settings: the quick panel next to the plate, and All settings (every OrcaSlicer process and filament setting) ----
+// Blank means "as in the preset": the placeholder shows the preset's value (or OrcaSlicer's default).
+function presetValue(s){const v=S.values[s.preset]?.[s.key];return v!==undefined&&v!==null?v:s.default;}
+function shown(s,v){if(v===undefined||v===null||v==='')return '';
+ if(s.type==='bool')return [true,'1','true'].includes(v)?'On':'Off';
+ if(s.type==='enum')return (s.options.find(o=>o[0]===String(v))||[0,String(v)])[1];
+ if(s.type==='percent'&&!String(v).endsWith('%'))return v+'%';return String(v);}
+function settingInput(s){const v=S.changes[s.key],now=v===undefined?'':String(v),pre=shown(s,presetValue(s));
+ if(s.type==='bool')return `<select data-key="${s.key}"><option value="">${h(pre?'Preset: '+pre:'Preset')}</option><option value="true"${now==='true'?' selected':''}>On</option><option value="false"${now==='false'?' selected':''}>Off</option></select>`;
+ if(s.type==='enum')return `<select data-key="${s.key}"><option value="">${h(pre?'Preset: '+pre:'Preset')}</option>${s.options.map(o=>`<option value="${h(o[0])}"${now===o[0]?' selected':''}>${h(o[1])}</option>`).join('')}</select>`;
+ const number=s.type!=='float_or_percent',limits=number?`${s.min!==undefined?` min="${s.min}"`:''}${s.max!==undefined?` max="${s.max}"`:''} step="${s.type==='int'?1:'any'}"`:'';
+ return `<input data-key="${s.key}" type="${number?'number':'text'}" inputmode="decimal"${limits} placeholder="${h(pre||'Preset')}" value="${h(now)}">`;}
+function settingRow(s,label,help){const changed=s.key in S.changes;
+ return `<div class="set-row${changed?' changed':''}" title="${h(s.tooltip||'')}"><label><span>${h(label||s.label)}${s.unit?` <small>${h(s.unit)}</small>`:''}</span>${settingInput(s)}</label>`+
+  `<button type="button" class="set-reset" data-reset="${s.key}" title="Back to the preset"${changed?'':' hidden'}>↺</button>${help&&s.tooltip?`<small class="set-help">${h(s.tooltip)}</small>`:''}</div>`;}
+function buildSettings(){
+ el('slicerSettings').innerHTML=S.quick.map((g,i)=>`<details${i===0?' open':''}><summary>${h(g.group)}</summary>${g.keys.map(k=>S.byKey[k]?settingRow(S.byKey[k],S.byKey[k].quick_label):'').join('')}</details>`).join('');
+ updateChanged();}
+// A typed value as the Pi expects it, or undefined (blank: back to the preset); throws when it isn't valid.
+function settingName(s){return s.quick_label||(s.group&&s.group!==s.label&&s.label.split(' ').length<3?`${s.group}: ${s.label}`:s.label);}   // "Line width: Default"
+function parseSetting(s,raw){const v=String(raw).trim();if(v==='')return undefined;const name=settingName(s);
+ if(s.type==='bool')return v==='true';if(s.type==='enum')return v;
+ if(s.type==='float_or_percent'&&v.endsWith('%')){const n=Number(v.slice(0,-1));if(!Number.isFinite(n))throw new Error(`${name}: a number or a percentage like 50%`);return n+'%';}
+ const n=Number(v);if(!Number.isFinite(n))throw new Error(`${name} must be a number.`);
+ if(s.type==='int'&&!Number.isInteger(n))throw new Error(`${name} must be a whole number.`);
+ if((s.min!==undefined&&n<s.min)||(s.max!==undefined&&n>s.max))throw new Error(`${name} must be between ${s.min??'…'} and ${s.max??'…'}${s.unit?' '+s.unit:''}.`);return n;}
+function changeSetting(e){const input=e.target,k=input.dataset?.key;if(!k)return;const s=S.byKey[k];
+ try{const v=parseSetting(s,input.value);if(v===undefined)delete S.changes[k];else S.changes[k]=v;input.classList.remove('bad');input.title='';}
+ catch(err){input.classList.add('bad');input.title=err.message;el('slicerMessage').textContent=err.message;return;}
+ document.querySelectorAll(`[data-key="${k}"]`).forEach(x=>{if(x!==input)x.value=input.value;});
+ document.querySelectorAll(`[data-reset="${k}"]`).forEach(b=>{b.hidden=!(k in S.changes);b.closest('.set-row')?.classList.toggle('changed',k in S.changes);});
+ updateChanged();}
+function resetSetting(e){const b=e.target.closest('[data-reset]');if(!b)return;const k=b.dataset.reset;delete S.changes[k];
+ document.querySelectorAll(`[data-key="${k}"]`).forEach(x=>{x.value='';x.classList.remove('bad');});
+ document.querySelectorAll(`[data-reset="${k}"]`).forEach(x=>{x.hidden=true;x.closest('.set-row')?.classList.remove('changed');});updateChanged();}
+function updateChanged(){const n=Object.keys(S.changes).length;el('slicerChanged').textContent=n?`${n} changed from the presets`:'';
+ el('slicerAllOpen').textContent=`All settings (${S.schema.length})${n?` · ${n} changed`:''}`;}
+// The selected presets' own values, for the placeholders (a worker sends them; without them, OrcaSlicer's defaults).
+async function loadValues(){for(const [kind,id] of [['process','slicerProcess'],['filament','slicerFilament']]){const name=el(id).value;
+  try{S.values[kind]=name?(await api(`slicer/values?kind=${kind}&name=${encodeURIComponent(name)}`,undefined,'GET')).values||{}:{};}catch(e){S.values[kind]={};}}
+ buildSettings();if(el('slicerAll').open)renderAll();}
+// All settings: OrcaSlicer's Process and Filament pages, a search over every setting, and "Changed only".
+function openAll(){renderAllNav();renderAll();el('slicerAll').showModal();el('slicerAllSearch').focus();}
+function pages(){const out=[];S.schema.forEach(s=>{const id=s.preset+'|'+s.page;if(!out.some(p=>p.id===id))out.push({id,preset:s.preset,page:s.page});});return out;}
+function renderAllNav(){el('slicerAllNav').innerHTML=['process','filament'].map(kind=>`<strong>${kind==='process'?'Process':'Filament'}</strong>`+
+ pages().filter(p=>p.preset===kind).map(p=>{const n=S.schema.filter(s=>s.preset===p.preset&&s.page===p.page&&s.key in S.changes).length;
+  return `<button type="button" data-page="${h(p.id)}"${p.id===S.allPage?' class="on"':''}>${h(p.page)}${n?` <small>${n}</small>`:''}</button>`;}).join('')).join('');}
+function renderAll(){const q=el('slicerAllSearch').value.trim().toLowerCase(),only=el('slicerAllChanged').checked;
+ const list=S.schema.filter(s=>(q?(s.label+' '+s.key+' '+(s.tooltip||'')+' '+s.group).toLowerCase().includes(q):(only||s.preset+'|'+s.page===S.allPage))&&(!only||s.key in S.changes));
+ const groups=[];list.forEach(s=>{const g=(q||only?(s.preset==='process'?'Process':'Filament')+' › '+s.page+' › ':'')+s.group;let x=groups.find(y=>y.name===g);if(!x)groups.push(x={name:g,items:[]});x.items.push(s);});
+ el('slicerAllList').innerHTML=groups.map(g=>`<section><h3>${h(g.name)}</h3>${g.items.map(s=>settingRow(s,null,true)).join('')}</section>`).join('')||`<p class="muted">${only?'No settings changed from the presets.':'No setting matches.'}</p>`;
+ el('slicerAllNav').hidden=!!q;}
 // ---- slicing ----
 async function slice(){
  if(!S.objects.length)return;const problems=checkPlate();
@@ -242,9 +289,9 @@ function applyMine(p){
  if(S.catalog){const m=p.settings?.machine;if(m&&S.catalog.machines.some(x=>x.name===m)&&el('slicerMachine').value!==m){el('slicerMachine').value=m;fillPresets(true);drawPlate();}
   for(const [id,key] of [['slicerProcess','process'],['slicerFilament','filament']]){const v=p.settings?.[key];if(v&&[...el(id).options].some(o=>o.value===v))el(id).value=v;}}
  S.changes={...(p.changes||{})};
- el('slicerSettings').querySelectorAll('[data-key]').forEach(input=>{const v=S.changes[input.dataset.key];input.value=v===undefined?'':String(v);});
+ buildSettings();if(el('slicerAll').open)renderAll();
  el('slicerAutoArrange').checked=!!p.options?.arrange;el('slicerAutoOrient').checked=!!p.options?.orient;
- el('slicerChanged').textContent=Object.keys(S.changes).length?`${Object.keys(S.changes).length} changed from the presets`:'';}
+ updateChanged();}
 async function saveMine(){const name=(prompt('Save these settings as:',el('slicerMine').value||'')||'').trim();if(!name)return;
  try{S.mine=(await api('slicer/presets',{name,settings:{machine:el('slicerMachine').value,process:el('slicerProcess').value,filament:el('slicerFilament').value},changes:S.changes,options:sliceOptions()})).presets;
   renderMine(name);notice(`Saved as "${name}".`);}catch(e){notice(e.message);}}

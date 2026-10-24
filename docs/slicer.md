@@ -103,17 +103,26 @@ The worker then shows under **Slicer → Workers**, and its presets appear in th
    - **Duplicate** (Ctrl+D) with **×** copies: makes that many copies and arranges the plate. Then **Delete**, **Reset** (back to where it was added), **Drop to bed**, and **Arrange**, which lays all the objects out in rows.
    - Objects off the plate, taller than the printer, or overlapping another object turn red and are listed under the plate.
 3. **Choose presets.** The printer, process and filament lists are OrcaSlicer's own Bambu Lab presets, and only matching ones are offered. The printer starts on the model of your first printer.
-4. **Change settings** if you need to (blank means "as in the preset"):
+4. **Change settings** if you need to. A blank setting uses the preset: the preset's own value is shown greyed in the box.
+   - **The panel next to the plate** has the common ones:
 
-   | Group | Settings |
-   |---|---|
-   | **Quality** | layer height, first layer height, line width, seam position, ironing |
-   | **Strength** | wall loops, top and bottom shell layers, infill density and pattern |
-   | **Speed** | outer and inner wall, infill, first layer and travel speeds, acceleration |
-   | **Support** | supports on or off, support type, overhang angle, build plate only, brim |
-   | **Material** | nozzle temperatures, plate temperatures, flow ratio, max volumetric speed, max fan speed |
+     | Group | Settings |
+     |---|---|
+     | **Quality** | layer height, first layer height, line width, seam position, ironing |
+     | **Strength** | wall loops, top and bottom shell layers, infill density and pattern |
+     | **Speed** | outer and inner wall, infill, first layer and travel speeds, acceleration |
+     | **Support** | supports on or off, support type, overhang angle, build plate only, brim |
+     | **Material** | nozzle temperatures, plate temperatures, flow ratio, max volumetric speed, max fan speed |
 
-   Every value is checked on the Pi against its limits, so a worker only ever gets known settings.
+   - **All settings** opens every one of OrcaSlicer's process and filament settings (about 425), on OrcaSlicer's own pages and in its groups:
+     - **Process pages:** Quality, Strength, Speed, Support, Multimaterial, Others.
+     - **Filament pages:** Filament, Cooling, Multimaterial, Setting Overrides (the filament's own retraction, z-hop and wipe).
+     - Each setting has OrcaSlicer's name, unit, limits, choices and explanation.
+     - **Find a setting** searches them all, for example *retraction* or *seam*. **Changed only** lists what you changed, and **↺** puts one back to the preset.
+     - Some take a length or a percentage, for example a line width of `0.45` (mm) or `110%` (of the nozzle).
+     - The bed type (under Others → Plate) picks which bed temperature of the filament is used.
+   - Text settings are left out: custom G-code, post-processing scripts, notes. Every value is checked on the Pi against OrcaSlicer's limits, so a worker only ever gets known settings with valid values.
+   - The greyed preset values come from the workers (worker 1.2.0 or newer: `sudo slicer-worker update`). Until a worker has sent them, OrcaSlicer's defaults are shown.
 5. **Options** (under the settings):
    - **Auto-orient:** OrcaSlicer turns each object to the way it prints best (less support, more stable), instead of how you placed it.
    - **Let OrcaSlicer arrange the plate:** OrcaSlicer places the objects itself. Off, they stay exactly where you put them.

@@ -157,9 +157,9 @@ class SettingsTests(unittest.TestCase):
         keys=[s['key'] for s in settings.SCHEMA]
         self.assertEqual(len(keys),len(set(keys)))
         for s in settings.SCHEMA:
-            self.assertIn(s['preset'],('process','filament'));self.assertIn(s['type'],('float','int','percent','bool','enum'))
-            if s['type']=='enum':self.assertTrue(s['options'])
-            elif s['type']!='bool':self.assertLess(s['min'],s['max'])
+            self.assertIn(s['preset'],('process','filament'));self.assertIn(s['type'],('float','int','percent','float_or_percent','bool','enum'))
+            if s['type']=='enum':self.assertTrue(s['options']);self.assertTrue(all(len(o)==2 for o in s['options']))
+            elif s['type']!='bool' and 'max' in s:self.assertLessEqual(s.get('min',-1e9),s['max'])
 
     def test_check(self):
         self.assertEqual(settings.check(None),{'process':{},'filament':{}})

@@ -18,6 +18,7 @@ Worker setup (no secrets in them; registering needs a setup code from the dashbo
     GET  /slicer/worker/install.sh, /slicer/worker/bundle.tar.gz
 """
 import asyncio
+import gzip
 import hashlib
 import io
 import json
@@ -27,6 +28,7 @@ import shutil
 import tarfile
 import time
 import zipfile
+import zlib
 from pathlib import Path
 
 from aiohttp import web
@@ -38,6 +40,7 @@ from slicer.installer import install_script
 HERE = Path(__file__).resolve().parent
 MAX_OBJECTS = 50
 MAX_RESULT = 512 * 1024 * 1024
+MAX_VALUES = 5 * 1024 * 1024   # the presets' values, gzip-compressed (about 30 KB for OrcaSlicer's Bambu Lab presets)
 ID = re.compile(r'[0-9a-f]{16}')
 MODEL = re.compile(r'[0-9a-f]{64}')
 
@@ -51,6 +54,7 @@ class Slicer:
             folder.mkdir(parents=True, exist_ok=True)
         self.jobs = jobs_module.Jobs(self.folder / 'slicer.sqlite3')
         self.task = None
+        self.values_cache = {}
 
     def routes(self):
         return [
@@ -67,6 +71,7 @@ class Slicer:
             web.post('/api/slicer/workers/{id}', self.configure), web.post('/api/slicer/workers/{id}/remove', self.remove),
             web.post('/api/slicer/worker/enroll', self.w_enroll), web.post('/api/slicer/worker/heartbeat', self.w_heartbeat),
             web.post('/api/slicer/worker/catalog', self.w_catalog), web.post('/api/slicer/worker/claim', self.w_claim),
+            web.post('/api/slicer/worker/values', self.w_values), web.get('/api/slicer/values', self.values),
             web.get('/api/slicer/worker/jobs/{id}/models/{index}', self.w_model),
             web.post('/api/slicer/worker/jobs/{id}/progress', self.w_progress),
             web.post('/api/slicer/worker/jobs/{id}/result', self.w_result), web.post('/api/slicer/worker/jobs/{id}/fail', self.w_fail),
@@ -100,7 +105,7 @@ class Slicer:
     async def catalog(self, request):
         version, catalog = self.jobs.catalog()
         workers = self.jobs.workers()
-        return web.json_response(dict(version=version, catalog=catalog, schema=slicing_settings.SCHEMA,
+        return web.json_response(dict(version=version, catalog=catalog, schema=slicing_settings.SCHEMA, quick=slicing_settings.client_schema()['quick'],
                                       workers=sum(1 for w in workers if w['online'] and w['enabled']),
                                       printers=[dict(name=n, model=self.printer_model(n)) for n in self.core.names()]))
 
@@ -366,7 +371,69 @@ class Slicer:
         info = info if isinstance(info, dict) else {}
         return web.json_response(dict(enabled=bool(current['enabled']), draining=bool(current['draining']), concurrency=current['concurrency'],
                                       stop=self.jobs.cancelled(worker['id'], info.get('running')),
-                                      catalog_wanted=not self.jobs.has_catalog(info.get('orca_version') or 'unknown')))
+                                      catalog_wanted=not self.jobs.has_catalog(info.get('orca_version') or 'unknown'),
+                                      values_wanted=self.values_wanted(info.get('orca_version') or 'unknown')))
+
+    # ---- the presets' values, shown next to each setting ----
+
+    def values_path(self, version):
+        return self.folder / f"values-{re.sub(r'[^A-Za-z0-9._-]', '_', str(version))[:40]}.json.gz"
+
+    def values_wanted(self, version):
+        """The settings whose preset values a worker should send ({kind: [key]}), or None when the Pi has them."""
+        if self.values_path(version).exists():
+            return None
+        return {kind: [e['key'] for e in slicing_settings.SCHEMA if e['preset'] == kind] for kind in ('process', 'filament')}
+
+    def load_values(self, version):
+        if version not in self.values_cache:
+            try:
+                self.values_cache = {version: json.loads(gzip.decompress(self.values_path(version).read_bytes()))}
+            except (OSError, ValueError, EOFError):
+                return None
+        return self.values_cache[version]
+
+    async def w_values(self, request):
+        worker = self.worker_of(request)
+        version = request.query.get('version') or 'unknown'
+        body = await request.content.read(MAX_VALUES + 1)
+        if len(body) > MAX_VALUES:
+            raise ValueError('The preset values are too large.')
+        inflate = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        try:
+            raw = inflate.decompress(body, MAX_VALUES * 20)
+            if inflate.unconsumed_tail:
+                raise ValueError('The preset values are too large.')
+            data = json.loads(raw)
+        except (zlib.error, ValueError) as exc:
+            raise ValueError(f'Invalid preset values: {exc}') from None
+        for kind in ('process', 'filament'):
+            table = data.get(kind) if isinstance(data, dict) else None
+            if (not isinstance(table, dict) or not isinstance(table.get('keys'), list) or not isinstance(table.get('rows'), list)
+                    or not isinstance(table.get('presets'), dict)
+                    or not all(isinstance(r, list) and len(r) == len(table['keys']) for r in table['rows'])
+                    or not all(isinstance(i, int) and 0 <= i < len(table['rows']) for i in table['presets'].values())):
+                raise ValueError('Invalid preset values.')
+        path = self.values_path(version)
+        temporary = path.with_suffix(f'.{secrets.token_hex(4)}.tmp')
+        temporary.write_bytes(gzip.compress(json.dumps(data, separators=(',', ':')).encode()))
+        temporary.replace(path)
+        self.values_cache = {}
+        self.event('Slicing preset values updated', f"{worker['name']}: OrcaSlicer {version}")
+        return web.json_response(dict(ok=True))
+
+    async def values(self, request):
+        """One preset's values for every setting ({key: value}; settings it doesn't set are left out: OrcaSlicer's default)."""
+        kind, name = request.query.get('kind'), request.query.get('name', '')
+        if kind not in ('process', 'filament'):
+            raise ValueError('Ask for a process or filament preset.')
+        version, _ = self.jobs.catalog()
+        data = await asyncio.to_thread(self.load_values, version) if version else None
+        table = (data or {}).get(kind) or {}
+        row = table.get('presets', {}).get(name)
+        if row is None:
+            return web.json_response(dict(values=None))
+        return web.json_response(dict(values={k: v for k, v in zip(table['keys'], table['rows'][row]) if v is not None}))
 
     async def w_catalog(self, request):
         worker = self.worker_of(request)
