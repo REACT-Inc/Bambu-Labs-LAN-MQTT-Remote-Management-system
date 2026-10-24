@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.9.16-beta.1
+
+Built on 1.9.15-beta.1: every OrcaSlicer process and filament setting in the Slicer tab (about 425), in an All settings window laid out like OrcaSlicer's tabs, with search and the presets' own values shown next to each setting.
 
 ### Added
 - **Every OrcaSlicer setting in the Slicer tab.** **All settings** opens all of OrcaSlicer's process and filament settings (about 425 instead of 28), on OrcaSlicer's own pages and groups (Quality, Strength, Speed, Support, Multimaterial, Others; Filament, Cooling, Setting Overrides). Each has OrcaSlicer's name, unit, limits, choices and explanation. See [Slicer](docs/slicer.md).
