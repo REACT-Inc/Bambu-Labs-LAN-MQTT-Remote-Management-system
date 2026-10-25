@@ -150,6 +150,7 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,200)
         return (await r.json())['csrf']
     async def test_file_listing_requires_login(self):
+        self.dashboard.require_login=True   # (off by default: test_open_dashboard.py)
         r=await self.client.get('/api/files/A')
         self.assertEqual(r.status,401)
         await self.login()
@@ -174,7 +175,8 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,200)
         self.assertEqual(self.store.get(job['id'])['status'],'staging')
 
-    async def test_auth_required(self):self.assertEqual((await self.client.get('/api/state')).status,401)
+    async def test_auth_required(self):
+        self.dashboard.require_login=True;self.assertEqual((await self.client.get('/api/state')).status,401)
     async def test_cross_origin_login_blocked(self):
         r=await self.client.post('/api/login',json={'password':'test-password-123'},headers={'X-PM':'1','Origin':'https://attacker.example'})
         self.assertEqual(r.status,403)
@@ -194,6 +196,7 @@ class HTTPTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/api/login',json={'password':'wrong'},headers={'X-PM':'1'})
         self.assertEqual(r.status,401)
     async def test_live_camera_requires_login(self):
+        self.dashboard.require_login=True
         r=await self.client.get('/api/live/A')
         self.assertEqual(r.status,401)
         

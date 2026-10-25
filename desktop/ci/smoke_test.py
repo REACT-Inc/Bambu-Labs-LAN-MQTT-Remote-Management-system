@@ -1,7 +1,7 @@
 """End-to-end test of the desktop app, as someone would use it, against a demo Pi on this computer:
 
 1. The app starts with a fresh profile and shows its Connect page; entering the Pi's address opens the dashboard's
-   sign-in, and signing in shows the two demo printers.
+   sign-in if the Pi asks for one (it doesn't by default), and the dashboard shows the two demo printers.
 2. The tray icon sees both printers, and a notification from the Pi pops up.
 3. (Windows) Closing the window keeps the app running in the tray; starting the app again brings the window back.
 4. The app quits with --quit. Started again in the tray (--tray, as Start with Windows does), it's still signed in.
@@ -222,10 +222,12 @@ class Test:
             await page.js(type_into('#address', f'127.0.0.1:{self.port}'))
             await page.js("document.querySelector('#connect').click()")
         await page.until(f"location.href === 'http://127.0.0.1:{self.port}/'", 'the dashboard to open')
-        await page.until(shown('#loginPassword'), "the dashboard's sign-in")
-        await self.screenshot('sign-in', page)
-        await page.js(type_into('#loginPassword', PASSWORD))
-        await page.js("document.querySelector('#loginForm').requestSubmit()")
+        # Signing in is off unless the Pi's config.json says "require_login": true.
+        await page.until(shown('#loginPassword') + ' || ' + shown('#app'), "the dashboard (or its sign-in)")
+        if await page.js(shown('#loginPassword')):
+            await self.screenshot('sign-in', page)
+            await page.js(type_into('#loginPassword', PASSWORD))
+            await page.js("document.querySelector('#loginForm').requestSubmit()")
         await page.until(shown('#app') + " && document.querySelectorAll('.printer-card').length >= 2",
                          'the dashboard with the two demo printers')
         await self.screenshot('dashboard', page)

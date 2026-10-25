@@ -120,6 +120,7 @@ class UpdateHTTPTests(unittest.IsolatedAsyncioTestCase):
         form=FormData();form.add_field('file',package(),filename='release.zip',content_type='application/zip')
         return await self.client.post('/api/update/upload',data=form,headers=headers)
     async def test_auth_csrf_confirmation_and_maintenance(self):
+        self.dashboard.require_login=True
         self.assertEqual((await self.client.get('/api/update/status')).status,401)
         h=await self.login()
         self.assertEqual((await self.upload({'X-PM':'1'})).status,403)
@@ -154,6 +155,7 @@ class UpdateHTTPTests(unittest.IsolatedAsyncioTestCase):
         forced=[e for e in self.store.events() if e['title']=='Forced software update']
         self.assertEqual(len(forced),1);self.assertIn('while Test is printing',forced[0]['detail']);self.assertIn('dashboard (',forced[0]['detail'])
     async def test_github_settings_require_auth_csrf_and_hide_token(self):
+        self.dashboard.require_login=True
         self.assertEqual((await self.client.get('/api/github/status')).status,401)
         headers=await self.login()
         data={'repository':'test/printers','automatic':False,'token':'test-token-value'}

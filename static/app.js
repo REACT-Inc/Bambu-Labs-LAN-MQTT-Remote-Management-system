@@ -14,6 +14,9 @@ async function api(path,body,method='POST'){
  if(!r.ok){if(r.status===401)showLogin();throw new Error(result.error||'Request failed');}
  return result;
 }
+// Signing in is off unless "require_login": true in config.json: then there's nothing to sign out of.
+function showAccess(){$('logout').hidden=!state.login;$('passwordSave').textContent=state.login?'Change password & sign out':'Change password';$('accessNote').textContent=state.login?'Everyone using this dashboard password has management access.':
+ 'Signing in is turned off: anyone who can open this address can use the dashboard. The password below is still used by the pm-doctor page, and by the dashboard if you set "require_login": true in config.json and restart. See docs/configuration.md.';}
 function showLogin(){ $('app').hidden=true;$('loginScreen').hidden=false;state=null;settingsLoaded=false; }
 function notice(text){$('notice').textContent=text;$('notice').hidden=false;setTimeout(()=>$('notice').hidden=true,7000);}
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.',slicer:'Slice it here, print it there.'}[name];window.dispatchEvent(new CustomEvent('tab',{detail:name}));}
@@ -106,7 +109,7 @@ function renderJobs(){
  $('jobs').innerHTML=jobs.filter(j=>!terminal.has(j.status)).map(row).join('')||'<div class="empty">The queue is clear. Add a print here or use /queueadd in Discord.</div>';
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
 }
-async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;$('connectionBanner').hidden=true;render();}catch(e){if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
+async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;showAccess();$('connectionBanner').hidden=true;render();}catch(e){if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
 // No confirmation screens in the dashboard: every action runs straight away (the server still checks it is safe,
 // e.g. temperature limits and an idle printer for moves). Discord keeps its confirmations.
 async function confirmAction(title,text,label,callback){notice(title.replace(/\?$/,'')+'…');try{await callback();await refresh();}catch(e){notice(e.message);}}
@@ -290,7 +293,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  }catch(e){notice(e.message);}});
 $('takeSnapshot').onclick=async()=>{$('takeSnapshot').disabled=true;$('cameraMessage').textContent='Requesting snapshot…';try{const r=await fetch('/api/camera/'+encodeURIComponent(selectedPrinter));if(!r.ok){const data=await r.json();throw new Error(data.error||'Camera unavailable.');}if(cameraUrl)URL.revokeObjectURL(cameraUrl);cameraUrl=URL.createObjectURL(await r.blob());$('cameraImage').src=cameraUrl;$('cameraImage').hidden=false;$('cameraMessage').textContent='Snapshot captured '+new Date().toLocaleTimeString();}catch(e){$('cameraMessage').textContent=e.message;}finally{$('takeSnapshot').disabled=false;}};
 $('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value,alert_ping_users:$('alertPingUsers').value});notice('Settings saved.');}catch(e){notice(e.message);}};
-$('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';showLogin();}catch(e){notice(e.message);}};
+$('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';if(state?.login)showLogin();else notice('Password changed.');}catch(e){notice(e.message);}};
 $('testNotification').onclick=async()=>{try{await api('testnotification',{});notice('Test requested. Check Discord and the activity feed.');}catch(e){notice(e.message);}};
 refresh();setInterval(()=>{if(state&&!document.hidden)refresh();},5000);
 let permissionState=null;

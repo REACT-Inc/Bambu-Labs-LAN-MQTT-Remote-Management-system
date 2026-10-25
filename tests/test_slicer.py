@@ -466,6 +466,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,409)
         # The dashboard's own slicer routes still need signing in.
         from aiohttp.test_utils import TestClient,TestServer
+        self.dashboard.require_login=True   # (off by default: test_open_dashboard.py)
         anonymous=TestClient(TestServer(self.dashboard.app));await anonymous.start_server()
         try:
             self.assertEqual((await anonymous.get('/api/slicer/jobs')).status,401)

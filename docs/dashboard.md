@@ -1,6 +1,6 @@
 # Web dashboard
 
-The dashboard is served by the Pi at `http://<address>:8080`. It's protected by a single shared password: **anyone who signs in has full management access**, so give the password only to people who should manage printers. Sessions last 12 hours.
+The dashboard is served by the Pi at `http://<address>:8080`. **It doesn't ask for a password by default:** anyone who can reach the address has full management access, so keep it on Tailscale or a trusted network. To require the dashboard password (one shared password, 12-hour sessions), set `"require_login": true` in `config.json`. See [Signing in](configuration.md#signing-in).
 
 The page refreshes printer data every 5 seconds and works on phones as well as desktops. On Windows laptops, the [desktop app](desktop-app.md) shows the dashboard in its own window, with a tray icon for the printers and pop-ups for its notifications.
 
@@ -120,7 +120,7 @@ MeshCentral connection settings, the matching laptops with their online state, a
 | Discord (optional) | **Connect a Discord bot:** its token (never shown again) and your server IDs, applied with **Restart now**. Then the notification channel ID, the **commands channel ID** (replies are public there and private in every other channel), the people to ping for important alerts, and **approved user IDs** (admins without Discord Administrator). **Send test notification** checks the channel. See [Discord bot](discord.md). |
 | Other alerts | Send the same alerts as Discord to **Home Assistant**, **ntfy** (phone push), any **webhook**, or a **Discord channel webhook**, even without the Discord bot. See [Other alerts](#other-alerts). |
 | Discord command permissions | Choose who can use each Discord command: Everyone, Allowed roles + admins (with the **Allowed role IDs** list), Admins only, or Off. Commands marked 🔒 can only be admin-only or off. Opening an admin command to everyone asks for confirmation, and **Reset all to defaults** restores the defaults. See [Commands and permissions](commands.md). |
-| Dashboard access | Change the dashboard password (12+ characters). This signs everyone out. |
+| Dashboard access | Says whether signing in is on, and changes the dashboard password (12+ characters). The password is used by pm-doctor, and by the dashboard when `require_login` is on (changing it then signs everyone out). |
 | Diagnostics & error logs | Download a diagnostic ZIP and see recent errors with their error IDs. See [Troubleshooting](troubleshooting.md). |
 | Send a problem report | Send a description plus diagnostics to the developers as a GitHub issue, and set the report destination. See [Troubleshooting](troubleshooting.md#sending-a-problem-report). |
 | GitHub releases | Repository, token, **update channel** (stable / beta / alpha), automatic installation, **Check now**. See [Updates](updates.md). |

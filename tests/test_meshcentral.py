@@ -89,6 +89,7 @@ class MeshHTTPTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.client.close();self.store.db.close();self.tmp.cleanup()
     async def test_mesh_api_auth_settings_and_result(self):
+        self.dashboard.require_login=True
         self.assertEqual((await self.client.get('/api/team')).status,401)
         r=await self.client.post('/api/login',json={'password':'test-password-123'},headers={'X-PM':'1'});csrf=(await r.json())['csrf'];headers={'X-PM':'1','X-CSRF':csrf}
         data=dict(url='https://mesh.example.test',username='token-user',password='secret-value',prefix='REACT-')

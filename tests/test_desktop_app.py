@@ -71,6 +71,7 @@ class PiSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 200)
 
     async def test_needs_sign_in(self):
+        self.dashboard.require_login = True   # (off by default: test_open_dashboard.py)
         self.assertEqual((await self.client.get('/api/desktop')).status, 401)
 
     async def test_printers_status_and_notifications(self):
@@ -98,6 +99,7 @@ class PiSummaryTests(unittest.IsolatedAsyncioTestCase):
 
     @needs_desktop
     async def test_the_desktop_client_reads_it_with_the_window_sign_in(self):
+        self.dashboard.require_login = True
         base = str(self.client.make_url('')).rstrip('/')
         self.assertEqual(await asyncio.to_thread(pi_client.check, base), '')
         with self.assertRaises(pi_client.SignedOut):
@@ -106,6 +108,13 @@ class PiSummaryTests(unittest.IsolatedAsyncioTestCase):
         session = response.cookies['pm_session'].value
         data = await asyncio.to_thread(pi_client.summary, base, session)
         self.assertEqual(len(data['printers']), 2)
+
+    async def test_without_signing_in(self):
+        """Signing in is off by default: the tray reads the Pi without the window's session."""
+        base = str(self.client.make_url('')).rstrip('/')
+        for session in ('', 'left-from-before-a-restart'):
+            data = await asyncio.to_thread(pi_client.summary, base, session)
+            self.assertEqual(len(data['printers']), 2)
 
 
 
@@ -171,8 +180,8 @@ class CheckTests(unittest.TestCase):
         base = self.serve(404, b'{"error": "Not Found"}')
         with self.assertRaises(pi_client.TooOld):
             pi_client.summary(base, 'session')
-        with self.assertRaises(pi_client.SignedOut):
-            pi_client.summary(base, '')
+        with self.assertRaises(pi_client.TooOld):
+            pi_client.summary(base, '')   # asked without a session too (a dashboard without signing in)
 
 
 @needs_desktop
