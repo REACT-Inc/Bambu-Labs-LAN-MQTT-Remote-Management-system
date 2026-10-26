@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -56,6 +57,11 @@ class Dashboard:
     def __init__(self, core, store, engine):
         self.core, self.store, self.engine = core, store, engine
         self.sessions, self.failures = {}, {}
+        # Signing in is off unless "require_login": true in config.json: anyone who can reach the dashboard can use it.
+        # The page still gets a session with a CSRF token, so other websites can't send commands through a browser.
+        self.require_login = bool((getattr(core, 'CONFIG', None) or {}).get('require_login', False))
+        self.allowed_hosts = {str(h).lower() for h in (getattr(core, 'CONFIG', None) or {}).get('allowed_hosts') or []}
+        self.anonymous = {'csrf': secrets.token_urlsafe(32), 'expires': float('inf')}   # reading only: its token is never sent
         self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
         self.file_browser = Browser(core)
         self.controls = Controls(core,store)
@@ -133,8 +139,31 @@ class Dashboard:
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
         ])
 
+    def new_session(self, hours):
+        now = time.time()
+        self.sessions = {k: v for k, v in self.sessions.items() if v['expires'] > now}
+        if len(self.sessions) >= 5000:   # without a password anyone can make sessions: keep the newest
+            self.sessions = dict(sorted(self.sessions.items(), key=lambda kv: kv[1]['expires'])[-4000:])
+        token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+        self.sessions[token] = {'csrf': csrf, 'expires': now + hours * 3600}
+        return token, self.sessions[token]
+
+    def host_allowed(self, host):
+        """Without a password, only addresses a website can't take over with a DNS trick (DNS rebinding): IP addresses,
+        names without a dot, local names (.local, .lan, .home.arpa, .internal, Tailscale's .ts.net) and allowed_hosts."""
+        name = host.lower()
+        name = name[1:name.index(']')] if name.startswith('[') and ']' in name else name.rsplit(':', 1)[0] if name.count(':') == 1 else name
+        name = name.rstrip('.')
+        try:
+            ipaddress.ip_address(name)
+            return True
+        except ValueError:
+            pass
+        return '.' not in name or name.endswith(('.local', '.lan', '.home.arpa', '.internal', '.ts.net')) or name in self.allowed_hosts
+
     @web.middleware
     async def guard(self, request, handler):
+        cookie = None
         try:
             # Slicing workers sign in with their own token (slicer/web.py), not the dashboard password.
             if request.path.startswith(('/api/slicer/worker/', '/slicer/worker/')):
@@ -146,17 +175,30 @@ class Dashboard:
                 if request.headers.get('X-PM') != '1' or (origin and origin != f'{request.scheme}://{request.host}'):
                     raise web.HTTPForbidden(text='Invalid request origin.')
             if request.path.startswith('/api/') and request.path != '/api/login':
+                if not self.require_login and not self.host_allowed(request.host):
+                    raise web.HTTPForbidden(text=f'Unknown address {request.host[:80]}: add it to "allowed_hosts" in config.json, or set "require_login": true.')
                 token = request.cookies.get('pm_session','')
                 session = self.sessions.get(token)
                 if not session or session['expires'] < time.time():
                     self.sessions.pop(token,None)
-                    raise web.HTTPUnauthorized()
+                    if self.require_login:
+                        raise web.HTTPUnauthorized()
+                    if request.path == '/api/state':   # no password: the page gets its session when it loads
+                        cookie, session = self.new_session(30*24)
+                    elif request.method == 'GET':
+                        session = self.anonymous
+                    else:
+                        raise web.HTTPForbidden(text='This page is out of date: reload it.')
+                elif not self.require_login:
+                    session['expires'] = max(session['expires'], time.time()+30*24*3600)
                 request['session'] = session
                 if request.method != 'GET' and not hmac.compare_digest(request.headers.get('X-CSRF',''),session['csrf']):
                     raise web.HTTPForbidden(text='Invalid session token.')
             if request.method != 'GET' and request.path not in ('/api/login','/api/logout') and not request.path.startswith('/api/update/') and self.updater.busy():
                 raise web.HTTPServiceUnavailable(text='Management update in progress. Try again after it finishes.')
             response = await handler(request)
+            if cookie:
+                response.set_cookie('pm_session',cookie,httponly=True,samesite='Strict',secure=request.secure,max_age=30*24*3600,path='/')
         except (ValueError, KeyError, TypeError) as exc:
             response = web.json_response({'error':str(exc)}, status=400)
         except web.HTTPException as exc:
@@ -351,10 +393,8 @@ class Dashboard:
             self.failures[peer]=recent+[time.time()]
             raise web.HTTPUnauthorized(text='Incorrect password.')
         self.failures.pop(peer,None)
-        self.sessions={k:v for k,v in self.sessions.items() if v['expires']>time.time()}
-        token, csrf=secrets.token_urlsafe(32),secrets.token_urlsafe(32)
-        self.sessions[token]={'csrf':csrf,'expires':time.time()+12*3600}
-        response=web.json_response({'csrf':csrf})
+        token,session=self.new_session(12)
+        response=web.json_response({'csrf':session['csrf']})
         response.set_cookie('pm_session',token,httponly=True,samesite='Strict',secure=request.secure,max_age=43200,path='/')
         return response
 
@@ -428,7 +468,7 @@ class Dashboard:
             settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)],
                       # Discord IDs are sent as text: they are larger than JavaScript numbers can hold exactly.
                       'alert_ping_users':[str(x) for x in self.core.settings.get('alert_ping_users') or []]},
-            csrf=request['session']['csrf']))
+            csrf=request['session']['csrf'],login=self.require_login))
 
     async def desktop(self, request):
         """What the desktop app's tray icon shows (desktop/): each printer's state and the status icon with its

@@ -2,7 +2,7 @@
 
 **3D Printer Management for Windows** puts the dashboard in its own window on a laptop, with a tray icon that lists the printers and pops up the dashboard's notifications: prints finished or failed, printer errors, AI alerts.
 
-- **It's the same dashboard:** everything you can do in a browser works in the app, after signing in with the dashboard password.
+- **It's the same dashboard:** everything you can do in a browser works in the app. If the dashboard asks for its password (`require_login`), you sign in once.
 - **The Pi still does everything:** the app talks only to your Pi, never to the printers directly. Nothing changes on the Pi, and any number of laptops can use the app.
 - **No password is stored:** you sign in on the dashboard itself, and the app keeps that sign-in for the dashboard's 12-hour session.
 
@@ -125,7 +125,7 @@ If you move the .exe, start it once from its new place: Start with Windows follo
 | **"Nothing answered at …"** | The laptop can't reach the Pi. Check it's on the same network as the Pi, or signed in to Tailscale, and that the Pi is on. Try the same address in a browser. |
 | **"Something answered at …, but it isn't the 3D Printer Management dashboard"** | Check the address and port. The dashboard uses port 8080 unless `port` in `config.json` was changed. |
 | **Find it for me finds nothing** | Type the address instead. The search covers addresses like the laptop's own (for example 192.168.1.1–254); it can't see a Pi on a larger or different network, or past a guest Wi-Fi that keeps devices apart. |
-| **Tray: "Not signed in"** | Open the app and sign in. |
+| **Tray: "Not signed in"** | The dashboard asks for its password: open the app and sign in. |
 | **Tray: "Can't reach the Pi"** | As for "Nothing answered" above. The tray recovers by itself once the Pi can be reached. |
 | **Tray: "Update the Pi to version 1.8.0 or newer…"** | The window works; the tray's summary needs the newer Pi. [Update the Pi](updates.md). |
 | **No pop-ups** | Check **Notifications** in the tray menu, and that Windows notifications and Focus assist allow them. |

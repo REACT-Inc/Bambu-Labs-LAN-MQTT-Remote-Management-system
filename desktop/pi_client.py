@@ -106,11 +106,10 @@ def check(base, timeout=3):
 
 
 def summary(base, session, timeout=6):
-    """The tray's view of the Pi (GET /api/desktop), using the dashboard window's own session."""
-    if not session:
-        raise SignedOut('Not signed in.')
+    """The tray's view of the Pi (GET /api/desktop), using the dashboard window's own session. Without one it still asks:
+    a dashboard without signing in (the default) answers anyway, one that needs it answers 401."""
     try:
-        data = _get(base, '/api/desktop', timeout, {'Cookie': f'{SESSION_COOKIE}={session}'})
+        data = _get(base, '/api/desktop', timeout, {'Cookie': f'{SESSION_COOKIE}={session}'} if session else {})
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
             raise SignedOut('Signed out of the dashboard.') from None

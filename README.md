@@ -40,7 +40,7 @@ sudo bash install.sh                               # uses the Pi's Tailscale add
 # or: sudo PM_LISTEN_IP=192.168.1.50 bash install.sh   (a LAN address instead)
 ```
 
-Save the **initial dashboard password** the installer prints, open the address it shows (`http://<address>:8080`), and change the password under **Settings & help**. Then press **Add a printer** and enter each printer's IP address, serial number and access code: no Discord or file editing needed. Full instructions, demo mode and migrating from the original Discord bot are in the [installation guide](docs/installation.md).
+Open the address the installer shows (`http://<address>:8080`). The dashboard doesn't ask for a password unless you turn it on ([Signing in](docs/configuration.md#signing-in)), so keep it on Tailscale or a trusted network. Save the **initial password** the installer prints anyway: the pm-doctor page uses it. Then press **Add a printer** and enter each printer's IP address, serial number and access code: no Discord or file editing needed. Full instructions, demo mode and migrating from the original Discord bot are in the [installation guide](docs/installation.md).
 
 On Windows laptops, you can also use the [desktop app](docs/desktop-app.md): download `3d-printer-management-desktop.exe` from the same release and enter the same address.
 

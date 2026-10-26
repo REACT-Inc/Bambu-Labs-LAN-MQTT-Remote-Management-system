@@ -6,7 +6,7 @@ This guide installs 3D Printer Management as a systemd service on a Raspberry Pi
 - [Ubuntu and other Linux distributions](#ubuntu-and-other-linux-distributions)
 - [Choose how you'll reach the dashboard](#choose-how-youll-reach-the-dashboard)
 - [Install](#install)
-- [First login](#first-login)
+- [First start](#first-start)
 - [Migrating from the original Discord bot](#migrating-from-the-original-discord-bot)
 - [Demo mode](#demo-mode)
 - [Optional: allow rebooting the Pi from Discord or the dashboard](#optional-allow-rebooting-the-pi-from-discord-or-the-dashboard)
@@ -57,11 +57,11 @@ The dashboard never listens on every network interface. It always listens on `12
 | Option | How | Who can open the dashboard |
 |---|---|---|
 | **Tailscale** (recommended) | Install and sign in to Tailscale on the Pi before running the installer. The installer picks up the Pi's Tailscale IPv4 address automatically. | Devices on your tailnet that your Tailscale policy allows to reach the Pi on TCP 8080 |
-| **LAN address** | Run the installer as `sudo PM_LISTEN_IP=192.168.1.50 bash install.sh` (use the Pi's own LAN IP) | Anyone on that network who knows the password |
+| **LAN address** | Run the installer as `sudo PM_LISTEN_IP=192.168.1.50 bash install.sh` (use the Pi's own LAN IP) | Anyone on that network (the dashboard doesn't ask for a password unless `require_login` is on) |
 
 If Tailscale isn't connected and `PM_LISTEN_IP` isn't set, the installer stops without changing anything. The installer never changes Tailscale, your tailnet policy or firewall rules.
 
-The dashboard uses plain HTTP on port 8080, protected by a password. Use Tailscale, or keep it on a trusted network. Don't forward the port to the internet.
+The dashboard uses plain HTTP on port 8080 and **doesn't ask for a password by default** ([Signing in](configuration.md#signing-in) turns it on). Use Tailscale, or keep it on a trusted network. Don't forward the port to the internet.
 
 ## Install
 
@@ -82,12 +82,12 @@ The dashboard uses plain HTTP on port 8080, protected by a password. Use Tailsca
    | `--enable-reboot` | Allow the Pi to be rebooted from Discord or the dashboard. See [below](#optional-allow-rebooting-the-pi-from-discord-or-the-dashboard). |
 
 4. **Wait for the health check.** The installer validates the configuration and the command definitions, starts the service, and waits up to 15 seconds for the dashboard to answer. If it doesn't, it restores the previous installation and shows the last 30 log lines.
-5. **Save the password.** The installer prints the dashboard address(es) and, on a first install, an **initial dashboard password**.
+5. **Save the password.** The installer prints the dashboard address(es) and, on a first install, an **initial dashboard password**. The pm-doctor page uses it, and the dashboard does too if you turn signing in on.
 
-## First login
+## First start
 
-1. **Sign in:** open the printed address, for example `http://100.x.y.z:8080`, from a device that can reach it, and sign in with the initial password.
-2. **Change the password:** go to **Settings & help → Dashboard access** and set a new password (at least 12 characters). This signs out every session.
+1. **Open the dashboard:** open the printed address, for example `http://100.x.y.z:8080`, from a device that can reach it. It opens without a password. To require one, see [Signing in](configuration.md#signing-in).
+2. **Change the password:** go to **Settings & help → Dashboard access** and set a new password (at least 12 characters), for pm-doctor and in case you turn signing in on.
 3. **Add your printers:** a new installation shows a **Welcome** banner and demo printers until you add your own. Press **Add a printer** (or go to **Settings & help → Printers**) and enter each printer's name, IP address, serial number and access code. The model and camera type are worked out from the serial number. Then press **Restart now**: the dashboard is back after about 15 seconds, connected to your printers.
    - **Where to find the details:** on the printer, **Settings → Network** shows the IP address and the LAN access code, and **Settings → Device** shows the serial number. LAN mode (or developer mode) must be on, depending on your firmware.
    - **Give each printer a fixed address** (a DHCP reservation in your router), so it keeps the same IP.

@@ -2,6 +2,14 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Changed
+- **The dashboard no longer asks for a password.** It opens straight away, and **Sign out** is gone. Anyone who can reach its address can use it, so keep it on Tailscale or a trusted network. See [Signing in](docs/configuration.md#signing-in).
+  - **Still protected from other websites:** each browser gets its own session and token when the page loads, every change needs it, and only IP addresses, local names and `allowed_hosts` are answered.
+  - **To keep the password:** add `"require_login": true` to `config.json` and restart.
+  - The password is still used by the pm-doctor page. The desktop app works either way, also older versions.
+
 ## 1.9.16-beta.1
 
 Built on 1.9.15-beta.1: every OrcaSlicer process and filament setting in the Slicer tab (about 425), in an All settings window laid out like OrcaSlicer's tabs, with search and the presets' own values shown next to each setting.

@@ -173,7 +173,7 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
         from queueing import Engine
         with tempfile.TemporaryDirectory() as d:
             d=Path(d)
-            core=SimpleNamespace(DATA_DIR=d,SETTINGS_FILE=str(d/'settings.json'),settings={},SETTINGS_USER_IDS=set(),EXAMPLE_MODE=True,CONFIG={},
+            core=SimpleNamespace(DATA_DIR=d,SETTINGS_FILE=str(d/'settings.json'),settings={},SETTINGS_USER_IDS=set(),EXAMPLE_MODE=True,CONFIG={'require_login':True},
                 names=lambda:[],state_data=lambda n:('IDLE',0,{},True),last_seen={},bot=SimpleNamespace(is_ready=lambda:False),log=__import__('logging').getLogger('test'))
             store=Store(d/'db');dashboard=Dashboard(core,store,Engine(core,store));atomic_json(d/'auth.json',password_hash('test-password-123'))
             async with TestClient(TestServer(dashboard.app)) as client:

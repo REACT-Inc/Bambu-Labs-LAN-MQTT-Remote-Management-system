@@ -66,7 +66,7 @@ class CameraRecoveryTests(unittest.IsolatedAsyncioTestCase):
         async def fake(feed):
             await feed.put(b'\xff\xd8fakejpeg\xff\xd9');await asyncio.Event().wait()
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);store=Store(root/'queue.db');core=SimpleNamespace(DATA_DIR=root,CONFIG={},names=lambda:['A'],EXAMPLE_MODE=False,printer_config=lambda n:{'camera_type':'jpeg_tcp'},log=logging.getLogger('test'))
+            root=Path(temp);store=Store(root/'queue.db');core=SimpleNamespace(DATA_DIR=root,CONFIG={'require_login':True},names=lambda:['A'],EXAMPLE_MODE=False,printer_config=lambda n:{'camera_type':'jpeg_tcp'},log=logging.getLogger('test'))
             dashboard=Dashboard(core,store,Engine(core,store));(root/'auth.json').write_text(json.dumps(password_hash('testing-password')))
             async with TestClient(TestServer(dashboard.app)) as client:
                 self.assertEqual((await client.get('/api/liveframe/A')).status,401)

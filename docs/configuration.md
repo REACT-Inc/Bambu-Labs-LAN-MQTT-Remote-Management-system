@@ -48,6 +48,8 @@ sudo python3 -m json.tool /etc/3d-printer-management/config.json >/dev/null && e
 | `example_data` | object | two demo printers | Demo mode only: fake telemetry per printer name, in the same shape as a Bambu MQTT `print` report. |
 | `listen` | list of IPs | `["127.0.0.1", "<chosen IP>"]` | Addresses the dashboard listens on. Set by the installer. |
 | `port` | number | `8080` | Dashboard port |
+| `require_login` | boolean | `false` | `true` = the dashboard asks for its password (and sessions last 12 hours). `false` = no sign-in: anyone who can reach the address can use it. See [Signing in](#signing-in). |
+| `allowed_hosts` | list of names | `[]` | Without signing in, extra host names the dashboard answers to, for example `["printers.example.org"]`. IP addresses and local names (no dot, `.local`, `.lan`, `.home.arpa`, `.internal`, Tailscale's `.ts.net`) always work. |
 | `allow_host_reboot` | boolean | `false` | Allow `/reboot` and **Server → Reboot Pi…**. Set with `install.sh --enable-reboot`. See [Installation](installation.md#optional-allow-rebooting-the-pi-from-discord-or-the-dashboard). |
 | `failure_detection` | object | off | AI print-failure detection: a `.onnx` model on the CPU or a `.hef` model on a Raspberry Pi 5 AI HAT: `{"enabled": true, "model": "/path/model.onnx", "action": "notify"}`. See [AI failure detection](../failureDetection/FAILURE_DETECTION.md). |
 | `issue_reports` | object | GitHub, this repo | Default destination for problem reports: `{"destination": "github", "repository": "owner/name", "token": "..."}`. Dashboard settings override it. See [Troubleshooting](troubleshooting.md#sending-a-problem-report). |
@@ -147,10 +149,20 @@ sudo journalctl -u 3d-printer-management -n 80 --no-pager  # recent log (also in
 sudo journalctl -u 3d-printer-management -f                # follow the log live
 ```
 
-**Sessions:**
+## Signing in
+
+**By default the dashboard doesn't ask for a password:** anyone who can reach its address can use everything in it, including printer controls, the queue, settings, updates and the Pi's reboot. Keep it on Tailscale or a trusted network, and never forward the port to the internet.
+
+Even without a password, other websites can't send commands through your browser:
+- Each browser gets its own session and token when the page loads, and every change needs that token.
+- The dashboard only answers addresses a website can't take over: IP addresses, local names, and `allowed_hosts`.
+
+**To require the password,** add `"require_login": true` to `config.json` and restart (`sudo systemctl restart 3d-printer-management`). Then:
 - Dashboard sessions last 12 hours.
 - Restarting the service signs everyone out.
 - Changing the dashboard password signs out every session.
+
+The password is always used by the [pm-doctor page](doctor.md) (port 8081), whether or not the dashboard asks for it.
 
 ## Resetting a lost dashboard password
 
