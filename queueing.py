@@ -258,7 +258,10 @@ def storage_hint(printer):
     return f"The {name} couldn't save the file: check its MicroSD card or USB drive is in and has free space, then start again."
 
 
-def upload(printer, source, remote):
+def upload(printer, source, remote, reuse=False):
+    """Send a file to the printer's storage and check its size there. reuse: the Pi sent this same file under this name
+    before (file_cache.py), so when the printer still has a file of that name with that exact size, it isn't sent
+    again. Returns 'uploaded' or 'reused'."""
     ftp = ftps_client(printer)
     sent=0;expected=Path(source).stat().st_size;deadline=time.monotonic()+240
     phase='connect'
@@ -270,6 +273,14 @@ def upload(printer, source, remote):
         ftp.connect(printer['ip'], 990)
         ftp.login('bblp', printer['access_code'])
         ftp.prot_p()
+        if reuse:
+            phase='check the file already on the printer'
+            try:
+                ftp.voidcmd('TYPE I')
+                if ftp.size(remote) == expected:
+                    return 'reused'
+            except ftplib.error_perm:
+                pass   # not there (550): send it
         phase='transfer / TLS close'
         with open(source, 'rb') as stream:
             result = ftp.storbinary('STOR ' + remote, stream, blocksize=32768,callback=progress)
@@ -279,6 +290,7 @@ def upload(printer, source, remote):
         ftp.voidcmd('TYPE I')
         if ftp.size(remote) != Path(source).stat().st_size:
             raise RuntimeError('Uploaded file size did not match.')
+        return 'uploaded'
     except Exception as exc:
         detail=str(exc).replace(str(printer['access_code']),'[hidden]')
         if phase=='transfer / TLS close' and isinstance(exc,ftplib.Error) and detail[:3] in STORAGE_REPLIES:
@@ -347,7 +359,17 @@ class Engine:
         try:
             if job['asset'] and not self.core.EXAMPLE_MODE:
                 # Never start from inside the worker: a timed-out upload cannot later print.
-                await asyncio.wait_for(asyncio.to_thread(upload, self.core.printer_config(job['printer']), job['asset'], job['remote']), 300)
+                files = getattr(self, 'files', None)   # file_cache.FileCache: the same file already on this printer isn't sent again
+                key = size = None
+                if files:
+                    from file_cache import fingerprint
+                    key, size = await asyncio.to_thread(fingerprint, job['asset']), Path(job['asset']).stat().st_size
+                reuse = bool(files) and files.on_printer(job['printer'], job['remote'], key, size)
+                sent = await asyncio.wait_for(asyncio.to_thread(upload, self.core.printer_config(job['printer']), job['asset'], job['remote'], reuse), 300)
+                if sent == 'reused':
+                    self.store.event(job['printer'], 'File already on the printer', f"{job['label']} • {job['remote']}: not sent again")
+                elif files:
+                    files.sent(job['printer'], job['remote'], key, size)
             if self.store.get(job['id'])['status'] != 'staging':
                 return  # Cancelled during upload; never publish afterward.
             self.ready(job['printer'], override_error)
