@@ -1,7 +1,7 @@
 'use strict';
 let teamData=null,teamLoaded=false,teamBusy=false,meshLoaded=false;
 const teamCall=(action,data)=>api('team/'+action,data);
-async function refreshTeam(){if(!state||teamBusy)return;teamBusy=true;try{teamData=await api('team',undefined,'GET');renderTeam();}catch(e){if(state)console.warn(e.message);}finally{teamBusy=false;}}
+async function refreshTeam(){if(!state||!state.manage||teamBusy)return;teamBusy=true;try{teamData=await api('team',undefined,'GET');renderTeam();}catch(e){if(state)console.warn(e.message);}finally{teamBusy=false;}}
 function renderTeam(){
  const t=teamData,c=t.config;
  if(!teamLoaded){$('practiceEnabled').checked=c.practice_enabled;$('practiceZone').value=c.timezone;$('practiceTime').value=c.practice_time;$('practiceDays').value=c.practice_days.join(',');$('practiceChannel').value=c.practice_channel_id;$('practiceRole').value=c.practice_role_id;$('practiceRoster').value=c.roster.join('\n');$('ftcUrl').value=c.ftc_url;$('websiteUrl').value=c.website_url;$('managementUrl').value=c.management_url;teamLoaded=true;}
