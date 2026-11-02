@@ -15,7 +15,9 @@ from printer_errors import describe as describe_error
 from printer_files import Browser, render as render_files
 from printer_controls import Controls, limits
 import job_transfer
+import file_cache
 import sliced_file
+from file_cache import FileCache
 import filament_sides
 import printer_storage
 from live_camera import Cameras
@@ -73,6 +75,8 @@ class Dashboard:
         self.auth_file = core.DATA_DIR/'auth.json'
         self.uploads = core.DATA_DIR/'uploads'
         self.uploads.mkdir(exist_ok=True)
+        # Uploaded files kept by fingerprint: the same file isn't uploaded (or sent to a printer) twice (file_cache.py).
+        self.file_library = engine.files = FileCache(store, self.uploads, getattr(core, 'settings', None))
         self.app = web.Application(middlewares=[self.guard], client_max_size=MAX_UPLOAD+1024*1024)
         self.app['dashboard']=self
         self.updater = WebUpdates(self)
@@ -129,6 +133,9 @@ class Dashboard:
             web.get('/api/jobs/{id}/targets', self.job_targets),
             web.get('/api/uploads/{asset}/plate/{index}', self.upload_thumbnail),
             web.get('/api/uploads/{asset}/suggest', self.upload_suggest),
+            web.post('/api/upload/check', self.upload_check), web.get('/api/library', self.library),
+            web.post('/api/library/{key}/use', self.library_use), web.post('/api/library/{key}/delete', self.library_delete),
+            web.get('/api/library/{key}/plate/{index}', self.library_thumbnail), web.post('/api/files/reuse', self.reuse_printer_files),
             web.get('/api/jobs/{id}/suggest', self.job_suggest), web.get('/api/ams/{name}', self.ams_slots),
             web.post('/api/printers/{name}/{action}', self.control),
             web.get('/api/camera/{name}', self.camera), web.post('/api/settings', self.settings),
@@ -507,10 +514,51 @@ class Dashboard:
             # Some clients percent-encode the name in the form data (Bracket%20v2.gcode.3mf); decode that.
             original=Path(__import__('urllib.parse').parse.unquote(part.filename).replace('\\','/')).name[:200]
             path.with_suffix('.name').write_text(original)
-            return web.json_response({'asset':token,'filename':Path(part.filename).name,'plates':info['plates'],
-                'model':job_transfer.label(info['model']) if info['model'] else '','model_key':info['model']})
+            result={'plates':info['plates'],'model':job_transfer.label(info['model']) if info['model'] else '','model_key':info['model']}
+            self.file_library.remember(path,original,result)   # next time this same file isn't uploaded again
+            return web.json_response({'asset':token,'filename':Path(part.filename).name,**result})
         except BaseException:
             path.unlink(missing_ok=True);path.with_suffix('.name').unlink(missing_ok=True);raise
+
+    def library_result(self,asset,entry,reused):
+        return web.json_response({'asset':asset,'filename':entry['name'],**entry['info'],'reused':reused,'fingerprint':entry['fingerprint']})
+
+    async def upload_check(self,request):
+        """Queue a print: the browser sends the file's fingerprint before uploading it. When the Pi has that file, it
+        answers like an upload (a new asset made from the library's copy) and the file isn't sent again."""
+        data=await request.json();key=str(data.get('fingerprint','')).lower();size=data.get('size')
+        if not file_cache.FINGERPRINT.fullmatch(key) or type(size) is not int:raise ValueError('Invalid file fingerprint.')
+        entry=self.file_library.entry(key)
+        if not entry or entry['size']!=size:return web.json_response({'found':False})
+        asset,entry=self.file_library.use(key,data.get('name'))
+        return self.library_result(asset,entry,True)
+
+    async def library(self,request):
+        return web.json_response({'files':self.file_library.recent(),'reuse_printer_files':self.file_library.reuse_enabled()})
+
+    async def library_use(self,request):
+        """Recent files: queue a file the Pi already has, without uploading it."""
+        asset,entry=self.file_library.use(request.match_info['key'])
+        return self.library_result(asset,entry,True)
+
+    async def library_delete(self,request):
+        self.file_library.path(request.match_info['key'])   # checks the name
+        self.file_library.forget(request.match_info['key'])
+        return web.json_response({'files':self.file_library.recent()})
+
+    async def library_thumbnail(self,request):
+        path=self.file_library.path(request.match_info['key'])
+        image=await asyncio.to_thread(sliced_file.plate_thumbnail,path,int(request.match_info['index'])) if path.is_file() else None
+        if not image:raise web.HTTPNotFound(text='No thumbnail for that plate.')
+        return web.Response(body=image,content_type='image/png',headers={'Cache-Control':'private, max-age=86400'})
+
+    async def reuse_printer_files(self,request):
+        """Settings → Printers: don't send a file to a printer again when it still has the same file from the Pi."""
+        on=(await request.json()).get('on')
+        if type(on) is not bool:raise ValueError('Choose on or off.')
+        self.core.save_settings({**self.core.settings,'reuse_printer_files':on})
+        self.store.event('','Printer files','Files already on a printer are no longer sent again.' if on else 'Files are always sent to the printer again.')
+        return web.json_response({'ok':True,'on':on})
 
     def upload_path(self,asset):
         if not __import__('re').fullmatch('[0-9a-f]{32}',str(asset)): raise ValueError('Invalid upload.')

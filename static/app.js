@@ -94,6 +94,7 @@ function render(){if($('jobDialog').open)renderPrintNowOverride();renderStatus()
  renderJobs();
  $('events').innerHTML=state.events.map(e=>`<div class="event"><small>${new Date(e.time*1000).toLocaleString()}</small><div><strong>${esc(e.title)} · ${esc(printerLabel(e.printer)||'System')}</strong><p>${esc(e.detail)}</p></div></div>`).join('')||'<div class="empty">Events will appear here as printers report and jobs change.</div>';
  if(document.activeElement!==$('autoClearErrors'))$('autoClearErrors').checked=state.settings.auto_clear_errors!==false;
+ if(document.activeElement!==$('reusePrinterFiles'))$('reusePrinterFiles').checked=state.settings.reuse_printer_files!==false;
  if(!settingsLoaded){$('notificationChannel').value=state.settings.notification_channel_id||'';$('commandsChannel').value=state.settings.commands_channel_id||'';$('adminIds').value=(state.settings.admin_user_ids||[]).join('\n');$('alertPingUsers').value=(state.settings.alert_ping_users||[]).join('\n');settingsLoaded=true;}
  $('refreshed').textContent='Updated '+new Date().toLocaleTimeString();
  if(selectedPrinter&&$('detailDialog').open)renderDetails();
@@ -210,14 +211,63 @@ function pickerError(picker,on){const missing=on&&picker?picker.missing():[];if(
 let jobUpload=null,jobPlate=null,jobPicker=null;
 function resetJobUpload(){jobUpload=null;jobPlate=null;jobPicker=null;$('jobFilaments').innerHTML='';$('jobFilaments').hidden=true;$('jobPlates').hidden=true;$('jobPlates').innerHTML='';$('jobFileNote').textContent='';$('jobAmsHint').textContent='';}
 $('addJob').onclick=()=>{$('jobError').textContent='';$('jobDialog').showModal();renderPrintNowOverride();};
-$('source').onchange=()=>{const upload=$('source').value==='upload';if(!upload||!jobUpload){jobPicker=null;$('jobFilaments').innerHTML='';jobRemoteSlots();showJobFilaments();}$('uploadLabel').hidden=!upload;$('remoteLabel').hidden=upload;$('jobPlateLabel').hidden=upload;
+// A file of the Pi's own: an upload, or a recent file from the library (file_cache.py). Both end as jobUpload.
+const fileSource=()=>$('source').value!=='remote';
+$('source').onchange=()=>{const upload=fileSource(),library=$('source').value==='library';
+ if(library!==(jobUpload?.from==='library')){resetJobUpload();$('jobFile').value='';}
+ if(!upload||!jobUpload){jobPicker=null;$('jobFilaments').innerHTML='';jobRemoteSlots();showJobFilaments();}$('uploadLabel').hidden=$('source').value!=='upload';$('remoteLabel').hidden=upload;$('jobPlateLabel').hidden=upload;
+ $('jobLibrary').hidden=!library;if(library)loadLibrary();
  $('jobPlates').hidden=!upload||!jobUpload;$('jobFileNote').hidden=!upload;$('jobAmsHint').hidden=!upload;};
 $('jobFile').onchange=async()=>{const f=$('jobFile').files[0];resetJobUpload();$('jobError').textContent='';if(!f)return;
  if(!$('jobLabel').value)$('jobLabel').value=f.name.replace(/\.gcode\.3mf$|\.3mf$/i,'').slice(0,120);
  if(f.size>256*1024*1024){$('jobError').textContent='Maximum upload is 256 MiB.';$('jobFile').value='';return;}
- $('jobFileNote').textContent='Uploading and checking the file…';
- try{const form=new FormData();form.append('file',f);jobUpload=await api('upload',form);renderPlates();}
+ $('jobFileNote').textContent='Checking whether the Pi already has this file…';
+ try{let found=null;
+  try{found=await api('upload/check',{name:f.name,size:f.size,fingerprint:await fileFingerprint(f)});}catch(e){found=null;}   // (a Pi without the library: just upload)
+  if(found&&found.found!==false){jobUpload={...found,from:'upload'};renderPlates();$('jobFileNote').textContent='The Pi already has this file: not uploaded again. '+$('jobFileNote').textContent;return;}
+  $('jobFileNote').textContent='Uploading and checking the file…';
+  const form=new FormData();form.append('file',f);jobUpload={...await api('upload',form),from:'upload'};renderPlates();}
  catch(e){$('jobFileNote').textContent='';$('jobError').textContent=e.message;$('jobFile').value='';}};
+// Recent files: the sliced files the Pi already has (newest use first); choosing one queues it without uploading.
+async function loadLibrary(){$('jobLibrary').innerHTML='<p class="muted">Loading the files on the Pi…</p>';
+ try{const r=await api('library',undefined,'GET');renderLibrary(r.files);}catch(e){$('jobLibrary').innerHTML=`<p class="error">${esc(e.message)}</p>`;}}
+function renderLibrary(files){const chosen=jobUpload?.from==='library'?jobUpload.fingerprint:null;
+ $('jobLibrary').innerHTML=files.length?files.map(f=>`<div class="library-item${f.fingerprint===chosen?' active':''}"><button type="button" class="library-pick" data-library="${f.fingerprint}">`+
+  `${f.plates[0]?.thumbnail?`<img alt="" src="/api/library/${f.fingerprint}/plate/${f.plates[0].index}">`:'<span class="plate-noimg">No preview</span>'}`+
+  `<span><strong>${esc(f.name)}</strong><small>${[f.model,`${f.plates.length} plate${f.plates.length===1?'':'s'}`,fmtBytes(f.size),'used '+timeAgo(f.used),f.uses>1?`${f.uses} times`:''].filter(Boolean).map(esc).join(' · ')}</small></span></button>`+
+  `<button type="button" class="ghost small-btn" data-library-delete="${f.fingerprint}" title="Remove from the Pi's recent files" aria-label="Remove ${esc(f.name)}">✕</button></div>`).join('')
+  :'<p class="muted">No files yet: files you upload are kept here, so they can be queued again without uploading.</p>';}
+$('jobLibrary').addEventListener('click',async e=>{const pick=e.target.closest('[data-library]'),del=e.target.closest('[data-library-delete]');$('jobError').textContent='';
+ try{if(del){if(!confirm('Remove this file from the Pi? Jobs already in the queue keep their copy.'))return;renderLibrary((await api(`library/${del.dataset.libraryDelete}/delete`,{})).files);return;}
+  if(!pick)return;resetJobUpload();jobUpload={...await api(`library/${pick.dataset.library}/use`,{}),from:'library'};
+  if(!$('jobLabel').value)$('jobLabel').value=jobUpload.filename.replace(/\.gcode\.3mf$|\.3mf$/i,'').slice(0,120);
+  $('jobLibrary').querySelectorAll('.library-item').forEach(x=>x.classList.toggle('active',x.querySelector('[data-library]')?.dataset.library===jobUpload.fingerprint));renderPlates();}
+ catch(e){$('jobError').textContent=e.message;}});
+function fmtBytes(n){return n>=1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';}
+function timeAgo(t){const m=Math.round((Date.now()/1000-t)/60);return m<1?'just now':m<60?`${m} min ago`:m<1440?`${Math.round(m/60)} h ago`:`${Math.round(m/1440)} days ago`;}
+// The file's fingerprint, as file_cache.fingerprint() works it out: SHA-256 of the size, the first 64 KiB and the last
+// 64 KiB. Only those 128 KiB are read, so it's quick for any size. crypto.subtle only exists on https:// pages, so
+// over plain http (the dashboard on the network) sha256() below does the same.
+async function fileFingerprint(file){const SAMPLE=65536,parts=[new TextEncoder().encode(file.size+'\n')];
+ if(file.size<=2*SAMPLE)parts.push(new Uint8Array(await file.arrayBuffer()));
+ else{parts.push(new Uint8Array(await file.slice(0,SAMPLE).arrayBuffer()));parts.push(new Uint8Array(await file.slice(file.size-SAMPLE).arrayBuffer()));}
+ const data=new Uint8Array(parts.reduce((n,p)=>n+p.length,0));let at=0;for(const p of parts){data.set(p,at);at+=p.length;}
+ if(window.crypto?.subtle)return [...new Uint8Array(await crypto.subtle.digest('SHA-256',data))].map(b=>b.toString(16).padStart(2,'0')).join('');
+ return sha256(data);}
+function sha256(data){const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+ const H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19],length=data.length,blocks=((length+9+63)>>6)<<6;
+ const m=new Uint8Array(blocks);m.set(data);m[length]=0x80;const view=new DataView(m.buffer);view.setUint32(blocks-8,Math.floor(length/0x20000000));view.setUint32(blocks-4,(length*8)>>>0);
+ const w=new Uint32Array(64),rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+ for(let i=0;i<blocks;i+=64){for(let t=0;t<16;t++)w[t]=view.getUint32(i+t*4);
+  for(let t=16;t<64;t++){const s0=rotr(w[t-15],7)^rotr(w[t-15],18)^(w[t-15]>>>3),s1=rotr(w[t-2],17)^rotr(w[t-2],19)^(w[t-2]>>>10);w[t]=(w[t-16]+s0+w[t-7]+s1)>>>0;}
+  let [a,b,c,d,e,f,g,h]=H;
+  for(let t=0;t<64;t++){const t1=(h+(rotr(e,6)^rotr(e,11)^rotr(e,25))+((e&f)^(~e&g))+K[t]+w[t])>>>0,t2=((rotr(a,2)^rotr(a,13)^rotr(a,22))+((a&b)^(a&c)^(b&c)))>>>0;
+   h=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}
+  H[0]=(H[0]+a)>>>0;H[1]=(H[1]+b)>>>0;H[2]=(H[2]+c)>>>0;H[3]=(H[3]+d)>>>0;H[4]=(H[4]+e)>>>0;H[5]=(H[5]+f)>>>0;H[6]=(H[6]+g)>>>0;H[7]=(H[7]+h)>>>0;}
+ return H.map(x=>x.toString(16).padStart(8,'0')).join('');}
 function renderPlates(){const sliced=jobUpload.plates.filter(p=>p.sliced);if(!sliced.some(p=>p.index===jobPlate))jobPlate=sliced[0]?.index;
  $('jobFileNote').textContent=(jobUpload.model?`Sliced for the ${jobUpload.model}. `:'')+(sliced.length===1?'One sliced plate.':`${sliced.length} sliced plates: choose one.`);
  $('jobPlates').innerHTML=jobUpload.plates.map(p=>`<button type="button" class="plate-card${p.index===jobPlate?' active':''}" data-plate="${p.index}"${p.sliced?'':' disabled'}>`+
@@ -242,16 +292,16 @@ async function suggestAms(){if(!jobUpload||!jobPlate)return;const asset=jobUploa
   jobPicker=amsPicker($('jobFilaments'),$('jobMapping'),r);showJobFilaments();$('jobAmsHint').textContent=r.message;}
  catch(e){$('jobAmsHint').textContent=e.message;}}
 // A file already on the printer: its filaments aren't known, so the picker starts with one filament and can add more.
-async function jobRemoteSlots(){const printer=$('jobPrinter').value;if($('source').value==='upload'||!$('jobAms').checked)return;
+async function jobRemoteSlots(){const printer=$('jobPrinter').value;if(fileSource()||!$('jobAms').checked)return;
  try{const r=await api('ams/'+encodeURIComponent(printer),undefined,'GET');if($('jobPrinter').value!==printer)return;
   jobPicker=amsPicker($('jobFilaments'),$('jobMapping'),{slots:r.slots,rows:[]});showJobFilaments();
   $('jobAmsHint').textContent="The file is on the printer, so the dashboard can't read its filaments: choose a slot for each one, in the file's order.";}
  catch(e){$('jobAmsHint').textContent=e.message;}}
 function showJobFilaments(){$('jobFilaments').hidden=!$('jobAms').checked||!jobPicker;}
 $('jobAms').addEventListener('change',()=>{if($('jobAms').checked&&!jobPicker)jobRemoteSlots();showJobFilaments();});
-$('jobPrinter').addEventListener('change',()=>{if($('source').value!=='upload'){jobPicker=null;jobRemoteSlots();showJobFilaments();}});
+$('jobPrinter').addEventListener('change',()=>{if(!fileSource()){jobPicker=null;jobRemoteSlots();showJobFilaments();}});
 function jobData(){pickerError(jobPicker,$('jobAms').checked&&!$('jobFilaments').hidden);const data={printer:$('jobPrinter').value,label:$('jobLabel').value,use_ams:$('jobAms').checked,mapping:$('jobAms').checked?$('jobMapping').value:'',bed:$('jobBed').value,priority:Number($('jobPriority').value)};
- if($('source').value==='upload'){if(!jobUpload)throw new Error($('jobFile').files[0]?'Wait for the file check to finish.':'Select a sliced .3mf file.');if(!jobPlate)throw new Error('Choose a plate.');data.asset=jobUpload.asset;data.plate=jobPlate;}
+ if(fileSource()){if(!jobUpload)throw new Error($('source').value==='library'?'Choose one of the recent files.':$('jobFile').files[0]?'Wait for the file check to finish.':'Select a sliced .3mf file.');if(!jobPlate)throw new Error('Choose a plate.');data.asset=jobUpload.asset;data.plate=jobPlate;}
  else{data.remote=$('jobRemote').value;data.plate=Number($('jobPlate').value);}
  return data;}
 function jobDone(message){$('jobDialog').close();$('jobForm').reset();resetJobUpload();$('source').onchange();notice(message);tab('queue');}
@@ -351,6 +401,9 @@ $('sendToForm').onsubmit=async e=>{e.preventDefault();const target=$('sendToTarg
 // pm-doctor (#43) runs separately on port 8081 of the same host.
 $('doctorLink').href=`${location.protocol}//${location.hostname}:8081/`;
 // Printer errors (error_triage.py): clear the safe ones by themselves, or only say which are safe to clear.
+$('reusePrinterFiles').onchange=async e=>{const on=e.target.checked;
+ try{await api('files/reuse',{on});notice(on?'Files a printer already has from the Pi are no longer sent again.':'Files are always sent to the printer again.');await refresh();}
+ catch(err){e.target.checked=!on;notice(err.message);}};
 $('autoClearErrors').onchange=async e=>{const on=e.target.checked;
  try{await api('printer-errors/auto',{on});notice(on?'Safe printer errors now clear by themselves.':'Printer errors no longer clear by themselves; the cards still say which are safe to clear.');await refresh();}
  catch(err){e.target.checked=!on;notice(err.message);}};

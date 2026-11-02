@@ -6,6 +6,7 @@ Each printer has its own first-in, first-out queue. The queue is shared by the d
 
 - [What you can queue](#what-you-can-queue)
 - [Adding a job](#adding-a-job)
+- [Files the Pi already has](#files-the-pi-already-has)
 - [Starting a job](#starting-a-job)
 - [Job states](#job-states)
 - [When a job needs review](#when-a-job-needs-review)
@@ -29,13 +30,14 @@ What you can't queue:
 |---|---|
 | Printer | The printer this file was sliced for |
 | Job name | 1–120 characters, shown in the queue and notifications |
-| File source | Upload a sliced `.3mf` (up to 256 MiB), or a path already on the printer |
+| File source | Upload a sliced `.3mf` (up to 256 MiB), a **recent file on the Pi** (no upload: see [Files the Pi already has](#files-the-pi-already-has)), or a path already on the printer |
 | Plate | **Upload:** pick a plate card (see below). **Path on the printer:** type the plate number, 1–100. |
 | Bed type | Textured PEI, Smooth/high temperature, Cool plate, or Engineering plate |
 | Reprint priority | 1–5: if the AI pauses this print as failed, how long it waits before it's reprinted on another printer. 1 = 5 minutes (urgent), 2 = 1 hour, 3 = 1.5 hours, 4 = 2 hours, 5 = 2.5 hours (default). See [Automatic reprint](../failureDetection/FAILURE_DETECTION.md#automatic-reprint-on-another-printer). |
 | Use AMS / filaments | Off = the external spool. On = choose an AMS slot for each filament the plate uses: see [Choosing AMS slots](#choosing-ams-slots). |
 
 **What happens when you pick a file (dashboard):**
+- **The same file isn't uploaded twice:** if the Pi already has this exact file, it says *The Pi already has this file: not uploaded again* and uses its copy. See [Files the Pi already has](#files-the-pi-already-has).
 - **It's checked straight away:** the file uploads and is read right away, before you submit anything.
   - **Unsliced project:** you're told to slice it and use **File → Export → Export plate sliced file** in Bambu Studio.
   - **Wrong model:** a file sliced for a different printer model (say an A1 mini file for the H2D) is flagged, and adding it is refused.
@@ -68,6 +70,20 @@ How an uploaded file is used:
 2. When the job starts, it's copied to the printer over FTPS.
 3. The copy is checked (the transfer must complete and the remote file size must match).
 4. Only then is the print command sent over MQTT.
+
+## Files the Pi already has
+
+The Pi keeps the sliced files you upload, so queueing and reprinting the same file is quicker.
+
+- **Picking a file the Pi already has:** before uploading, the dashboard checks whether the Pi has this exact file. If it does, the file isn't sent again, which helps with big files on slow Wi-Fi. This works even if the file has been renamed on your computer; the new name is used.
+- **Recent files:** in **+ Queue a print**, choose **File source → Recent file on the Pi (no upload)**.
+  - Each file shows its preview, printer model, number of plates, size, when it was last used and how many times.
+  - Pick one and queue it as usual. **✕** removes a file from the list; jobs already in the queue keep their copy.
+- **Starting a job whose file the printer still has:** the file isn't sent to the printer again. This needs the Pi to have sent that same file to that printer under the same name before, and the printer must still have a file of that name at exactly that size. A reprint then starts in seconds instead of waiting minutes for the upload, and Activity says *File already on the printer*. If you change files on the printer's storage another way (Bambu Studio, the printer's screen), turn this off under **Settings & help → Printers → Don't send a file to a printer again when it still has it**.
+
+**How a file is recognised:** by a fingerprint of its size, its first 64 KB and its last 64 KB. Two different files of the same size never match. A sliced `.3mf` is a zip file whose last bytes list every file inside it with a checksum, so a change anywhere in the file is noticed.
+
+**Space:** the Pi keeps up to 5 GB of recent files, dropping the least recently used ones first, plus anything unused for 180 days. A file in the library and the same file in the queue share one copy on the disk.
 
 ## Starting a job
 

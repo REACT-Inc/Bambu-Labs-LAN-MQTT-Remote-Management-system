@@ -4,6 +4,13 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 
 ## Unreleased
 
+### Added
+- **Faster queueing and reprinting: the Pi keeps your sliced files.** See [Files the Pi already has](docs/print-queue.md#files-the-pi-already-has).
+  - **The same file isn't uploaded twice:** picking a file the Pi already has uses its copy (*The Pi already has this file: not uploaded again*), even if the file was renamed.
+  - **Recent files:** **+ Queue a print → File source → Recent file on the Pi** queues a past file without uploading it, with its preview, model, plates, size and how often it's been used.
+  - **A file the printer still has isn't sent to it again:** a reprint starts in seconds instead of minutes. It needs the Pi to have sent that same file under the same name, and the printer to still have it at exactly that size. **Settings & help → Printers** turns it off.
+  - Files are matched by a fingerprint of their size and their first and last 64 KB (which, for a `.3mf`, covers a checksum of everything in it), so two different files of the same size never match. Up to 5 GB of recent files are kept.
+
 ### Changed
 - **The dashboard no longer asks for a password.** It opens straight away, and **Sign out** is gone. Anyone who can reach its address can use it, so keep it on Tailscale or a trusted network. See [Signing in](docs/configuration.md#signing-in).
   - **Still protected from other websites:** each browser gets its own session and token when the page loads, every change needs it, and only IP addresses, local names and `allowed_hosts` are answered.
