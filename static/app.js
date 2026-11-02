@@ -464,3 +464,10 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-rest
  try{const r=await api('setup/restart',{});notice(r.message);}catch(err){notice(err.message);b.disabled=false;}});
 $('setupAddPrinter').onclick=()=>{tab('settings');printerForm(null);$('printersPanel').scrollIntoView({behavior:'smooth',block:'start'});$('printerName').focus();};
 const tabWithSetup=tab;tab=function(name){tabWithSetup(name);if(name==='settings')loadSetup();};
+// Phones: the bottom tab bar keeps the four main pages; More opens the rest above it (style.css).
+const tabWithNav=tab;tab=function(name){tabWithNav(name);document.body.dataset.tab=name;$('navMore').classList.toggle('active',!!document.querySelector('nav .nav-extra.active'));closeNav();};
+function closeNav(){document.querySelector('nav').classList.remove('open');document.body.classList.remove('nav-open');$('navMore').setAttribute('aria-expanded','false');}
+$('navMore').onclick=e=>{e.stopPropagation();const open=document.querySelector('nav').classList.toggle('open');document.body.classList.toggle('nav-open',open);$('navMore').setAttribute('aria-expanded',String(open));};
+document.addEventListener('click',e=>{if(!e.target.closest('nav'))closeNav();});
+document.body.dataset.tab='overview';
+

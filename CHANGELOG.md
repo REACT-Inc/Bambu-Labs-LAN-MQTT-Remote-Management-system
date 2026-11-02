@@ -2,6 +2,17 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Changed
+- **A better layout on phones.** See [Dashboard](docs/dashboard.md).
+  - **Tab bar at the bottom:** a tab bar along the bottom (Overview, Print queue, Slicer, Activity) replaces the sideways-scrolling strip at the top. **More** opens Team tools, Laptops, Server and Settings & help.
+  - **Slimmer top:** the top bar stays put and takes less room. Page titles are smaller, and the stats take less space.
+  - **Queue a print:** the **+ Queue a print** button floats above the tab bar on the Overview and Print queue pages.
+  - **Dialogs:** buttons (like **Add to shared queue**) stay in view at the bottom while you scroll.
+  - **No zooming into fields:** text fields are 16px, so iPhones don't zoom in when you tap one.
+  - **No sideways scrolling:** Settings no longer scrolls sideways. Messages show above the tab bar. The layout leaves room for the iPhone home bar and notch.
+
 ## 1.9.19-beta.1
 
 Built on 1.9.16-beta.1: the Pi keeps your sliced files so the same file is never uploaded or sent to a printer twice, and the dashboard opens without a login.

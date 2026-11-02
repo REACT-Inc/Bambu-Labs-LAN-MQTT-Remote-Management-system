@@ -304,3 +304,43 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 .library-pick{flex:1;display:flex;align-items:center;gap:12px;text-align:left;padding:8px 10px;border-radius:10px;min-width:0}.library-pick span{display:flex;flex-direction:column;min-width:0}
 .library-pick strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.library-pick small{line-height:1.5}.library-pick img,.library-pick .plate-noimg{width:52px;height:52px;flex:0 0 52px;object-fit:cover;border-radius:8px;background:#111815;display:grid;place-items:center;font-size:9px}
 .library-item.active .library-pick{border-color:var(--green);background:#293725}
+
+/* ---- Phones: a top bar, a bottom tab bar with a More sheet, and a floating Queue a print button ---- */
+.nav-more{display:none}
+.settings-grid>*{min-width:0}
+@media(max-width:720px){
+ body{font-size:15px}
+ input,select,textarea{font-size:16px}   /* below 16px, iPhones zoom into the field */
+ aside{position:sticky;top:0;z-index:30;padding:10px 16px 10px max(16px,env(safe-area-inset-left));background:#131916}   /* (no backdrop-filter: it would pin the fixed tab bar to the top bar) */
+ .brand{margin:0}.brand strong{font-size:16px}.brand strong br{display:none}
+ nav{position:fixed;left:0;right:0;bottom:0;z-index:40;display:grid;grid-template-columns:repeat(5,1fr);gap:0;overflow:visible;
+  padding:6px max(6px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(6px,env(safe-area-inset-left));background:#131916f2;border-top:1px solid var(--line);backdrop-filter:blur(12px)}
+ nav button{flex-direction:column;justify-content:center;gap:3px;min-height:54px;padding:6px 2px;font-size:20px;border-radius:12px;text-align:center}
+ nav button span{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+ nav button.active{background:transparent}nav button.active span{color:var(--green);font-weight:650}
+ .nav-more{display:flex}.nav-more.active{color:var(--green)}
+ nav .nav-extra{display:none;order:-1;grid-column:1/-1;flex-direction:row;justify-content:flex-start;gap:14px;min-height:50px;padding:10px 18px;font-size:18px}
+ nav .nav-extra span{font-size:15px}
+ nav .nav-extra.active{background:#293725}
+ nav.open{border-radius:20px 20px 0 0;box-shadow:0 -20px 60px #000a;padding-top:12px}
+ nav.open .nav-extra{display:flex}
+ main{padding:18px 16px calc(150px + env(safe-area-inset-bottom))}
+ header{margin-bottom:20px;align-items:center}
+ header .eyebrow{display:none}
+ h1{font-size:24px;letter-spacing:-.8px}
+ .header-actions{flex-direction:row;align-items:center}
+ .badge{font-size:9px;padding:4px 7px;white-space:nowrap}
+ #addJob{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(80px + env(safe-area-inset-bottom));z-index:35;border-radius:28px;padding:14px 20px;font-size:15px;white-space:nowrap;box-shadow:0 10px 30px #000c}
+ body:not([data-tab=overview]):not([data-tab=queue]) #addJob,body.nav-open #addJob{display:none}
+ .stats{gap:10px;margin-bottom:24px}.stat{padding:12px 14px;border-radius:12px}.stat small{margin-bottom:6px}.stat strong{font-size:24px}
+ .panel{padding:18px 16px;border-radius:14px}
+ .settings-grid{grid-template-columns:minmax(0,1fr);gap:0}
+ table{display:block;overflow-x:auto}
+ .job-row{padding:16px;gap:12px}.job-actions{justify-content:flex-start;width:100%}.job-actions button{min-height:40px}
+ footer{display:none}
+ dialog:not(.drawer){padding:22px 16px 0}
+ dialog:not(.drawer) .dialog-actions{position:sticky;bottom:0;margin:20px -16px 0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
+ .dialog-actions button{flex:1}
+ .notice{position:fixed;left:16px;right:16px;bottom:calc(140px + env(safe-area-inset-bottom));z-index:45;margin:0;box-shadow:0 10px 30px #000c}
+}
+
