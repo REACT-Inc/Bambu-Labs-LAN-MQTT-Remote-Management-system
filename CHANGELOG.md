@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.9.21-beta.1
+
+Built on 1.9.19-beta.1: management (Discord, team tools, laptops, the server, settings and updates) needs the dashboard password again while printing stays open, and a new phone layout with a tab bar at the bottom.
 
 ### Added
 - **Management needs the dashboard password again.** Printing stays open, but these ask for the password first: Team tools, Laptops, Server, Settings & help, and adding or changing slicing workers. See [Signing in](docs/configuration.md#signing-in).
