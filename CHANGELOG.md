@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.9.19-beta.1
+
+Built on 1.9.16-beta.1: the Pi keeps your sliced files so the same file is never uploaded or sent to a printer twice, and the dashboard opens without a login.
 
 ### Added
 - **Faster queueing and reprinting: the Pi keeps your sliced files.** See [Files the Pi already has](docs/print-queue.md#files-the-pi-already-has).
