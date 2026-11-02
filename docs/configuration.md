@@ -151,7 +151,16 @@ sudo journalctl -u 3d-printer-management -f                # follow the log live
 
 ## Signing in
 
-**By default the dashboard doesn't ask for a password:** anyone who can reach its address can use everything in it, including printer controls, the queue, settings, updates and the Pi's reboot. Keep it on Tailscale or a trusted network, and never forward the port to the internet.
+**By default the dashboard doesn't ask for a password to print:** anyone who can reach its address can use the printers, the queue, the slicer and the activity feed. Keep it on Tailscale or a trusted network, and never forward the port to the internet.
+
+**Management still needs the password.** Before you can use these, the dashboard asks for the password (padlocks on the tabs show what's locked):
+- **Team tools** (Discord assignments, attendance, notes, reminders, channel archive).
+- **Laptops** (MeshCentral).
+- **Server** (rebooting the Pi).
+- **Settings & help** (printers, Discord, alerts, Discord permissions, the password, diagnostics, problem reports, updates).
+- Adding or changing slicing workers.
+
+Entering it unlocks management in that browser for 12 hours. Other browsers stay locked. To lock it again sooner, use **Lock management** under **Settings & help → Dashboard access**. Changing the password locks management again in every browser. Discord's channel and people IDs aren't sent to a locked page. To turn the management password off, add `"protect_management": false` to `config.json` and restart.
 
 Even without a password, other websites can't send commands through your browser:
 - Each browser gets its own session and token when the page loads, and every change needs that token.
@@ -161,6 +170,7 @@ Even without a password, other websites can't send commands through your browser
 - Dashboard sessions last 12 hours.
 - Restarting the service signs everyone out.
 - Changing the dashboard password signs out every session.
+- Everyone signed in has management access (no separate unlock).
 
 The password is always used by the [pm-doctor page](doctor.md) (port 8081), whether or not the dashboard asks for it.
 

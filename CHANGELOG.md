@@ -2,6 +2,15 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Added
+- **Management needs the dashboard password again.** Printing stays open, but these ask for the password first: Team tools, Laptops, Server, Settings & help, and adding or changing slicing workers. See [Signing in](docs/configuration.md#signing-in).
+  - **Unlocking:** the password unlocks management in that browser for 12 hours. Locked tabs show a padlock, and **Lock management** under **Settings & help → Dashboard access** locks the browser again.
+  - **What a locked page sees:** Discord's channel and people IDs aren't sent to it.
+  - **Changing the password** locks management again in every browser.
+  - **To turn it off:** add `"protect_management": false` to `config.json`. With `"require_login": true`, signing in already gives management.
+
 ## 1.9.19-beta.1
 
 Built on 1.9.16-beta.1: the Pi keeps your sliced files so the same file is never uploaded or sent to a printer twice, and the dashboard opens without a login.
