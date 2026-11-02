@@ -4,6 +4,13 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 
 ## Unreleased
 
+### Added
+- **Management needs the dashboard password again.** Printing stays open, but these ask for the password first: Team tools, Laptops, Server, Settings & help, and adding or changing slicing workers. See [Signing in](docs/configuration.md#signing-in).
+  - **Unlocking:** the password unlocks management in that browser for 12 hours. Locked tabs show a padlock, and **Lock management** under **Settings & help → Dashboard access** locks the browser again.
+  - **What a locked page sees:** Discord's channel and people IDs aren't sent to it.
+  - **Changing the password** locks management again in every browser.
+  - **To turn it off:** add `"protect_management": false` to `config.json`. With `"require_login": true`, signing in already gives management.
+
 ### Changed
 - **A better layout on phones.** See [Dashboard](docs/dashboard.md).
   - **Tab bar at the bottom:** a tab bar along the bottom (Overview, Print queue, Slicer, Activity) replaces the sideways-scrolling strip at the top. **More** opens Team tools, Laptops, Server and Settings & help.

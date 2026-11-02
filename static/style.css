@@ -344,3 +344,4 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
  .notice{position:fixed;left:16px;right:16px;bottom:calc(140px + env(safe-area-inset-bottom));z-index:45;margin:0;box-shadow:0 10px 30px #000c}
 }
 
+nav button.locked span::after{content:' 🔒';font-size:11px}
