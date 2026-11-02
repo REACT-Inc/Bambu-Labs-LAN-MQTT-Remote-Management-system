@@ -2,7 +2,12 @@
 
 The dashboard is served by the Pi at `http://<address>:8080`. **It doesn't ask for a password to print by default:** anyone who can reach the address can use the printers, the queue and the slicer, so keep it on Tailscale or a trusted network. Management (Team tools, Laptops, Server, Settings & help) asks for the dashboard password first, and stays unlocked in that browser for 12 hours. To require the dashboard password (one shared password, 12-hour sessions), set `"require_login": true` in `config.json`. See [Signing in](configuration.md#signing-in).
 
-The page refreshes printer data every 5 seconds and works on phones as well as desktops. On Windows laptops, the [desktop app](desktop-app.md) shows the dashboard in its own window, with a tray icon for the printers and pop-ups for its notifications.
+The page refreshes printer data every 5 seconds and works on phones as well as desktops.
+
+**On a phone:**
+- **Tab bar:** Overview, Print queue, Slicer and Activity are along the bottom of the screen. **More** opens Team tools, Laptops, Server and Settings & help.
+- **+ Queue a print** floats above the tab bar on the Overview and Print queue pages.
+- **Dialogs** slide up from the bottom, and their buttons stay in view while you scroll. On Windows laptops, the [desktop app](desktop-app.md) shows the dashboard in its own window, with a tray icon for the printers and pop-ups for its notifications.
 
 - [Overview](#overview)
 - [Printer details](#printer-details)
