@@ -2,6 +2,17 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Changed
+- **Sign in with Google at your own address, through Cloudflare, instead of the management password.** The dashboard can be served at `https://printers.<your domain>` with Cloudflare Tunnel (no open port). Cloudflare Access asks for a Google sign-in first. See [Google sign-in (Cloudflare Access)](docs/cloudflare-access.md).
+  - **The Pi checks each request too:** it checks Cloudflare's signed token (your team, your Access application, not expired) and reads the Google account from it.
+  - **Who can do what:** Google accounts listed as admins (emails, or `@example.org` for a domain) can use management: Team tools, Laptops, Server, Settings & help, and slicing workers. Everyone else Access lets in can print.
+  - **Setting it up:** `sudo bash cloudflare-tunnel.sh --token … --hostname printers.example.org --team … --aud … --admin you@example.org` installs `cloudflared`, connects the tunnel and saves the settings.
+  - **The Pi's own addresses** (IP, `.local`, Tailscale) can print by default: `"lan"` is `printing`, `full` or `off`.
+  - **Settings & help → Dashboard access** shows who's signed in, with **Sign out of Google**.
+  - **The password unlock from 1.9.21 is gone:** the **Unlock management** dialog, **Lock management** and `"protect_management"`. Without Cloudflare Access set up, the dashboard is open as in 1.9.19. The password stays for pm-doctor and `"require_login"`.
+
 ## 1.9.21-beta.1
 
 Built on 1.9.19-beta.1: management (Discord, team tools, laptops, the server, settings and updates) needs the dashboard password again while printing stays open, and a new phone layout with a tab bar at the bottom.
