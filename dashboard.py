@@ -35,10 +35,10 @@ from status_center import StatusCenter
 from printer_setup import Setup
 from Updater.web_updates import BUSY as UPDATE_BUSY
 from Updater.version import VERSION
+from cloudflare_access import Access
 
-# Management: Discord and team tools, laptops, the server, settings, problem reports and installing updates. Without
-# signing in ("require_login"), these ask for the dashboard password once per browser, for MANAGE_HOURS.
-MANAGE_HOURS = 12
+# Management: Discord and team tools, laptops, the server, settings, problem reports and installing updates. With
+# Cloudflare Access set up (cloudflare_access.py), only its admins' Google accounts may use these.
 MANAGEMENT_ROUTES = ('/api/team', '/api/setup', '/api/permissions', '/api/alerttargets', '/api/report')
 MANAGEMENT_CHANGES = ('/api/slicer/workers', '/api/update/', '/api/github/')   # anyone may look; changes are management
 MANAGEMENT_PATHS = {'/api/settings', '/api/password', '/api/testnotification', '/api/diagnostics', '/api/errors'}
@@ -69,9 +69,9 @@ class Dashboard:
         # Signing in is off unless "require_login": true in config.json: anyone who can reach the dashboard can use it.
         # The page still gets a session with a CSRF token, so other websites can't send commands through a browser.
         self.require_login = bool((getattr(core, 'CONFIG', None) or {}).get('require_login', False))
-        # Without signing in, printing stays open but management (Discord, team tools, laptops, the server, settings and
-        # updates) asks for the dashboard password first: unlocked per browser for MANAGE_HOURS ("protect_management").
-        self.protect_management = bool((getattr(core, 'CONFIG', None) or {}).get('protect_management', True))
+        # Google sign-in through Cloudflare Access at printers.<your domain> ("cloudflare_access"): its admins manage;
+        # the Pi's own addresses get its "lan" mode (printing only, by default). Not set up: open as before.
+        self.access = Access((getattr(core, 'CONFIG', None) or {}).get('cloudflare_access'))
         self.allowed_hosts = {str(h).lower() for h in (getattr(core, 'CONFIG', None) or {}).get('allowed_hosts') or []}
         self.anonymous = {'csrf': secrets.token_urlsafe(32), 'expires': float('inf')}   # reading only: its token is never sent
         self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
@@ -138,7 +138,6 @@ class Dashboard:
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
-            web.post('/api/manage/unlock', self.manage_unlock), web.post('/api/manage/lock', self.manage_lock),
             web.get('/api/state', self.state), web.get('/api/desktop', self.desktop), web.post('/api/upload', self.upload),
             web.post('/api/jobs', self.add_job), web.post('/api/jobs/{id}/{action}', self.job_action),
             web.get('/api/jobs/{id}/targets', self.job_targets),
@@ -177,7 +176,8 @@ class Dashboard:
             return True
         except ValueError:
             pass
-        return '.' not in name or name.endswith(('.local', '.lan', '.home.arpa', '.internal', '.ts.net')) or name in self.allowed_hosts
+        return ('.' not in name or name.endswith(('.local', '.lan', '.home.arpa', '.internal', '.ts.net')) or name in self.allowed_hosts
+                or (self.access.enabled and name == self.access.hostname))   # (its requests must carry Access's token)
 
     def management_route(self, request):
         path = request.path
@@ -185,9 +185,20 @@ class Dashboard:
             return request.method != 'GET'
         return path.startswith(MANAGEMENT_ROUTES) or path in MANAGEMENT_PATHS
 
-    def can_manage(self, session):
-        """Signed in with the password ("require_login"), or this browser unlocked management with it."""
-        return self.require_login or not self.protect_management or session.get('manage_until', 0) > time.time()
+    def can_manage(self, request):
+        """Signed in with the password ("require_login"); else, with Cloudflare Access set up, one of its admins (or
+        the Pi's own addresses when "lan" is "full"). Without Cloudflare Access, everyone."""
+        if self.require_login or not self.access.enabled:
+            return True
+        identity = request.get('identity')
+        return identity['admin'] if identity else self.access.lan == 'full'
+
+    def locked_message(self, request):
+        identity = request.get('identity')
+        if identity:
+            return (f"Your Google account ({identity['email']}) isn't a dashboard admin: ask for it to be added to "
+                    '"admins" under "cloudflare_access" in config.json.')
+        return f'Management is open at https://{self.access.hostname} (sign in with Google there).'
 
     @web.middleware
     async def guard(self, request, handler):
@@ -200,11 +211,21 @@ class Dashboard:
                 return response
             if request.method != 'GET':
                 origin = request.headers.get('Origin')
-                if request.headers.get('X-PM') != '1' or (origin and origin != f'{request.scheme}://{request.host}'):
+                # Through Cloudflare Tunnel the Pi sees plain http, but the browser's page is https://<hostname>
+                expected = {f'{request.scheme}://{request.host}'} | ({f'https://{self.access.hostname}'} if self.access.enabled and self.access.through_cloudflare(request) else set())
+                if request.headers.get('X-PM') != '1' or (origin and origin not in expected):
                     raise web.HTTPForbidden(text='Invalid request origin.')
             if request.path.startswith('/api/') and request.path != '/api/login':
                 if not self.require_login and not self.host_allowed(request.host):
                     raise web.HTTPForbidden(text=f'Unknown address {request.host[:80]}: add it to "allowed_hosts" in config.json, or set "require_login": true.')
+                if self.access.enabled:
+                    if self.access.through_cloudflare(request):
+                        # Cloudflare Access let this through: its signed token says who (no token, no access)
+                        request['identity'] = await self.access.identity(request)
+                        if not request['identity']:
+                            return web.json_response({'error':'Sign in with Google again: reload the page.','signin':True}, status=403)
+                    elif self.access.lan == 'off':
+                        raise web.HTTPForbidden(text=f'This dashboard is open at https://{self.access.hostname} only.')
                 token = request.cookies.get('pm_session','')
                 session = self.sessions.get(token)
                 if not session or session['expires'] < time.time():
@@ -220,8 +241,8 @@ class Dashboard:
                 elif not self.require_login:
                     session['expires'] = max(session['expires'], time.time()+30*24*3600)
                 request['session'] = session
-                if self.management_route(request) and not self.can_manage(session):
-                    return web.json_response({'error':'Management is locked: unlock it with the dashboard password.','locked':True}, status=403)
+                if self.management_route(request) and not self.can_manage(request):
+                    return web.json_response({'error':self.locked_message(request),'locked':True}, status=403)
                 if request.method != 'GET' and not hmac.compare_digest(request.headers.get('X-CSRF',''),session['csrf']):
                     raise web.HTTPForbidden(text='Invalid session token.')
             if request.method != 'GET' and request.path not in ('/api/login','/api/logout') and not request.path.startswith('/api/update/') and self.updater.busy():
@@ -409,7 +430,7 @@ class Dashboard:
         if name not in ('app.js','team.js','controls.js','updates.js','style.css','slicer.js','three.module.min.js','OrbitControls.js','TransformControls.js','STLLoader.js'): raise web.HTTPNotFound()
         return web.FileResponse(Path(__file__).parent/'static'/name)
 
-    async def check_password(self, request, status=web.HTTPUnauthorized):
+    async def check_password(self, request):
         """The dashboard password from the request body; eight wrong tries from one address wait five minutes."""
         peer=request.remote or '?'
         recent=[t for t in self.failures.get(peer,[]) if t>time.time()-300]
@@ -423,29 +444,15 @@ class Dashboard:
         if not hmac.compare_digest(result['hash'],auth['hash']):
             if len(self.failures)>1000: self.failures.clear()
             self.failures[peer]=recent+[time.time()]
-            raise status(text='Incorrect password.')
+            raise web.HTTPUnauthorized(text='Incorrect password.')
         self.failures.pop(peer,None)
 
     async def login(self, request):
         await self.check_password(request)
         token,session=self.new_session(12)
-        session['manage_until']=session['expires']   # signed in with the password: management too
         response=web.json_response({'csrf':session['csrf']})
         response.set_cookie('pm_session',token,httponly=True,samesite='Strict',secure=request.secure,max_age=43200,path='/')
         return response
-
-    async def manage_unlock(self, request):
-        session=request['session']
-        if session is self.anonymous: raise web.HTTPForbidden(text='This page is out of date: reload it.')
-        # 403, not 401: a 401 sends the page to the sign-in screen
-        await self.check_password(request, web.HTTPForbidden)
-        session['manage_until']=time.time()+MANAGE_HOURS*3600
-        self.store.event('Settings','Management unlocked',f'For {MANAGE_HOURS} hours in one browser ({request.remote or "unknown address"})')
-        return web.json_response({'ok':True,'manage':True})
-
-    async def manage_lock(self, request):
-        request['session'].pop('manage_until',None)
-        return web.json_response({'ok':True,'manage':self.can_manage(request['session'])})
 
     async def logout(self, request):
         self.sessions.pop(request.cookies.get('pm_session'),None)
@@ -511,16 +518,17 @@ class Dashboard:
             printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),condition=self.triage.condition(name,error,data),storage=self.storage(name,data,connected),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
-        manage=self.can_manage(request['session'])
+        manage=self.can_manage(request)
         settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)],
                   # Discord IDs are sent as text: they are larger than JavaScript numbers can hold exactly.
                   'alert_ping_users':[str(x) for x in self.core.settings.get('alert_ping_users') or []]}
-        if not manage:   # Discord's channels and people only once management is unlocked
+        if not manage:   # Discord's channels and people only for those who may manage
             for key in ('notification_channel_id','commands_channel_id','admin_user_ids','alert_ping_users'): settings.pop(key,None)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
             discord=self.core.bot.is_ready(), discord_configured=bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
             setup_needed=self.core.EXAMPLE_MODE and not getattr(self.core,'CONFIG',{}).get('demo'), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
-            settings=settings,csrf=request['session']['csrf'],login=self.require_login,manage=manage))
+            settings=settings,csrf=request['session']['csrf'],login=self.require_login,manage=manage,
+            identity=request.get('identity'),access=self.access.public()))
 
     async def desktop(self, request):
         """What the desktop app's tray icon shows (desktop/): each printer's state and the status icon with its
@@ -831,8 +839,6 @@ class Dashboard:
         if not 12<=len(password)<=1024: raise ValueError('Use at least 12 characters.')
         atomic_json(self.auth_file,await asyncio.to_thread(password_hash,password))
         if self.require_login: self.sessions.clear()
-        else:   # without signing in, the pages keep working: only management locks again everywhere
-            for session in self.sessions.values(): session.pop('manage_until',None)
         return web.json_response({'ok':True})
 
     async def alert_targets_get(self,request):

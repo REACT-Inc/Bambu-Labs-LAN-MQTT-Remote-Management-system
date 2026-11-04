@@ -11,17 +11,20 @@ async function api(path,body,method='POST'){
  if(body!==undefined&&!(body instanceof FormData)){headers['Content-Type']='application/json';payload=JSON.stringify(body);}
  const r=await fetch('/api/'+path,{method,headers,body:payload});
  let result;try{result=await r.json();}catch{throw new Error('The server returned an unexpected response.');}
- if(!r.ok){if(r.status===401)showLogin();if(r.status===403&&result.locked)askUnlock();throw new Error(result.error||'Request failed');}
+ if(!r.ok){if(r.status===401)showLogin();throw new Error(result.error||'Request failed');}
  return result;
 }
 // Signing in is off unless "require_login": true in config.json: then there's nothing to sign out of.
 function showAccess(){$('logout').hidden=!state.login;$('passwordSave').textContent=state.login?'Change password & sign out':'Change password';$('accessNote').textContent=state.login?'Everyone using this dashboard password has management access.':
- 'Signing in is turned off: anyone who can open this address can print. Management (Discord, team tools, laptops, the server, settings and updates) asks for this password first, and stays unlocked in that browser for 12 hours. The password is also used by the pm-doctor page. See docs/configuration.md.';}
-// Without signing in, management (MANAGED tabs and their settings) asks for the dashboard password first (state.manage).
+ !state.access.enabled?'Anyone who can open this address can use the dashboard, management included. To sign in with Google at your own address (printers.your-domain), set up Cloudflare Access: see docs/cloudflare-access.md. The password below is used by the pm-doctor page.':
+ state.identity?`Signed in with Google as ${state.identity.email} through Cloudflare Access${state.manage?' (dashboard admin)':' (printing only: not a dashboard admin)'}.`:
+ state.access.lan==='full'?`This is one of the Pi's own addresses, which can use everything ("lan": "full"). Everyone else signs in with Google at https://${state.access.hostname}.`:
+ `This is one of the Pi's own addresses: printing only. Sign in with Google at https://${state.access.hostname} for management.`;
+ $('accessSignOut').hidden=!state.identity;}
+// Management (MANAGED tabs and their settings) is for Cloudflare Access admins once it's set up (state.manage).
 const MANAGED=new Set(['team','devices','server','settings']);
-let afterUnlock=null;
-function showManage(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('locked',MANAGED.has(b.dataset.tab)&&!state.manage));$('manageLock').hidden=state.login||!state.manage;}
-function askUnlock(then=null){afterUnlock=then;$('manageError').textContent='';$('managePassword').value='';if(!$('manageDialog').open)$('manageDialog').showModal();$('managePassword').focus();}
+function showManage(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('locked',MANAGED.has(b.dataset.tab)&&!state.manage));}
+function lockedText(){return state.identity?`Management is for dashboard admins: ${state.identity.email} isn't one.`:`Management is open at https://${state.access.hostname}: sign in with Google there.`;}
 function showLogin(){ $('app').hidden=true;$('loginScreen').hidden=false;state=null;settingsLoaded=false; }
 function notice(text){$('notice').textContent=text;$('notice').hidden=false;setTimeout(()=>$('notice').hidden=true,7000);}
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.',slicer:'Slice it here, print it there.'}[name];window.dispatchEvent(new CustomEvent('tab',{detail:name}));}
@@ -348,7 +351,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  }catch(e){notice(e.message);}});
 $('takeSnapshot').onclick=async()=>{$('takeSnapshot').disabled=true;$('cameraMessage').textContent='Requesting snapshot…';try{const r=await fetch('/api/camera/'+encodeURIComponent(selectedPrinter));if(!r.ok){const data=await r.json();throw new Error(data.error||'Camera unavailable.');}if(cameraUrl)URL.revokeObjectURL(cameraUrl);cameraUrl=URL.createObjectURL(await r.blob());$('cameraImage').src=cameraUrl;$('cameraImage').hidden=false;$('cameraMessage').textContent='Snapshot captured '+new Date().toLocaleTimeString();}catch(e){$('cameraMessage').textContent=e.message;}finally{$('takeSnapshot').disabled=false;}};
 $('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value,alert_ping_users:$('alertPingUsers').value});notice('Settings saved.');}catch(e){notice(e.message);}};
-$('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';if(state?.login)showLogin();else{notice('Password changed. Management is locked again in every browser: unlock it with the new password.');await refresh();tab('overview');}}catch(e){notice(e.message);}};
+$('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';if(state?.login)showLogin();else notice('Password changed.');}catch(e){notice(e.message);}};
 $('testNotification').onclick=async()=>{try{await api('testnotification',{});notice('Test requested. Check Discord and the activity feed.');}catch(e){notice(e.message);}};
 refresh();setInterval(()=>{if(state&&!document.hidden)refresh();},5000);
 let permissionState=null;
@@ -476,8 +479,4 @@ $('navMore').onclick=e=>{e.stopPropagation();const open=document.querySelector('
 document.addEventListener('click',e=>{if(!e.target.closest('nav'))closeNav();});
 document.body.dataset.tab='overview';
 
-const tabUnlocked=tab;tab=function(name){if(MANAGED.has(name)&&state&&!state.manage){askUnlock(()=>tabUnlocked(name));return;}tabUnlocked(name);};
-$('manageForm').onsubmit=async e=>{e.preventDefault();
- try{await api('manage/unlock',{password:$('managePassword').value});$('managePassword').value='';settingsLoaded=false;closeDialog($('manageDialog'));await refresh();const then=afterUnlock;afterUnlock=null;if(then)then();else notice('Management unlocked for 12 hours in this browser.');}
- catch(err){$('manageError').textContent=err.message;}};
-$('manageLock').onclick=async()=>{try{await api('manage/lock',{});await refresh();if(MANAGED.has(document.querySelector('nav button.active')?.dataset.tab))tab('overview');notice('Management locked.');}catch(err){notice(err.message);}};
+const tabUnlocked=tab;tab=function(name){if(MANAGED.has(name)&&state&&!state.manage){notice(lockedText());return;}tabUnlocked(name);};
