@@ -307,6 +307,43 @@ class PeopleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,200);self.assertEqual(self.dashboard.access.people,{'member@example.org':'admin'})
 
 
+class AskTests(unittest.IsolatedAsyncioTestCase):
+    start,state,queue,asyncTearDown=DashboardTests.start,DashboardTests.state,DashboardTests.queue,DashboardTests.asyncTearDown
+
+    async def test_asking_to_print(self):
+        await self.start(operators=['@club.example.org'])
+        admin={'Host':HOST,'Cf-Access-Jwt-Assertion':sign()}
+        visitor={'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='parent@gmail.com')}
+        status,vstate=await self.state(visitor)
+        self.assertFalse(vstate['can_print']);self.assertIsNone(vstate['my_request']);self.assertEqual(vstate['access_requests'],0)
+        async def post(path,body,headers,csrf):
+            r=await self.client.post(path,json=body,headers={'X-PM':'1','X-CSRF':csrf,**headers})
+            return r.status,await r.json()
+        status,body=await post('/api/ask-access',{'level':'print','note':'For the robotics club'},visitor,vstate['csrf'])   # allowed though view only
+        self.assertEqual((status,body['wants']),(200,'print'))
+        self.assertEqual((await self.state(visitor))[1]['my_request'],'print')
+        status,astate=await self.state(admin)
+        self.assertEqual(astate['access_requests'],1)
+        seen=(await (await self.client.get('/api/access',headers=admin)).json())['seen']
+        self.assertEqual((seen[0]['email'],seen[0]['wants'],seen[0]['note']),('parent@gmail.com','print','For the robotics club'))   # asking: first
+        self.assertTrue(seen[0]['online']);self.assertTrue(seen[0]['new'])
+        status,body=await post('/api/access/person',{'email':'parent@gmail.com','level':'print'},admin,astate['csrf'])   # Allow
+        self.assertEqual(status,200);self.assertIsNone({p['email']:p for p in body['seen']}['parent@gmail.com']['wants'])
+        self.assertEqual((await self.state(admin))[1]['access_requests'],0)
+        status,vstate=await self.state(visitor);self.assertTrue(vstate['can_print'])
+        status,body=await post('/api/ask-access',{'level':'print'},visitor,vstate['csrf'])
+        self.assertEqual(status,400);self.assertIn('already',body['error'])
+        # asked to be an admin, turned down
+        await post('/api/ask-access',{'level':'admin'},visitor,vstate['csrf'])
+        status,body=await post('/api/access/person',{'email':'parent@gmail.com','dismiss':True},admin,astate['csrf'])
+        self.assertEqual(status,200);self.assertEqual((await self.state(admin))[1]['access_requests'],0)
+        self.assertIn('Google sign-in: request from parent@gmail.com dismissed',[e['title'] for e in self.store.events()])
+        status,body=await post('/api/ask-access',{'level':'everything'},visitor,vstate['csrf']);self.assertEqual(status,400)
+        lan=(await self.state({'Host':'192.168.1.50'}))[1]
+        status,body=await post('/api/ask-access',{'level':'print'},{'Host':'192.168.1.50'},lan['csrf'])
+        self.assertEqual(status,400);self.assertIn(f'https://{HOST}',body['error'])
+
+
 class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from aiohttp.test_utils import TestClient,TestServer
@@ -448,6 +485,7 @@ class PageTests(unittest.TestCase):
                    'accessSeen','signinBanner','signinAgain','viewBanner'):
             self.assertIn(f'id="{id}"',page)
         self.assertIn("api('access/person',{email:sel.dataset.person,level:sel.value||null})",app)
+        self.assertIn("api('ask-access',{level:'print'})",app);self.assertIn("document.querySelector('nav button[data-tab=settings]').dataset.badge=waiting",app)
         self.assertIn("api('access/test',accessData())",app);self.assertIn('<option value="view">',page)
         self.assertIn("if(r.status===403&&result.signin)$('signinBanner').hidden=false;",app);self.assertIn("document.body.classList.toggle('view-only',state.can_print===false)",app)
         self.assertIn('err.result?.confirm',app)

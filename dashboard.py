@@ -78,6 +78,11 @@ class Dashboard:
         self.seen_at = {}
         store.db.executescript('CREATE TABLE IF NOT EXISTS access_seen (email TEXT PRIMARY KEY, first REAL NOT NULL, last REAL NOT NULL, '
                                'admin INTEGER NOT NULL, print INTEGER NOT NULL, address TEXT NOT NULL, visits INTEGER NOT NULL DEFAULT 1)')
+        columns = {r[1] for r in store.db.execute('PRAGMA table_info(access_seen)')}
+        for column in ('wants TEXT', 'wants_at REAL', 'note TEXT'):   # Ask to print: the level someone asked for
+            if column.split()[0] not in columns:
+                store.db.execute(f'ALTER TABLE access_seen ADD COLUMN {column}')
+        store.db.commit()
         self.allowed_hosts = {str(h).lower() for h in (getattr(core, 'CONFIG', None) or {}).get('allowed_hosts') or []}
         self.anonymous = {'csrf': secrets.token_urlsafe(32), 'expires': float('inf')}   # reading only: its token is never sent
         self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
@@ -161,7 +166,7 @@ class Dashboard:
             web.post('/api/alerttargets/test', self.alert_targets_test),
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
             web.get('/api/access', self.access_get), web.post('/api/access', self.access_save), web.post('/api/access/test', self.access_test),
-            web.post('/api/access/person', self.access_person),
+            web.post('/api/access/person', self.access_person), web.post('/api/ask-access', self.access_request),
         ])
         self.app.on_startup.append(self.access_start);self.app.on_shutdown.append(self.access_stop)
         self.status.add_source(self.access_status)
@@ -276,6 +281,10 @@ class Dashboard:
             raise ValueError('Turn the Google sign-in on first.')
         data = await request.json()
         email, level = str(data.get('email') or '').strip().lower(), data.get('level')
+        if data.get('dismiss') is True:   # a request to print, turned down
+            wanted = self.clear_request(email)
+            self.store.event('Settings', f'Google sign-in: request from {email} dismissed', f'asked for: {wanted or "nothing"} • {actor(request)}')
+            return web.json_response(self.access_public(request))
         identity = request.get('identity')
         if identity and email == identity['email'].lower():
             raise ValueError("You can't change your own level: ask another admin.")
@@ -289,6 +298,8 @@ class Dashboard:
         fetch, keys, keys_at = self.access.fetch, self.access.keys, self.access.keys_at
         self.access = Access(settings)
         self.access.fetch, self.access.keys, self.access.keys_at = fetch, keys, keys_at   # (same team: keep its keys)
+        if self.access.level(email) in ('admin', 'print', 'block'):
+            self.clear_request(email)   # answered
         text = {'admin': 'is an admin', 'print': 'can print', 'view': 'can only look', 'block': 'is blocked', None: 'follows the lists again'}[level]
         self.store.event('Settings', f'Google sign-in: {email} {text}', f'{email} is now: {self.access.level(email)} • {actor(request)}')
         return web.json_response(self.access_public(request))
@@ -359,9 +370,47 @@ class Dashboard:
                                   'address=excluded.address,visits=visits+1', (email, now, now, int(identity['admin']), int(identity['print']), address))
 
     def seen(self, limit=50):
-        rows = self.store.db.execute('SELECT * FROM access_seen ORDER BY last DESC LIMIT ?', (limit,)).fetchall()
+        """Recent sign-ins, those asking to print first: online in the last 5 minutes, new in the last day."""
+        rows = self.store.db.execute('SELECT * FROM access_seen ORDER BY wants IS NULL, last DESC LIMIT ?', (limit,)).fetchall()
+        now = time.time()
         return [dict(email=r['email'], first=r['first'], last=r['last'], address=r['address'], visits=r['visits'],
-                     level=self.access.level(r['email']), own=r['email'] in self.access.people) for r in rows]
+                     level=self.access.level(r['email']), own=r['email'] in self.access.people,
+                     online=now - r['last'] < 300, new=now - r['first'] < 86400,
+                     wants=r['wants'], wants_at=r['wants_at'], note=r['note'] or '') for r in rows]
+
+    def requests_waiting(self):
+        return self.store.db.execute('SELECT COUNT(*) FROM access_seen WHERE wants IS NOT NULL').fetchone()[0]
+
+    def clear_request(self, email):
+        row = self.store.db.execute('SELECT wants FROM access_seen WHERE email=?', (email,)).fetchone()
+        with self.store.db:
+            self.store.db.execute('UPDATE access_seen SET wants=NULL,wants_at=NULL,note=NULL WHERE email=?', (email,))
+        return row['wants'] if row else None
+
+    async def access_request(self, request):
+        """Ask to print: someone who can only look asks the admins for more (shown first in their Recent sign-ins)."""
+        identity = request.get('identity')
+        if not identity:
+            raise ValueError('Sign in with Google at https://' + self.access.hostname + ' to ask for access.' if self.access.enabled else 'Nothing to ask for.')
+        data = await request.json()
+        wants = data.get('level', 'print')
+        if wants not in ('print', 'admin'):
+            raise ValueError('Ask to print, or to be an admin.')
+        level = self.access.level(identity['email'])
+        if level == wants or (level == 'admin' and wants == 'print'):
+            raise ValueError('You already can.')
+        note = str(data.get('note') or '').strip()[:300]
+        self.seen_at.pop(identity['email'][:200], None);self.access_seen(request)   # (make sure there's a row)
+        with self.store.db:
+            self.store.db.execute('UPDATE access_seen SET wants=?,wants_at=?,note=? WHERE email=?', (wants, time.time(), note, identity['email'][:200]))
+        return web.json_response({'ok': True, 'wants': wants})
+
+    def my_request(self, request):
+        identity = request.get('identity')
+        if not identity:
+            return None
+        row = self.store.db.execute('SELECT wants FROM access_seen WHERE email=?', (identity['email'][:200],)).fetchone()
+        return row['wants'] if row else None
 
     def locked_message(self, request):
         identity = request.get('identity')
@@ -416,7 +465,7 @@ class Dashboard:
                 request['session'] = session
                 if self.management_route(request) and not self.can_manage(request):
                     return web.json_response({'error':self.locked_message(request),'locked':True}, status=403)
-                if request.method != 'GET' and not self.can_print(request):
+                if request.method != 'GET' and not self.can_print(request) and request.path != '/api/ask-access':
                     return web.json_response({'error':self.view_only_message(request),'viewonly':True}, status=403)
                 if request.method != 'GET' and not hmac.compare_digest(request.headers.get('X-CSRF',''),session['csrf']):
                     raise web.HTTPForbidden(text='Invalid session token.')
@@ -703,6 +752,7 @@ class Dashboard:
             discord=self.core.bot.is_ready(), discord_configured=bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
             setup_needed=self.core.EXAMPLE_MODE and not getattr(self.core,'CONFIG',{}).get('demo'), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
             settings=settings,csrf=request['session']['csrf'],login=self.require_login,manage=manage,can_print=self.can_print(request),
+            access_requests=self.requests_waiting() if manage and self.access.enabled else 0,my_request=self.my_request(request) if self.access.enabled else None,
             identity=request.get('identity'),access=self.access.public()))
 
     async def desktop(self, request):

@@ -24,7 +24,11 @@ function showAccess(){$('logout').hidden=!state.login;$('passwordSave').textCont
  $('whoami').hidden=!state.identity;if(state.identity)$('whoami').innerHTML=`Signed in as <b>${esc(state.identity.email)}</b> · ${state.manage?'admin':state.can_print?'can print':'view only'} · <a href="/cdn-cgi/access/logout">Sign out</a>`;
  // View only (Cloudflare Access "operators", or "lan": "view"): look, but no queueing or controls.
  document.body.classList.toggle('view-only',state.can_print===false);$('viewBanner').hidden=state.can_print!==false;
- if(state.can_print===false)$('viewBanner').textContent=state.identity?`View only: ${state.identity.email} can watch the printers but not print or change anything. An admin can add it under Who may print.`:`View only: this address can watch the printers. Sign in with Google at https://${state.access.hostname} to print.`;
+ if(state.can_print===false)$('viewBanner').innerHTML=state.identity?`<span>View only: ${esc(state.identity.email)} can watch the printers but not print or change anything.</span> `+
+  (state.my_request?'<b>You\'ve asked to print: an admin will see it in Settings.</b>':'<button type="button" id="askPrint" class="primary small-btn">Ask to print</button>'):
+  `View only: this address can watch the printers. Sign in with Google at https://${esc(state.access.hostname)} to print.`;
+ // Admins: requests to print waiting in Settings & help → Google sign-in (a count on the tab, and on More on phones)
+ const waiting=state.access_requests?String(state.access_requests):'';document.querySelector('nav button[data-tab=settings]').dataset.badge=waiting;$('navMore').dataset.badge=waiting;
  $('signinBanner').hidden=true;}
 // Management (MANAGED tabs and their settings) is for Cloudflare Access admins once it's set up (state.manage).
 const MANAGED=new Set(['team','devices','server','settings']);
@@ -493,8 +497,13 @@ function renderAccess(r){
  $('accessSeenBlock').hidden=!(set&&r.seen&&r.seen.length);
  const me=(r.identity?.email||'').toLowerCase(),levels={admin:'Admin',print:'Can print',view:'View only',block:'Blocked'};
  // Each person's level, changed right here: their own level wins over the lists above ("From the lists" goes back).
- $('accessSeen').innerHTML=(r.seen||[]).map(p=>`<li class="${p.level==='block'?'blocked':''}"><div><b>${esc(p.email)}</b> <span class="muted">${esc(timeAgo(p.last))}${p.address?' · from '+esc(p.address):''} · first ${esc(new Date(p.first*1000).toLocaleDateString())}</span></div>
+ $('accessSeen').innerHTML=(r.seen||[]).map(p=>`<li class="${p.level==='block'?'blocked':''}${p.wants?' asking':''}"><div>${p.online?'<span class="online-dot" title="Online now"></span>':''}<b>${esc(p.email)}</b>${p.new?' <span class="tag">new</span>':''} <span class="muted">${p.online?'online now':esc(timeAgo(p.last))}${p.address?' · from '+esc(p.address):''} · first ${esc(new Date(p.first*1000).toLocaleDateString())}</span>${p.wants?`<p class="ask">Asked ${esc(timeAgo(p.wants_at))} ${p.wants==='admin'?'to be an admin':'to print'}${p.note?': “'+esc(p.note)+'”':''} <button type="button" class="primary small-btn" data-allow="${esc(p.email)}" data-level="${esc(p.wants)}">Allow</button> <button type="button" class="small-btn" data-dismiss="${esc(p.email)}">Dismiss</button></p>`:''}</div>
   <select data-person="${esc(p.email)}" aria-label="Level for ${esc(p.email)}"${p.email===me?' disabled title="Another admin can change your level"':''}>${p.own?'':`<option value="" selected>From the lists: ${levels[p.level]}</option>`}${Object.entries(levels).map(([k,v])=>`<option value="${k}"${p.own&&p.level===k?' selected':''}>${v}</option>`).join('')}${p.own?'<option value="">From the lists</option>':''}</select></li>`).join('');}
+$('accessSeen').addEventListener('click',async e=>{const b=e.target.closest('[data-allow],[data-dismiss]');if(!b)return;b.disabled=true;
+ try{renderAccess(await api('access/person',b.dataset.allow?{email:b.dataset.allow,level:b.dataset.level}:{email:b.dataset.dismiss,dismiss:true}));$('accessStatus').textContent=b.dataset.allow?`${b.dataset.allow} ${b.dataset.level==='admin'?'is an admin':'can print'} now.`:'Dismissed.';refresh();}
+ catch(err){$('accessStatus').textContent=err.message;b.disabled=false;}});
+$('viewBanner').addEventListener('click',async e=>{if(!e.target.closest('#askPrint'))return;e.target.disabled=true;
+ try{await api('ask-access',{level:'print'});notice('Asked: an admin will see it in Settings & help → Google sign-in.');await refresh();}catch(err){notice(err.message);e.target.disabled=false;}});
 $('accessSeen').addEventListener('change',async e=>{const sel=e.target.closest('[data-person]');if(!sel)return;sel.disabled=true;
  try{renderAccess(await api('access/person',{email:sel.dataset.person,level:sel.value||null}));$('accessStatus').textContent=`${sel.dataset.person}: saved.`;}
  catch(err){$('accessStatus').textContent=err.message;loadAccess();}});

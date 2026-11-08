@@ -22,6 +22,8 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
     - **Change a person's level from that list** (Admin, Can print, View only, Blocked) without editing the lists.
     - **Blocking takes effect at once,** even with a valid Cloudflare sign-in.
     - **Your own level** can only be changed by another admin.
+    - **Ask to print:** view-only people can ask from their banner. Admins see a count on Settings, and **Allow** or **Dismiss** it in one click.
+    - **Online now and new:** the list marks who's online now, and accounts first seen in the last day.
   - **Only Cloudflare Access *application* tokens are accepted** (not the team-wide one).
   - **Sign in again:** when a Google sign-in expires, a **Sign in again** banner replaces failed requests.
   - **Settings & help → Dashboard access** shows who's signed in, with **Sign out of Google**.

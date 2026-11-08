@@ -97,6 +97,10 @@ Then open `https://printers.example.org`. Cloudflare asks you to sign in with Go
   - **Your own level:** another admin has to change it, so you can't lock yourself out.
   - **Saved as `"people"`:** for example `{"kid@example.org": "view"}` in the settings file.
 - **View-only accounts** see a banner saying so, and no **+ Queue a print** button.
+- **Ask to print:** the view-only banner has an **Ask to print** button.
+  - **Admins** see a count on **Settings & help** (on **More** on phones).
+  - **In Recent sign-ins,** the request is at the top, with **Allow** and **Dismiss**. **Allow** gives that person **Can print** at once.
+- **Recent sign-ins also mark** who's **online now** (in the last 5 minutes) and accounts first seen in the last day (**new**).
 - **When a Google sign-in expires** while the page is open, a **Sign in again** banner appears. Pressing it reloads the page through Google.
 
 **Admins and who may print:** each entry is a Google address, or `@example.org` for everyone in that domain.
