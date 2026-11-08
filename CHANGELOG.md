@@ -19,6 +19,10 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Status icon:** warns when the Pi can't read Cloudflare's keys, or when the `cloudflared` service has stopped. Both are checked every 5 minutes.
   - **The Pi's own addresses** (IP, `.local`, Tailscale) can print by default: `"lan"` is `printing`, `full`, `view` (look only) or `off`.
   - **Recent sign-ins:** admins see which Google accounts used the dashboard, when, and from which IP address.
+    - **Change a person's level from that list** (Admin, Can print, View only, Blocked) without editing the lists.
+    - **Blocking takes effect at once,** even with a valid Cloudflare sign-in.
+    - **Your own level** can only be changed by another admin.
+  - **Only Cloudflare Access *application* tokens are accepted** (not the team-wide one).
   - **Sign in again:** when a Google sign-in expires, a **Sign in again** banner replaces failed requests.
   - **Settings & help → Dashboard access** shows who's signed in, with **Sign out of Google**.
   - **The password unlock from 1.9.21 is gone:** the **Unlock management** dialog, **Lock management** and `"protect_management"`. Without Cloudflare Access set up, the dashboard is open as in 1.9.19. The password stays for pm-doctor and `"require_login"`.

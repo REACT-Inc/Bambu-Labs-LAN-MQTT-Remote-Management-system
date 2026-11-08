@@ -161,6 +161,7 @@ class Dashboard:
             web.post('/api/alerttargets/test', self.alert_targets_test),
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
             web.get('/api/access', self.access_get), web.post('/api/access', self.access_save), web.post('/api/access/test', self.access_test),
+            web.post('/api/access/person', self.access_person),
         ])
         self.app.on_startup.append(self.access_start);self.app.on_shutdown.append(self.access_stop)
         self.status.add_source(self.access_status)
@@ -247,6 +248,8 @@ class Dashboard:
             self.access = Access(None)
             self.store.event('Settings', 'Google sign-in turned off', f'Cloudflare Access • {who}')
             return web.json_response(self.access_public(request))
+        if 'people' not in data:   # (the panel's form doesn't edit them: Recent sign-ins does)
+            data = {**data, 'people': self.access.people}
         settings = clean_access(data)
         new = Access(settings)
         # Don't lock out the person saving: say what they would lose, and save only once they've confirmed it.
@@ -265,6 +268,29 @@ class Dashboard:
         asyncio.create_task(self.access.warm())
         admins = ', '.join(settings['admins']) or 'everyone Access lets in'
         self.store.event('Settings', 'Google sign-in saved', f"https://{settings['hostname']} • admins: {admins} • the Pi's own addresses: {settings['lan']} • {who}"[:1800])
+        return web.json_response(self.access_public(request))
+
+    async def access_person(self, request):
+        """One person's level from Recent sign-ins: admin / print / view / block, or null for "from the lists"."""
+        if not self.access.enabled:
+            raise ValueError('Turn the Google sign-in on first.')
+        data = await request.json()
+        email, level = str(data.get('email') or '').strip().lower(), data.get('level')
+        identity = request.get('identity')
+        if identity and email == identity['email'].lower():
+            raise ValueError("You can't change your own level: ask another admin.")
+        people = dict(self.access.people)
+        if level is None:
+            people.pop(email, None)
+        else:
+            people[email] = level
+        settings = clean_access({**self.access.config, 'people': people})
+        atomic_json(self.access_file, settings)
+        fetch, keys, keys_at = self.access.fetch, self.access.keys, self.access.keys_at
+        self.access = Access(settings)
+        self.access.fetch, self.access.keys, self.access.keys_at = fetch, keys, keys_at   # (same team: keep its keys)
+        text = {'admin': 'is an admin', 'print': 'can print', 'view': 'can only look', 'block': 'is blocked', None: 'follows the lists again'}[level]
+        self.store.event('Settings', f'Google sign-in: {email} {text}', f'{email} is now: {self.access.level(email)} • {actor(request)}')
         return web.json_response(self.access_public(request))
 
     def new_session(self, hours):
@@ -334,8 +360,8 @@ class Dashboard:
 
     def seen(self, limit=50):
         rows = self.store.db.execute('SELECT * FROM access_seen ORDER BY last DESC LIMIT ?', (limit,)).fetchall()
-        return [dict(email=r['email'], first=r['first'], last=r['last'], admin=bool(r['admin']), print=bool(r['print']),
-                     address=r['address'], visits=r['visits']) for r in rows]
+        return [dict(email=r['email'], first=r['first'], last=r['last'], address=r['address'], visits=r['visits'],
+                     level=self.access.level(r['email']), own=r['email'] in self.access.people) for r in rows]
 
     def locked_message(self, request):
         identity = request.get('identity')
@@ -369,6 +395,8 @@ class Dashboard:
                         if not request['identity']:
                             return web.json_response({'error':'Sign in with Google again: reload the page.','signin':True}, status=403)
                         self.access_seen(request)
+                        if request['identity'].get('blocked'):   # an admin blocked this account (Recent sign-ins): at once
+                            return web.json_response({'error':f"This Google account ({request['identity']['email']}) has been blocked from this dashboard by an admin.",'blocked':True}, status=403)
                     elif self.access.lan == 'off':
                         raise web.HTTPForbidden(text=f'This dashboard is open at https://{self.access.hostname} only.')
                 token = request.cookies.get('pm_session','')

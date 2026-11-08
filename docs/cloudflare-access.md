@@ -91,7 +91,11 @@ sudo bash cloudflare-tunnel.sh
 Then open `https://printers.example.org`. Cloudflare asks you to sign in with Google, then the dashboard opens.
 - **The sidebar** shows who you're signed in as, with **Sign out**.
 - **Activity** records changes under the Google account that made them, instead of "web administrator".
-- **Recent sign-ins:** at the bottom of **Settings & help → Google sign-in**, admins see which Google accounts used the dashboard. The list shows each account's level, when it was last there and first seen, and its IP address as Cloudflare saw it.
+- **Recent sign-ins:** at the bottom of **Settings & help → Google sign-in**, admins see which Google accounts used the dashboard. The list shows when each account was last there and first seen, and its IP address as Cloudflare saw it.
+  - **Change one person's level right there:** **Admin**, **Can print**, **View only** or **Blocked**. A person's own level wins over the lists. **From the lists** goes back to them.
+  - **Blocked accounts are refused at once,** even with a valid Cloudflare sign-in (removing someone from the Access policy only takes effect when their sign-in expires, up to a day later). They see "This Google account has been blocked".
+  - **Your own level:** another admin has to change it, so you can't lock yourself out.
+  - **Saved as `"people"`:** for example `{"kid@example.org": "view"}` in the settings file.
 - **View-only accounts** see a banner saying so, and no **+ Queue a print** button.
 - **When a Google sign-in expires** while the page is open, a **Sign in again** banner appears. Pressing it reloads the page through Google.
 

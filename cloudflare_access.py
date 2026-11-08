@@ -14,6 +14,8 @@ cloudflare-tunnel.sh; "cloudflare_access" in config.json is read when that file 
   emails, or "@example.org" for a whole domain. Empty: everyone Access lets in.
 - operators: who else may print and control printers (queue, slicer, controls), the same way. Empty: everyone Access
   lets in. Anyone else may only look (view only).
+- people: one person's level, set from Recent sign-ins: {"email": "admin" | "print" | "view" | "block"}. It wins over
+  the lists above; "block" refuses that Google account at once, even with a valid Cloudflare sign-in.
 - lan: what the dashboard's local addresses (IP, .local, Tailscale) may do without Cloudflare: "printing" (the
   default: printers, queue, slicer, activity), "full", "view" (look only), or "off".
 
@@ -33,6 +35,8 @@ LEEWAY = 60                 # seconds of clock difference allowed on exp/nbf
 KEYS_FOR = 3600             # Cloudflare rotates its keys every 6 weeks; look again hourly
 KEYS_RETRY = 60             # an unknown key id looks again at most once a minute
 LAN_MODES = ('printing', 'full', 'view', 'off')
+LEVELS = ('admin', 'print', 'view', 'block')
+EMAIL = re.compile(r'[^@\s]+@[a-z0-9.-]+\.[a-z]{2,63}')
 TEAM = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com')
 AUD = re.compile(r'[0-9a-f]{64}')
 HOSTNAME = re.compile(r'(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}')
@@ -80,7 +84,21 @@ def clean(data):
     if lan not in LAN_MODES:
         raise ValueError('The Pi\'s own addresses: printing, full, view or off.')
     return dict(team_domain=team, aud=aud[0] if len(aud) == 1 else aud, hostname=hostname,
-                admins=list(dict.fromkeys(admins)), operators=list(dict.fromkeys(operators)), lan=lan)
+                admins=list(dict.fromkeys(admins)), operators=list(dict.fromkeys(operators)), people=clean_people(data.get('people')), lan=lan)
+
+
+def clean_people(people):
+    """{email: level}: one person's own level (from Recent sign-ins), checked."""
+    people = people or {}
+    if not isinstance(people, dict) or len(people) > 500:
+        raise ValueError('People: up to 500 Google accounts, each with a level.')
+    out = {}
+    for email, level in people.items():
+        email = str(email).strip().lower()
+        if not EMAIL.fullmatch(email) or level not in LEVELS:
+            raise ValueError(f'People: {email[:80]} needs a Google address and a level ({", ".join(LEVELS)}).')
+        out[email] = level
+    return out
 
 
 def rsa_verify(n, e, message, signature):
@@ -106,13 +124,15 @@ class Access:
         self.hostname = str(config.get('hostname') or '').strip().lower().rstrip('.')
         self.admins = [str(a).strip().lower() for a in config.get('admins') or [] if str(a).strip()]
         self.operators = [str(a).strip().lower() for a in config.get('operators') or [] if str(a).strip()]
+        people = config.get('people') if isinstance(config.get('people'), dict) else {}
+        self.people = {str(e).strip().lower(): l for e, l in people.items() if l in LEVELS}
         self.lan = config.get('lan', 'printing') if config.get('lan', 'printing') in LAN_MODES else 'printing'
         self.enabled = bool(self.team and self.aud and self.hostname)
         self.fetch, self.clock = fetch or self.fetch_keys, clock
         self.keys, self.keys_at, self.tried_at = {}, 0.0, 0.0
         self.error = ''   # why Cloudflare's keys couldn't be read last time
         self.lock = asyncio.Lock()
-        self.config = dict(team_domain=self.team, aud=sorted(self.aud), hostname=self.hostname, admins=self.admins, operators=self.operators, lan=self.lan)
+        self.config = dict(team_domain=self.team, aud=sorted(self.aud), hostname=self.hostname, admins=self.admins, operators=self.operators, people=self.people, lan=self.lan)
 
     @property
     def issuer(self):
@@ -143,12 +163,21 @@ class Access:
             return False
         return not people or any(email == a or (a.startswith('@') and email.endswith(a)) for a in people)
 
+    def level(self, email):
+        """admin / print / view / block: the person's own level if set (Recent sign-ins), else from the lists."""
+        email = str(email or '').lower()
+        if not email:
+            return 'view'
+        if email in self.people:
+            return self.people[email]
+        return 'admin' if self.listed(email, self.admins) else 'print' if self.listed(email, self.operators) else 'view'
+
     def is_admin(self, email):
-        return self.listed(email, self.admins)
+        return self.level(email) == 'admin'
 
     def can_print(self, email):
         """Queue, slice and control printers: admins, and the operators (everyone, with no operators listed)."""
-        return self.is_admin(email) or self.listed(email, self.operators)
+        return self.level(email) in ('admin', 'print')
 
     # ---- checking Cloudflare's token ----
 
@@ -196,6 +225,8 @@ class Access:
         aud = claims.get('aud')
         if not self.aud & set([aud] if isinstance(aud, str) else aud or []):
             raise ValueError('The Cloudflare Access token is for another application.')
+        if claims.get('type', 'app') != 'app':   # an application token, not the team-wide (org) one
+            raise ValueError('Not a Cloudflare Access application token.')
         if claims.get('iss') != self.issuer:
             raise ValueError('The Cloudflare Access token is from another team.')
         now = self.clock()
@@ -227,7 +258,8 @@ class Access:
         except (aiohttp.ClientError, OSError, asyncio.TimeoutError, KeyError, TypeError):
             return None   # Cloudflare's keys couldn't be read: nobody is let in rather than everybody
         email = str(claims.get('email') or claims.get('common_name') or '')
-        return {'email': email, 'admin': self.is_admin(claims.get('email')), 'print': self.can_print(claims.get('email'))}
+        level = self.level(claims.get('email'))
+        return {'email': email, 'admin': level == 'admin', 'print': level in ('admin', 'print'), 'blocked': level == 'block'}
 
 
 async def probe(team, hostname, get=None):

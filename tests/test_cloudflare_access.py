@@ -149,7 +149,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         cf={'Host':HOST,'Cf-Ray':'8a1b2c3d4e5f-AMS','Cf-Access-Jwt-Assertion':sign()}
         status,state=await self.state(cf)
         self.assertEqual(status,200);self.assertTrue(state['manage'])
-        self.assertEqual(state['identity'],{'email':'admin@example.org','admin':True,'print':True});self.assertTrue(state['access']['enabled'])
+        self.assertEqual(state['identity'],{'email':'admin@example.org','admin':True,'print':True,'blocked':False});self.assertTrue(state['access']['enabled'])
         self.assertEqual(state['settings']['notification_channel_id'],'123456789012345678')
         self.assertEqual((await self.client.get('/api/alerttargets',headers=cf)).status,200)
         self.assertEqual(await self.queue(state['csrf'],cf),200)
@@ -248,7 +248,7 @@ class ViewOnlyTests(unittest.IsolatedAsyncioTestCase):
         seen={p['email']:p for p in self.dashboard.seen()}
         self.assertEqual(set(seen),{'admin@example.org','parent@gmail.com'})
         self.assertEqual(seen['admin@example.org']['visits'],1)   # (once a minute at most)
-        self.assertEqual((seen['parent@gmail.com']['address'],seen['parent@gmail.com']['admin']),('198.51.100.7',False))
+        self.assertEqual((seen['parent@gmail.com']['address'],seen['parent@gmail.com']['level']),('198.51.100.7','print'))   # (nobody under Who may print: everyone may)
         self.dashboard.seen_at.clear()
         await self.state({'Host':HOST,'Cf-Connecting-Ip':'203.0.113.9','Cf-Access-Jwt-Assertion':sign()})
         again={p['email']:p for p in self.dashboard.seen()}['admin@example.org']
@@ -256,6 +256,55 @@ class ViewOnlyTests(unittest.IsolatedAsyncioTestCase):
         body=await (await self.client.get('/api/access',headers={'Host':HOST,'Cf-Access-Jwt-Assertion':sign()})).json()
         self.assertEqual(body['seen'][0]['email'],'admin@example.org')
         self.assertEqual((await self.client.get('/api/access',headers={'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='parent@gmail.com')})).status,403)   # admins only
+
+
+class LevelTests(unittest.IsolatedAsyncioTestCase):
+    def test_levels(self):
+        a=Access({'team_domain':TEAM,'aud':AUD,'hostname':HOST,'admins':['@staff.example.org'],'operators':['@example.org'],
+                  'people':{'coach@staff.example.org':'print','kid@example.org':'view','alum@gmail.com':'admin','troll@example.org':'block','bad@example.org':'sideways'}})
+        self.assertEqual([a.level(e) for e in ('head@staff.example.org','coach@staff.example.org','member@example.org','kid@example.org','alum@gmail.com','troll@example.org','x@gmail.com','')],
+                         ['admin','print','print','view','admin','block','view','view'])   # their own level wins over the lists
+        self.assertNotIn('bad@example.org',a.people)
+        self.assertEqual(clean({'hostname':HOST,'team_domain':TEAM,'aud':AUD,'people':{'Kid@Example.org':'view'}})['people'],{'kid@example.org':'view'})
+        for bad in ({'@example.org':'view'},{'kid@example.org':'boss'},['kid@example.org']):
+            with self.assertRaises(ValueError,msg=bad):clean({'hostname':HOST,'team_domain':TEAM,'aud':AUD,'people':bad})
+
+    async def test_only_application_tokens(self):
+        a=access()
+        with self.assertRaises(ValueError):await a.verify(sign(type='org'))
+        self.assertTrue(await a.verify(sign()))
+
+class PeopleTests(unittest.IsolatedAsyncioTestCase):
+    start,state,queue,asyncTearDown=DashboardTests.start,DashboardTests.state,DashboardTests.queue,DashboardTests.asyncTearDown
+
+    async def test_levels_from_recent_sign_ins(self):
+        await self.start(operators=['@example.org'])
+        admin={'Host':HOST,'Cf-Access-Jwt-Assertion':sign()}
+        member={'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='member@example.org')}
+        csrf=(await self.state(admin))[1]['csrf']
+        mcsrf=(await self.state(member))[1]['csrf']
+        async def person(email,level,headers=admin):
+            r=await self.client.post('/api/access/person',json={'email':email,'level':level},headers={'X-PM':'1','X-CSRF':csrf,**headers})
+            return r.status,await r.json()
+        status,body=await person('member@example.org','block')
+        self.assertEqual(status,200);self.assertEqual({p['email']:p for p in body['seen']}['member@example.org']['level'],'block')
+        status,body=await self.state(member)   # blocked at once, despite a good Cloudflare sign-in
+        self.assertEqual(status,403);self.assertTrue(body['blocked']);self.assertIn('member@example.org',body['error'])
+        self.assertIn('Google sign-in: member@example.org is blocked',[e['title'] for e in self.store.events()])
+        await person('member@example.org','view')
+        status,state=await self.state(member);self.assertEqual(status,200);self.assertFalse(state['can_print'])   # beats the @example.org operators
+        await person('member@example.org',None)
+        self.assertTrue((await self.state(member))[1]['can_print'])   # back to the lists
+        self.assertEqual(json.loads((Path(self.tmp.name)/'cloudflare_access.json').read_text())['people'],{})
+        status,body=await person('admin@example.org','view')
+        self.assertEqual(status,400);self.assertIn('your own level',body['error'])
+        status,body=await person('member@example.org','boss');self.assertEqual(status,400)
+        status,body=await person('member@example.org','admin',member)   # (not an admin)
+        self.assertEqual(status,403)
+        # saving the panel's form keeps each person's level
+        await person('member@example.org','admin')
+        r=await self.client.post('/api/access',json={'hostname':HOST,'team_domain':TEAM,'aud':AUD,'admins':'admin@example.org','operators':'@example.org','lan':'printing'},headers={'X-PM':'1','X-CSRF':csrf,**admin})
+        self.assertEqual(r.status,200);self.assertEqual(self.dashboard.access.people,{'member@example.org':'admin'})
 
 
 class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
@@ -288,7 +337,7 @@ class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
         status,body=await self.post('/api/access',self.settings(lan='full'))   # keeps management here: no question
         self.assertEqual(status,200);self.assertEqual(body['settings']['hostname'],HOST);self.assertTrue(self.dashboard.access.enabled)
         saved=json.loads((Path(self.tmp.name)/'cloudflare_access.json').read_text())
-        self.assertEqual(saved,{'team_domain':TEAM,'aud':AUD,'hostname':HOST,'admins':['admin@example.org'],'operators':[],'lan':'full'})
+        self.assertEqual(saved,{'team_domain':TEAM,'aud':AUD,'hostname':HOST,'admins':['admin@example.org'],'operators':[],'people':{},'lan':'full'})
         self.assertIn('Google sign-in saved',[e['title'] for e in self.store.events()])
         status,body=await self.post('/api/access',{**self.settings(),'confirmed':True})
         self.assertEqual(status,200);self.assertEqual(self.dashboard.access.lan,'printing')
@@ -350,7 +399,7 @@ class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
 class SettingsTests(unittest.IsolatedAsyncioTestCase):
     def test_settings_are_checked(self):
         good={'hostname':'https://Printers.Example.org/','team_domain':'PrintRoom','aud':AUD.upper(),'admins':'Boss@Example.org\n@staff.example.org, boss@example.org','lan':'full'}
-        self.assertEqual(clean(good),{'hostname':HOST,'team_domain':TEAM,'aud':AUD,'admins':['boss@example.org','@staff.example.org'],'operators':[],'lan':'full'})
+        self.assertEqual(clean(good),{'hostname':HOST,'team_domain':TEAM,'aud':AUD,'admins':['boss@example.org','@staff.example.org'],'operators':[],'people':{},'lan':'full'})
         self.assertEqual(clean({**good,'operators':'Student@Example.org\n@club.example.org'})['operators'],['student@example.org','@club.example.org'])
         with self.assertRaises(ValueError):clean({**good,'operators':'everyone'})
         self.assertEqual(clean({**good,'lan':'view'})['lan'],'view')
@@ -398,6 +447,7 @@ class PageTests(unittest.TestCase):
         for id in ('accessForm','accessHostname','accessTeam','accessAud','accessAdmins','accessOperators','accessLan','accessTest','accessRemove','accessConfirm','whoami',
                    'accessSeen','signinBanner','signinAgain','viewBanner'):
             self.assertIn(f'id="{id}"',page)
+        self.assertIn("api('access/person',{email:sel.dataset.person,level:sel.value||null})",app)
         self.assertIn("api('access/test',accessData())",app);self.assertIn('<option value="view">',page)
         self.assertIn("if(r.status===403&&result.signin)$('signinBanner').hidden=false;",app);self.assertIn("document.body.classList.toggle('view-only',state.can_print===false)",app)
         self.assertIn('err.result?.confirm',app)

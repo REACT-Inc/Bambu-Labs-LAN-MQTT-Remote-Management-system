@@ -123,7 +123,7 @@ function renderJobs(){
  $('jobs').innerHTML=jobs.filter(j=>!terminal.has(j.status)).map(row).join('')||'<div class="empty">The queue is clear. Add a print here or use /queueadd in Discord.</div>';
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
 }
-async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;showAccess();showManage();$('connectionBanner').hidden=true;render();}catch(e){if(e.result?.signin){$('loginScreen').hidden=true;$('app').hidden=false;$('logout').hidden=true;$('connectionBanner').hidden=true;}else if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
+async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;showAccess();showManage();$('connectionBanner').hidden=true;render();}catch(e){if(e.result?.signin||e.result?.blocked){$('loginScreen').hidden=true;$('app').hidden=false;$('logout').hidden=true;$('connectionBanner').hidden=!e.result.blocked;$('connectionBanner').textContent=e.message;if(e.result.blocked)$('signinBanner').hidden=true;}else if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
 // No confirmation screens in the dashboard: every action runs straight away (the server still checks it is safe,
 // e.g. temperature limits and an idle printer for moves). Discord keeps its confirmations.
 async function confirmAction(title,text,label,callback){notice(title.replace(/\?$/,'')+'…');try{await callback();await refresh();}catch(e){notice(e.message);}}
@@ -491,7 +491,13 @@ function renderAccess(r){
  if(set){$('accessHostname').value=set.hostname;$('accessTeam').value=set.team_domain;$('accessAud').value=set.aud.join('\n');$('accessAdmins').value=set.admins.join('\n');$('accessOperators').value=(set.operators||[]).join('\n');$('accessLan').value=set.lan;}
  $('accessRemove').hidden=!set;
  $('accessSeenBlock').hidden=!(set&&r.seen&&r.seen.length);
- $('accessSeen').innerHTML=(r.seen||[]).map(p=>`<li><b>${esc(p.email)}</b> <span class="muted">${p.admin?'admin':p.print?'can print':'view only'} · ${esc(timeAgo(p.last))}${p.address?' · from '+esc(p.address):''} · first ${esc(new Date(p.first*1000).toLocaleDateString())}</span></li>`).join('');}
+ const me=(r.identity?.email||'').toLowerCase(),levels={admin:'Admin',print:'Can print',view:'View only',block:'Blocked'};
+ // Each person's level, changed right here: their own level wins over the lists above ("From the lists" goes back).
+ $('accessSeen').innerHTML=(r.seen||[]).map(p=>`<li class="${p.level==='block'?'blocked':''}"><div><b>${esc(p.email)}</b> <span class="muted">${esc(timeAgo(p.last))}${p.address?' · from '+esc(p.address):''} · first ${esc(new Date(p.first*1000).toLocaleDateString())}</span></div>
+  <select data-person="${esc(p.email)}" aria-label="Level for ${esc(p.email)}"${p.email===me?' disabled title="Another admin can change your level"':''}>${p.own?'':`<option value="" selected>From the lists: ${levels[p.level]}</option>`}${Object.entries(levels).map(([k,v])=>`<option value="${k}"${p.own&&p.level===k?' selected':''}>${v}</option>`).join('')}${p.own?'<option value="">From the lists</option>':''}</select></li>`).join('');}
+$('accessSeen').addEventListener('change',async e=>{const sel=e.target.closest('[data-person]');if(!sel)return;sel.disabled=true;
+ try{renderAccess(await api('access/person',{email:sel.dataset.person,level:sel.value||null}));$('accessStatus').textContent=`${sel.dataset.person}: saved.`;}
+ catch(err){$('accessStatus').textContent=err.message;loadAccess();}});
 async function loadAccess(){try{renderAccess(await api('access',undefined,'GET'));}catch(e){$('accessState').textContent=e.message;}}
 $('accessTest').onclick=async()=>{const b=$('accessTest');b.disabled=true;$('accessStatus').textContent='Testing: reading the team\'s keys and opening the address from the Pi…';
  try{const r=await api('access/test',accessData());$('accessChecks').hidden=false;
