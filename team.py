@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import discord
 from aiohttp import web
 from dashboard import atomic_json
+from cloudflare_access import actor
 
 
 class Team:
@@ -320,7 +321,7 @@ class Team:
         elif action=='remember':
             guild=str(data.get('guild',''))
             if not self.ids_allowed(guild):raise ValueError('Choose an allowed server.')
-            result={'id':self.remember(guild,'web administrator',str(data.get('title','')),str(data.get('body','')))}
+            result={'id':self.remember(guild,actor(request),str(data.get('title','')),str(data.get('body','')))}
         elif action=='attendance':
             guild=str(data.get('guild',''))
             if not self.ids_allowed(guild):raise ValueError('Choose an allowed server.')
@@ -348,7 +349,7 @@ class Team:
         elif action=='desktop':
             # Remote desktop through MeshCentral's own viewer (#61); recorded in Activity.
             node,url=await self.mesh.desktop_url(str(data.get('device','')))
-            self.store.event('Laptops','Remote desktop opened',f"{node['name']} • web administrator")
+            self.store.event('Laptops','Remote desktop opened',f"{node['name']} • {actor(request)}")
             result={'url':url}
         elif action=='reboot':await self.reboot(data.get('confirmed'))
         else:raise ValueError('Unknown team action.')

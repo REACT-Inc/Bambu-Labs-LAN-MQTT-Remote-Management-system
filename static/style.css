@@ -345,3 +345,4 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 }
 
 nav button.locked span::after{content:' 🔒';font-size:11px}
+.access-checks{list-style:none;padding:0;margin:12px 0;display:grid;gap:8px}.access-checks li{padding:10px 12px;border-radius:9px;border:1px solid var(--line);line-height:1.5;font-size:13px}.access-checks li.ok{border-color:#576b48;background:#263020}.access-checks li.ok b{color:var(--green)}.access-checks li.bad{border-color:#794d49;background:#392522}.access-checks li.bad b{color:var(--red)}.access-state{overflow-wrap:anywhere}.whoami{overflow-wrap:anywhere}.whoami a{color:var(--green)}

@@ -1,29 +1,34 @@
 #!/usr/bin/env bash
 # The dashboard at printers.<your domain>, behind a Google sign-in (Cloudflare Tunnel + Cloudflare Access).
-# Installs cloudflared, connects the tunnel you made in Cloudflare Zero Trust, and saves the Access settings the
-# dashboard checks each request against. Steps and the Cloudflare side: docs/cloudflare-access.md.
+# Installs cloudflared, connects the tunnel you made in Cloudflare Zero Trust, saves the Access settings the dashboard
+# checks each request against, then checks the address really asks for a sign-in. Steps: docs/cloudflare-access.md.
 #
-#   sudo bash cloudflare-tunnel.sh --token <tunnel token> --hostname printers.example.org \
-#        --team yourteam.cloudflareaccess.com --aud <Application Audience tag> --admin you@example.org [--admin ...] \
-#        [--lan printing|full|off]
-#   sudo bash cloudflare-tunnel.sh --remove      # stop the tunnel and turn the Google sign-in off again
+#   sudo bash cloudflare-tunnel.sh                       # asks for each value
+#   sudo bash cloudflare-tunnel.sh --token <tunnel token> --domain example.org --team yourteam \
+#        --aud <Application Audience tag> --admin you@example.org [--admin @example.org] [--lan printing|full|off]
+#   (--hostname printers.example.org instead of --domain for another name; --tunnel-only to keep the settings)
+#   sudo bash cloudflare-tunnel.sh --remove              # stop the tunnel and turn the Google sign-in off
 set -euo pipefail
 if [ "$(id -u)" -ne 0 ]; then
   echo 'Run this with sudo bash cloudflare-tunnel.sh ...'; exit 1
 fi
 CONFIG=/etc/3d-printer-management/config.json
+DATA=/var/lib/3d-printer-management
+SETTINGS="$DATA/cloudflare_access.json"
 PYTHON=/opt/3d-printer-management/venv/bin/python
-TOKEN='' HOSTNAME_='' TEAM='' AUD='' LAN=printing REMOVE=0
+TOKEN='' HOST='' TEAM='' AUD='' LAN='' REMOVE=0 TUNNEL_ONLY=0
 ADMINS=()
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --token) TOKEN="${2:-}"; shift 2 ;;
-    --hostname) HOSTNAME_="${2:-}"; shift 2 ;;
+    --domain) HOST="printers.${2:-}"; shift 2 ;;
+    --hostname) HOST="${2:-}"; shift 2 ;;
     --team) TEAM="${2:-}"; shift 2 ;;
     --aud) AUD="${2:-}"; shift 2 ;;
     --admin) ADMINS+=("${2:-}"); shift 2 ;;
     --lan) LAN="${2:-}"; shift 2 ;;
+    --tunnel-only) TUNNEL_ONLY=1; shift ;;
     --remove) REMOVE=1; shift ;;
     -h|--help) usage ;;
     *) echo "Unknown option: $1"; usage ;;
@@ -31,29 +36,56 @@ while [ $# -gt 0 ]; do
 done
 [ -f "$CONFIG" ] || { echo "No $CONFIG: install the dashboard first (sudo bash install.sh)."; exit 1; }
 [ -x "$PYTHON" ] || PYTHON="$(command -v python3)"
+OWNER="$(stat -c %U "$DATA" 2>/dev/null || echo root)"
+
+save_settings() {   # $1: JSON. Owned by the dashboard's user, which may change it from Settings & help.
+  printf '%s\n' "$1" > "$SETTINGS.tmp"
+  chmod 600 "$SETTINGS.tmp"; chown "$OWNER" "$SETTINGS.tmp"; mv -f "$SETTINGS.tmp" "$SETTINGS"
+}
 
 if [ "$REMOVE" = 1 ]; then
   if command -v cloudflared >/dev/null; then cloudflared service uninstall || true; fi
-  "$PYTHON" - "$CONFIG" <<'EOF'
-import json, os, sys, tempfile
-path = sys.argv[1]
-config = json.load(open(path))
-config.pop('cloudflare_access', None)
-fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-with os.fdopen(fd, 'w') as f: json.dump(config, f, indent=2)
-os.chmod(tmp, os.stat(path).st_mode); os.chown(tmp, os.stat(path).st_uid, os.stat(path).st_gid); os.replace(tmp, path)
-EOF
+  save_settings '{}'   # (empty: "cloudflare_access" in config.json isn't used either)
   systemctl restart 3d-printer-management || true
   echo 'The tunnel is stopped and the Google sign-in is off. (Delete the tunnel and the Access application in Cloudflare too.)'
   exit 0
 fi
 
-[ -n "$TOKEN" ] && [ -n "$HOSTNAME_" ] && [ -n "$TEAM" ] && [ -n "$AUD" ] || { echo 'Needs --token, --hostname, --team and --aud.'; usage; }
-case "$LAN" in printing|full|off) ;; *) echo '--lan is printing, full or off.'; exit 1 ;; esac
-case "$HOSTNAME_" in *.*) ;; *) echo "--hostname is the full address, for example printers.example.org"; exit 1 ;; esac
-TEAM="${TEAM#https://}"; TEAM="${TEAM%/}"
-case "$TEAM" in *.cloudflareaccess.com) ;; *) TEAM="$TEAM.cloudflareaccess.com" ;; esac
-[ ${#ADMINS[@]} -gt 0 ] || echo 'No --admin given: every Google account your Access policy lets in can use management.'
+# Anything not given on the command line is asked for (when someone is at the keyboard).
+ask() {   # ask VAR "question" [default]
+  local value=''
+  if [ ! -t 0 ] && [ ! -r /dev/tty ]; then echo "Missing: $2 (pass it as an option; see --help)"; exit 1; fi
+  read -r -p "$2${3:+ [$3]}: " value </dev/tty || true
+  printf -v "$1" '%s' "${value:-${3:-}}"
+}
+[ -n "$TOKEN" ] || ask TOKEN 'Tunnel token (Zero Trust -> Networks -> Tunnels -> your tunnel; the long code after "service install")'
+if [ "$TUNNEL_ONLY" = 0 ]; then
+  if [ -z "$HOST" ]; then ask DOMAIN 'Your domain (the dashboard will be at printers.<domain>)'; HOST="printers.${DOMAIN:-}"; fi
+  [ -n "$TEAM" ] || ask TEAM 'Zero Trust team name or domain (yourteam or yourteam.cloudflareaccess.com)'
+  [ -n "$AUD" ] || ask AUD "Access application's Application Audience (AUD) tag"
+  if [ ${#ADMINS[@]} -eq 0 ]; then
+    ask ADMIN_LIST 'Admin Google accounts, separated by spaces (@example.org for a whole domain; empty: everyone Access lets in)'
+    read -r -a ADMINS <<< "${ADMIN_LIST:-}"
+  fi
+  [ -n "$LAN" ] || ask LAN "What the Pi's own addresses (IP, .local, Tailscale) may use: printing, full or off" printing
+fi
+[ -n "$TOKEN" ] || { echo 'A tunnel token is needed.'; exit 1; }
+
+# Check and save the settings first (the same checks as Settings & help -> Google sign-in), so a typo stops here.
+if [ "$TUNNEL_ONLY" = 0 ]; then
+  ADMINS_TEXT="$(printf '%s\n' "${ADMINS[@]+"${ADMINS[@]}"}")"
+  SETTINGS_JSON="$(cd /opt/3d-printer-management 2>/dev/null || cd "$(dirname "$0")"; "$PYTHON" -c '
+import json, sys
+sys.path.insert(0, ".")
+from cloudflare_access import clean
+try:
+    print(json.dumps(clean({"hostname": sys.argv[1], "team_domain": sys.argv[2], "aud": sys.argv[3], "admins": sys.argv[4], "lan": sys.argv[5]})))
+except ValueError as exc:
+    sys.exit(str(exc))' "$HOST" "$TEAM" "$AUD" "$ADMINS_TEXT" "$LAN")" || exit 1
+  HOST="$("$PYTHON" -c 'import json,sys;print(json.loads(sys.argv[1])["hostname"])' "$SETTINGS_JSON")"
+  TEAM="$("$PYTHON" -c 'import json,sys;print(json.loads(sys.argv[1])["team_domain"])' "$SETTINGS_JSON")"
+  [ ${#ADMINS[@]} -gt 0 ] || echo 'No admins given: every Google account your Access policy lets in can use management.'
+fi
 
 if ! command -v cloudflared >/dev/null; then
   echo 'Installing cloudflared...'
@@ -74,27 +106,45 @@ if ! command -v cloudflared >/dev/null; then
 fi
 cloudflared --version
 
-# The tunnel runs as its own service, with the token from the Cloudflare dashboard (Networks -> Tunnels).
-if systemctl list-unit-files cloudflared.service >/dev/null 2>&1 && systemctl cat cloudflared >/dev/null 2>&1; then
+# The tunnel runs as its own service, with the token from the Cloudflare dashboard.
+if systemctl cat cloudflared >/dev/null 2>&1; then
   echo 'Replacing the existing cloudflared service with this tunnel...'
   cloudflared service uninstall || true
 fi
 cloudflared service install "$TOKEN"
 systemctl enable --now cloudflared
 
-ADMINS_JSON="$(printf '%s\n' "${ADMINS[@]+"${ADMINS[@]}"}" | "$PYTHON" -c 'import json,sys;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')"
-"$PYTHON" - "$CONFIG" "$TEAM" "$AUD" "$HOSTNAME_" "$ADMINS_JSON" "$LAN" <<'EOF'
-import json, os, sys, tempfile
-path, team, aud, hostname, admins, lan = sys.argv[1:]
-config = json.load(open(path))
-config['cloudflare_access'] = {'team_domain': team, 'aud': aud, 'hostname': hostname.lower(), 'admins': json.loads(admins), 'lan': lan}
-fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-with os.fdopen(fd, 'w') as f: json.dump(config, f, indent=2)
-os.chmod(tmp, os.stat(path).st_mode); os.chown(tmp, os.stat(path).st_uid, os.stat(path).st_gid); os.replace(tmp, path)
-EOF
+if [ "$TUNNEL_ONLY" = 1 ]; then
+  echo 'The tunnel is connected. The Google sign-in settings are unchanged.'; exit 0
+fi
+save_settings "$SETTINGS_JSON"
 systemctl restart 3d-printer-management
 PORT="$("$PYTHON" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("port",8080))' "$CONFIG")"
+
+# Does https://<host> really ask for a Google sign-in? (Asked like a visitor without one; the tunnel can take a
+# minute to come up.)
+echo "Checking https://$HOST ..."
+RESULT=''
+for _ in $(seq 1 12); do
+  RESULT="$(curl -s -o /dev/null -m 15 -w '%{http_code} %{redirect_url}' "https://$HOST/" || true)"
+  case "$RESULT" in
+    30[1-8]\ *cloudflareaccess.com*) break ;;
+    530*|502*|000*) sleep 5 ;;
+    *) break ;;
+  esac
+done
 echo
-echo "Done. Open https://$HOSTNAME_ and sign in with Google."
-echo "In Cloudflare, the tunnel's public hostname $HOSTNAME_ must point at http://localhost:$PORT."
-echo "The Pi's own addresses now allow: $LAN (change with --lan, see docs/cloudflare-access.md)."
+case "$RESULT" in
+  30[1-8]\ *"//$TEAM/"*)
+    echo "OK: https://$HOST asks for a Google sign-in. Open it and sign in." ;;
+  30[1-8]\ *cloudflareaccess.com*)
+    echo "WARNING: https://$HOST asks for a sign-in with another Zero Trust team than $TEAM: check --team." ;;
+  530*|502*|000*)
+    echo "WARNING: Cloudflare can't reach the Pi yet ($RESULT). Check the tunnel's public hostname $HOST points at http://localhost:$PORT,"
+    echo "         and sudo systemctl status cloudflared." ;;
+  *)
+    echo "WARNING: https://$HOST answered without a Google sign-in ($RESULT)."
+    echo "         Add a Cloudflare Access application for $HOST (step 3 of docs/cloudflare-access.md). The dashboard refuses"
+    echo "         its API without Access's token meanwhile, but don't rely on it." ;;
+esac
+echo "The Pi's own addresses can use: $("$PYTHON" -c 'import json,sys;print(json.loads(sys.argv[1])["lan"])' "$SETTINGS_JSON") (change it in Settings & help -> Google sign-in)."

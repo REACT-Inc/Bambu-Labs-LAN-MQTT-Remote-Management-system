@@ -62,25 +62,36 @@ This replaces the dashboard password for management. The password is still used 
 From the extracted release folder (the one with `install.sh`):
 
 ```bash
-sudo bash cloudflare-tunnel.sh \
-  --token '<tunnel token from step 2>' \
-  --hostname printers.example.org \
-  --team <team name>.cloudflareaccess.com \
-  --aud '<Application Audience tag from step 3>' \
-  --admin you@example.org --admin teacher@example.org
+sudo bash cloudflare-tunnel.sh
 ```
 
-The script:
-1. Installs `cloudflared`, from Cloudflare's package repository on Raspberry Pi OS, Debian and Ubuntu, or from its GitHub releases on other systems.
-2. Connects your tunnel as the `cloudflared` service.
-3. Saves the settings under `"cloudflare_access"` in `/etc/3d-printer-management/config.json`.
-4. Restarts the dashboard.
+**What it asks for** (or give them as options):
+- **The tunnel token** (`--token`).
+- **Your domain** (`--domain example.org`): the dashboard goes at `printers.example.org`. For another name, use `--hostname`.
+- **The team** (`--team yourteam`, or the full `yourteam.cloudflareaccess.com`).
+- **The AUD tag** (`--aud`).
+- **The admins** (`--admin you@example.org --admin @staff.example.org`).
+- **What the Pi's own addresses may use** (`--lan printing`).
 
-Then open `https://printers.example.org`. Cloudflare asks you to sign in with Google, then the dashboard opens. **Settings & help → Dashboard access** shows who you're signed in as, whether you're an admin, and **Sign out of Google**.
+**Then it:**
+1. Checks the settings, so a typo stops it before anything changes.
+2. Installs `cloudflared`, from Cloudflare's package repository on Raspberry Pi OS, Debian and Ubuntu, or from its GitHub releases on other systems.
+3. Connects your tunnel as the `cloudflared` service.
+4. Saves the settings and restarts the dashboard.
+5. Opens `https://printers.example.org` like a visitor would, and tells you whether it really asks for a Google sign-in. It warns you if the address answers without one, uses another team, or can't reach the Pi.
 
-**`--admin`:** each one is a Google address, or `@example.org` for everyone in that domain. Leave them all out and every account your Access policy allows is an admin.
+**Or set up the sign-in from the dashboard:** connect only the tunnel with `sudo bash cloudflare-tunnel.sh --tunnel-only --token '<token>'`. Then fill in **Settings & help → Google sign-in (Cloudflare Access)** and press **Test** before saving.
+- **Test** checks that the Pi can read your team's signing keys, and that the address asks for a Google sign-in.
+- **Saving applies at once,** with no restart.
+- **The dashboard won't lock you out without asking:** saving asks first when it would take management away from the address you're using, or remove you from the admins.
 
-What the script saves in `config.json` (you can also edit it by hand, then `sudo systemctl restart 3d-printer-management`):
+Then open `https://printers.example.org`. Cloudflare asks you to sign in with Google, then the dashboard opens.
+- **The sidebar** shows who you're signed in as, with **Sign out**.
+- **Activity** records changes under the Google account that made them, instead of "web administrator".
+
+**Admins:** each one is a Google address, or `@example.org` for everyone in that domain. With no admins, every account your Access policy allows is an admin.
+
+**Where the settings are saved:** `/var/lib/3d-printer-management/cloudflare_access.json`, by both the script and Settings. You can also put the same settings under `"cloudflare_access"` in `config.json`, which is used only when that file doesn't exist:
 
 ```json
 "cloudflare_access": {
@@ -92,6 +103,8 @@ What the script saves in `config.json` (you can also edit it by hand, then `sudo
 }
 ```
 
+**Checked every 5 minutes:** the dashboard checks that it can still read Cloudflare's signing keys and that the `cloudflared` service is running. If either fails, the status icon (top left) says so.
+
 ## The Pi's own addresses
 
 The dashboard still answers on the Pi's own addresses, such as `http://192.168.1.50:8080`, `.local` names and Tailscale. These requests don't go through Cloudflare, so there's no Google account to check. `"lan"` decides what they may do:
@@ -102,7 +115,7 @@ The dashboard still answers on the Pi's own addresses, such as `http://192.168.1
 | `full` | Everything, management included (as before Cloudflare Access was set up). |
 | `off` | Nothing: the dashboard is only at `https://printers.<your domain>`. |
 
-Set it with `--lan` when you run the script, or in `config.json`.
+Set it in **Settings & help → Google sign-in**, or with `--lan` when you run the script.
 
 **Cloudflare's requests can't pose as local ones:** any request that has the public hostname, or Cloudflare's own headers (`Cf-Ray`, `Cf-Connecting-Ip`), must carry a valid Access token, whatever `lan` says.
 
@@ -114,9 +127,12 @@ Set it with `--lan` when you run the script, or in `config.json`.
 
 ## Changing or removing it
 
-- **Add or remove admins:** edit `"admins"` in `config.json` and restart, or run the script again with the new `--admin` list.
+- **Add or remove admins:** use **Settings & help → Google sign-in** (applies at once).
 - **Who may sign in at all:** change the Access application's policy in Zero Trust. Changes apply at once and need nothing on the Pi.
-- **Turn it off:** `sudo bash cloudflare-tunnel.sh --remove` stops the tunnel and removes `"cloudflare_access"`. Then delete the tunnel and the Access application in Zero Trust.
+- **Turn it off:**
+  - **Turn off** in **Settings & help → Google sign-in** turns the sign-in off.
+  - `sudo bash cloudflare-tunnel.sh --remove` also stops the tunnel.
+  - Then delete the tunnel and the Access application in Zero Trust.
 
 ## Troubleshooting
 
@@ -124,6 +140,8 @@ Set it with `--lan` when you run the script, or in `config.json`.
 |---|---|
 | **"Sign in with Google again: reload the page."** | The Access sign-in expired, or the token doesn't match the settings. Check that `aud` is this application's Audience tag and `team_domain` is your team. The Pi must also reach `https://<team>.cloudflareaccess.com` (it downloads Cloudflare's keys from there) and have the right time (`timedatectl`). |
 | **Cloudflare shows error 1033 or 502** | The tunnel isn't connected (`sudo systemctl status cloudflared`), or its public hostname doesn't point at `http://localhost:8080`. |
-| **"Your Google account (…) isn't a dashboard admin"** | Add it to `"admins"`, then restart. |
+| **"Your Google account (…) isn't a dashboard admin"** | An admin adds it in **Settings & help → Google sign-in**. |
+| **The status icon says "Google sign-in can't check sign-ins"** | The Pi can't download your team's keys from `https://<team>.cloudflareaccess.com`. Check its internet connection, DNS, and the team domain. Nobody can use the public address until it can. |
+| **Locked out of management** | On the Pi, `sudo bash cloudflare-tunnel.sh --remove` (or write `{}` into `/var/lib/3d-printer-management/cloudflare_access.json` and restart the dashboard) turns the sign-in off. |
 | **"Management is open at https://printers…"** | You're on one of the Pi's own addresses with `"lan": "printing"`. Use the public address, or set `"lan": "full"`. |
 | **Google says the app isn't verified, or refuses the account** | On Google's OAuth consent screen, use **Internal** for Workspace accounts, or add the people as test users while the app is in testing. |

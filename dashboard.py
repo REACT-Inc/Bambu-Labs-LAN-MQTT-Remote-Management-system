@@ -35,11 +35,12 @@ from status_center import StatusCenter
 from printer_setup import Setup
 from Updater.web_updates import BUSY as UPDATE_BUSY
 from Updater.version import VERSION
-from cloudflare_access import Access
+import shutil
+from cloudflare_access import Access, actor, clean as clean_access, probe as probe_access
 
 # Management: Discord and team tools, laptops, the server, settings, problem reports and installing updates. With
 # Cloudflare Access set up (cloudflare_access.py), only its admins' Google accounts may use these.
-MANAGEMENT_ROUTES = ('/api/team', '/api/setup', '/api/permissions', '/api/alerttargets', '/api/report')
+MANAGEMENT_ROUTES = ('/api/team', '/api/setup', '/api/permissions', '/api/alerttargets', '/api/report', '/api/access')
 MANAGEMENT_CHANGES = ('/api/slicer/workers', '/api/update/', '/api/github/')   # anyone may look; changes are management
 MANAGEMENT_PATHS = {'/api/settings', '/api/password', '/api/testnotification', '/api/diagnostics', '/api/errors'}
 
@@ -71,7 +72,9 @@ class Dashboard:
         self.require_login = bool((getattr(core, 'CONFIG', None) or {}).get('require_login', False))
         # Google sign-in through Cloudflare Access at printers.<your domain> ("cloudflare_access"): its admins manage;
         # the Pi's own addresses get its "lan" mode (printing only, by default). Not set up: open as before.
-        self.access = Access((getattr(core, 'CONFIG', None) or {}).get('cloudflare_access'))
+        self.access_file = core.DATA_DIR/'cloudflare_access.json'
+        self.access = Access(self.access_settings())
+        self.tunnel = None   # is the cloudflared service running (None: no systemd to ask)
         self.allowed_hosts = {str(h).lower() for h in (getattr(core, 'CONFIG', None) or {}).get('allowed_hosts') or []}
         self.anonymous = {'csrf': secrets.token_urlsafe(32), 'expires': float('inf')}   # reading only: its token is never sent
         self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
@@ -154,7 +157,112 @@ class Dashboard:
             web.get('/api/alerttargets', self.alert_targets_get), web.post('/api/alerttargets', self.alert_targets_save),
             web.post('/api/alerttargets/test', self.alert_targets_test),
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
+            web.get('/api/access', self.access_get), web.post('/api/access', self.access_save), web.post('/api/access/test', self.access_test),
         ])
+        self.app.on_startup.append(self.access_start);self.app.on_shutdown.append(self.access_stop)
+        self.status.add_source(self.access_status)
+
+    # ---- Google sign-in through Cloudflare Access (cloudflare_access.py) ----
+
+    def access_settings(self):
+        """Saved from Settings (or by cloudflare-tunnel.sh) in DATA_DIR; else "cloudflare_access" in config.json."""
+        try:
+            return json.loads(self.access_file.read_text())
+        except FileNotFoundError:
+            return (getattr(self.core, 'CONFIG', None) or {}).get('cloudflare_access')
+        except ValueError:
+            self.core.log.error('%s is not valid JSON: Google sign-in is off until it is fixed.', self.access_file)
+            return None
+
+    async def access_start(self, app):
+        self.access_task = asyncio.create_task(self.access_watch())
+
+    async def access_stop(self, app):
+        task = getattr(self, 'access_task', None)
+        if task: task.cancel()
+
+    async def access_watch(self):
+        """Every 5 minutes: Cloudflare's keys readable? the tunnel running? Both show in the status icon."""
+        while True:
+            try:
+                if self.access.enabled:
+                    await self.access.warm()
+                    self.tunnel = await self.tunnel_running()
+            except Exception as exc:
+                self.core.log.warning('Checking Google sign-in failed: %s', exc)
+            await asyncio.sleep(300)
+
+    async def tunnel_running(self):
+        if not shutil.which('systemctl'):
+            return None
+        proc = await asyncio.create_subprocess_exec('systemctl', 'is-active', '--quiet', 'cloudflared',
+                                                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        return await proc.wait() == 0
+
+    def access_status(self):
+        if not self.access.enabled:
+            return []
+        items = []
+        if self.access.error:
+            items.append(dict(key='access-keys', title="Google sign-in can't check sign-ins", level='error',
+                              detail=self.access.error + ' Nobody can use https://' + self.access.hostname + ' until it can.'))
+        if self.tunnel is False:
+            items.append(dict(key='access-tunnel', title='Cloudflare Tunnel is not running', level='warn',
+                              detail=f'https://{self.access.hostname} is down. On the Pi: sudo systemctl status cloudflared'))
+        return items
+
+    def access_public(self, request):
+        return dict(settings=self.access.config if self.access.enabled else None, status=self.access.status(), tunnel=self.tunnel,
+                    through_cloudflare=self.access.enabled and self.access.through_cloudflare(request),
+                    identity=request.get('identity'), file=str(self.access_file))
+
+    async def access_get(self, request):
+        return web.json_response(self.access_public(request))
+
+    async def access_test(self, request):
+        """Before saving: can the Pi read the team's keys, and does https://<hostname> ask for a Google sign-in?"""
+        data = await request.json()
+        settings = clean_access(data)
+        trial = Access(settings)
+        try:
+            await trial.key(None)
+        except Exception:
+            pass
+        keys = dict(ok=bool(trial.keys), text=f'{len(trial.keys)} signing keys read from https://{trial.team}.' if trial.keys else
+                    (trial.error or f'https://{trial.team} has no signing keys: check the team domain.'))
+        state, text = await probe_access(trial.team, trial.hostname)
+        return web.json_response(dict(keys=keys, address=dict(ok=state == 'protected', state=state, text=text)))
+
+    async def access_save(self, request):
+        data = await request.json()
+        who = actor(request)
+        if data.get('remove') is True:
+            if request.get('identity') and data.get('confirmed') is not True:
+                return web.json_response({'error': f'https://{self.access.hostname} stops working (and anyone who can reach the Pi can manage): '
+                                          "use the Pi's own address afterwards.", 'confirm': True}, status=409)
+            atomic_json(self.access_file, {})   # (an empty file, so "cloudflare_access" in config.json isn't used either)
+            self.access = Access(None)
+            self.store.event('Settings', 'Google sign-in turned off', f'Cloudflare Access • {who}')
+            return web.json_response(self.access_public(request))
+        settings = clean_access(data)
+        new = Access(settings)
+        # Don't lock out the person saving: say what they would lose, and save only once they've confirmed it.
+        identity = request.get('identity')
+        if identity and new.hostname == self.access.hostname and not new.is_admin(identity['email']):
+            lose = f"{identity['email']} would no longer be an admin, so you couldn't change these settings again from here."
+        elif not identity and new.lan != 'full':
+            lose = (f"This is one of the Pi's own addresses: it would {'only print' if new.lan == 'printing' else 'stop working'}, and management "
+                    f'would be at https://{new.hostname} only. Use Test first, and make sure you can sign in there as an admin.')
+        else:
+            lose = ''
+        if lose and data.get('confirmed') is not True:
+            return web.json_response({'error': lose, 'confirm': True}, status=409)
+        atomic_json(self.access_file, settings)
+        self.access = Access(settings)
+        asyncio.create_task(self.access.warm())
+        admins = ', '.join(settings['admins']) or 'everyone Access lets in'
+        self.store.event('Settings', 'Google sign-in saved', f"https://{settings['hostname']} • admins: {admins} • the Pi's own addresses: {settings['lan']} • {who}"[:1800])
+        return web.json_response(self.access_public(request))
 
     def new_session(self, hours):
         now = time.time()
@@ -290,13 +398,13 @@ class Dashboard:
         reprints=self.failure.reprints
         if action=='available':   # "Mark available": someone looked at that printer (target) and vouches for it
             if type(data.get('on')) is not bool:raise ValueError('Say whether to mark the printer available.')
-            reprints.mark(data.get('target'),data['on'],'web administrator')   # the lists shown update without a camera
+            reprints.mark(data.get('target'),data['on'],actor(request))   # the lists shown update without a camera
             return web.json_response(self.failure.state(name))
         if action=='now':
-            copy=await reprints.reprint(name,'web administrator')
+            copy=await reprints.reprint(name,actor(request))
             return web.json_response({'ok':True,'job':copy['id'],'printer':copy['printer'],'swap':copy['swap']})
         if action=='cancel':
-            reprints.cancel(name,'web administrator')
+            reprints.cancel(name,actor(request))
         elif action=='check':
             job_id,_=reprints.for_printer(name)
             job=self.store.get(job_id) if job_id else self.store.active(name)
@@ -380,7 +488,7 @@ class Dashboard:
     async def ai_training_clear(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
         await asyncio.to_thread(self.failure.training.clear)
-        self.failure.store_event('','Training pictures cleared','web administrator')
+        self.failure.store_event('','Training pictures cleared',actor(request))
         return web.json_response(self.failure.training.summary())
     async def list_objects(self, request):
         name=request.match_info['name']
@@ -396,7 +504,7 @@ class Dashboard:
         name=request.match_info['name']
         if name not in self.core.names():raise ValueError('Unknown printer.')
         data=await request.json()
-        message=self.objects.skip(name,data.get('ids'),data.get('confirmed'),'web administrator')
+        message=self.objects.skip(name,data.get('ids'),data.get('confirmed'),actor(request))
         return web.json_response({'message':message})
 
     async def objects_picture(self, request):
@@ -680,8 +788,8 @@ class Dashboard:
     async def add_job(self,request):
         data=await request.json()
         if data.get('print_now'):
-            return web.json_response(await self.print_now(data,'web administrator'))
-        job=self.add(data,'web administrator')
+            return web.json_response(await self.print_now(data,actor(request)))
+        job=self.add(data,actor(request))
         await self.core.notify(job['printer'],'📋 Job queued',job['label'],self.core.BLUE)
         return web.json_response({'id':job['id']})
 
@@ -712,22 +820,22 @@ class Dashboard:
     async def job_action(self,request):
         data=await request.json();job_id=request.match_info['id'];action=request.match_info['action']
         if action=='start':
-            await self.engine.start(job_id,data.get('confirmed'),'web administrator',data.get('override_error',False))
+            await self.engine.start(job_id,data.get('confirmed'),actor(request),data.get('override_error',False))
         elif action=='resolve':
-            self.engine.resolve(job_id,data.get('outcome'),data.get('confirmed'),'web administrator')
-        elif action=='reprint': self.copy_job(job_id,'web administrator')
+            self.engine.resolve(job_id,data.get('outcome'),data.get('confirmed'),actor(request))
+        elif action=='reprint': self.copy_job(job_id,actor(request))
         elif action=='sendto':
             # Send a finished print to another printer's queue (#57). It still needs the normal start confirmation.
             # A file that's only on the original printer is copied to the Pi first, then uploaded to the new one at start.
             printer,checked=data.get('printer'),data.get('checked')
             job=job_transfer.validate(self.core,self.store,job_id,printer,checked)
             asset=await asyncio.to_thread(job_transfer.fetch,self.core,job,self.uploads) if job_transfer.needs_fetch(self.core,job) else None
-            try:copy=job_transfer.send(self.core,self.store,job_id,printer,data.get('use_ams',False),data.get('mapping',''),checked,'web administrator',asset)
+            try:copy=job_transfer.send(self.core,self.store,job_id,printer,data.get('use_ams',False),data.get('mapping',''),checked,actor(request),asset)
             except Exception:
                 if asset:Path(asset).unlink(missing_ok=True)
                 raise
             return web.json_response({'ok':True,'id':copy['id'],'copied':bool(asset)})
-        else: self.store.edit(job_id,action,'web administrator')
+        else: self.store.edit(job_id,action,actor(request))
         return web.json_response({'ok':True})
 
     async def job_targets(self,request):
@@ -743,12 +851,12 @@ class Dashboard:
         if action=='clearerrors':
             ids=data.get('ids','all')
             if ids!='all' and not (isinstance(ids,list) and all(isinstance(x,str) for x in ids)):raise ValueError('Choose the alerts to clear.')
-            return web.json_response({'ok':True,**await self.alerts.clear(name,ids,data.get('confirmed'),author='web administrator')})
+            return web.json_response({'ok':True,**await self.alerts.clear(name,ids,data.get('confirmed'),author=actor(request))})
         if action in ('nozzle','nozzle_left','nozzle_right','bed','chamber','speed','fan','fanall','move','home','filament','nozzle_size') or action.startswith('fan_'):
-            message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'),author='web administrator')
+            message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'),author=actor(request))
             return web.json_response({'ok':True,'message':message})
         if action=='stop' and data.get('confirmed') is not True: raise ValueError('Confirm stopping the print.')
-        await self.engine.control(name,action,'web administrator')
+        await self.engine.control(name,action,actor(request))
         return web.json_response({'ok':True,'message':'Command submitted; wait for printer telemetry.'})
 
     async def plate_swap(self,request):
@@ -756,7 +864,7 @@ class Dashboard:
         if name not in self.core.names():raise ValueError('Unknown printer.')
         swap=self.engine.plate_swap
         if action=='configure':   # Swapmod on/off
-            return web.json_response(swap.configure(name,data.get('enabled'),'web administrator'))
+            return web.json_response(swap.configure(name,data.get('enabled'),actor(request)))
         if action=='file':        # the swap print file: an upload from /api/upload
             asset=str(data.get('asset',''))
             if not __import__('re').fullmatch('[0-9a-f]{32}',asset): raise ValueError('Upload the swap print file first.')
@@ -765,9 +873,9 @@ class Dashboard:
             plate=int(data.get('plate') or 1);validate_archive(str(path),plate)
             try:label=path.with_suffix('.name').read_text().strip()
             except OSError:label='plate-swap.gcode.3mf'
-            return web.json_response(swap.set_file(name,path,label,plate,'web administrator'))
+            return web.json_response(swap.set_file(name,path,label,plate,actor(request)))
         if action=='now':         # Swap plate now
-            job=await swap.swap_now(self.engine,name,'web administrator')
+            job=await swap.swap_now(self.engine,name,actor(request))
             return web.json_response({'ok':True,'job':job['id'],**swap.state(name)})
         raise ValueError('Unknown Swapmod action.')
 
@@ -830,8 +938,8 @@ class Dashboard:
         changes=[f'/{n}: {core.LEVEL_LABELS[before[n]]} → {core.LEVEL_LABELS[core.command_level(n)]}' for n in sorted(known) if before[n]!=core.command_level(n)]
         if sorted(before_roles)!=sorted(roles):changes.append('allowed role IDs: '+(', '.join(map(str,roles)) or 'none'))
         if changes:
-            self.store.event(None,'Discord permissions changed','; '.join(changes)[:1800]+' • web administrator')
-            core.log.info('Discord permissions changed by web administrator: %s','; '.join(changes))
+            self.store.event(None,'Discord permissions changed','; '.join(changes)[:1800]+' • '+actor(request))
+            core.log.info('Discord permissions changed by %s: %s',actor(request),'; '.join(changes))
         return web.json_response(dict(self.permission_state(),changed=changes))
 
     async def change_password(self,request):
@@ -847,7 +955,7 @@ class Dashboard:
     async def alert_targets_save(self,request):
         data=await request.json()
         targets=self.alert_targets.save(data.get('targets'))
-        self.store.event('Settings','Other alerts saved',f'{len(targets)} target(s) • web administrator')
+        self.store.event('Settings','Other alerts saved',f'{len(targets)} target(s) • {actor(request)}')
         return web.json_response({'targets':targets})
 
     async def alert_targets_test(self,request):

@@ -5,7 +5,7 @@ team's certs endpoint would."""
 import base64,hashlib,json,random,subprocess,tempfile,time,unittest
 from pathlib import Path
 
-from cloudflare_access import SHA256_PREFIX,Access,rsa_verify
+from cloudflare_access import SHA256_PREFIX,Access,actor,clean,probe,rsa_verify
 from queueing import Engine,Store
 from tests.test_slicer import Core
 
@@ -213,6 +213,124 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get('/api/alerttargets')).status,200)
 
 
+class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from aiohttp.test_utils import TestClient,TestServer
+        from dashboard import Dashboard
+        self.tmp=tempfile.TemporaryDirectory();d=Path(self.tmp.name)
+        self.core=Core(d,{'Mini':{'model':'A1 mini'}});self.core.CONFIG={}
+        self.store=Store(d/'db');self.engine=Engine(self.core,self.store);self.dashboard=Dashboard(self.core,self.store,self.engine)
+        self.client=TestClient(TestServer(self.dashboard.app));await self.client.start_server()
+        self.csrf=(await (await self.client.get('/api/state')).json())['csrf']
+    async def asyncTearDown(self):
+        for task in list(self.engine.tasks):task.cancel()
+        await self.client.close();self.store.db.close();self.dashboard.slicer.jobs.db.close();self.tmp.cleanup()
+
+    def keys(self):   # (saving starts reading the real keys in the background: use the test's keys instead)
+        a=self.dashboard.access;a.fetch=Certs('key-1','key-2');a.tried_at=0
+
+    def settings(self,**extra):
+        return {'hostname':HOST,'team_domain':TEAM,'aud':AUD,'admins':'admin@example.org','lan':'printing',**extra}
+
+    async def post(self,path,body,headers=None):
+        r=await self.client.post(path,json=body,headers={'X-PM':'1','X-CSRF':self.csrf,**(headers or {})})
+        return r.status,await r.json()
+
+    async def test_saving_from_the_pis_own_address(self):
+        status,body=await self.post('/api/access',self.settings())
+        self.assertEqual(status,409);self.assertTrue(body['confirm']);self.assertIn('only print',body['error'])   # would lose management here
+        self.assertFalse(self.dashboard.access.enabled)
+        status,body=await self.post('/api/access',self.settings(lan='full'))   # keeps management here: no question
+        self.assertEqual(status,200);self.assertEqual(body['settings']['hostname'],HOST);self.assertTrue(self.dashboard.access.enabled)
+        saved=json.loads((Path(self.tmp.name)/'cloudflare_access.json').read_text())
+        self.assertEqual(saved,{'team_domain':TEAM,'aud':AUD,'hostname':HOST,'admins':['admin@example.org'],'lan':'full'})
+        self.assertIn('Google sign-in saved',[e['title'] for e in self.store.events()])
+        status,body=await self.post('/api/access',{**self.settings(),'confirmed':True})
+        self.assertEqual(status,200);self.assertEqual(self.dashboard.access.lan,'printing')
+        self.assertEqual((await self.client.get('/api/access')).status,403)   # printing only now, applied at once
+        status,body=await self.post('/api/access',self.settings(aud='nope'))
+        self.assertEqual(status,403)
+
+    async def test_saving_through_cloudflare_keeps_you_an_admin(self):
+        await self.post('/api/access',self.settings(lan='full'))
+        self.keys()
+        cf={'Host':HOST,'Cf-Access-Jwt-Assertion':sign()}
+        status,body=await self.post('/api/access',self.settings(admins='someone@example.org'),cf)
+        self.assertEqual(status,409);self.assertIn('admin@example.org would no longer be an admin',body['error'])
+        status,body=await self.post('/api/access',self.settings(admins='admin@example.org\nsomeone@example.org'),cf)
+        self.assertEqual(status,200);self.assertEqual(body['identity']['email'],'admin@example.org')
+        self.keys()
+        self.assertIn('admin@example.org',self.store.events()[0]['detail'])   # Activity says who
+        r=await self.client.post('/api/jobs',json={'printer':'Mini','label':'Part','remote':'part.3mf'},headers={'X-PM':'1','X-CSRF':self.csrf,**{**cf,'Cf-Access-Jwt-Assertion':sign()}})
+        self.assertEqual(r.status,200);self.assertIn('admin@example.org',json.dumps(self.store.events()[:3]))
+        # turning it off from the public address: asked first, since that address stops working
+        status,body=await self.post('/api/access',{'remove':True},{**cf,'Cf-Access-Jwt-Assertion':sign()})
+        self.assertEqual(status,409);self.assertIn('stops working',body['error'])
+        status,body=await self.post('/api/access',{'remove':True,'confirmed':True},{**cf,'Cf-Access-Jwt-Assertion':sign()})
+        self.assertEqual(status,200);self.assertIsNone(body['settings']);self.assertFalse(self.dashboard.access.enabled)
+        self.assertEqual(json.loads((Path(self.tmp.name)/'cloudflare_access.json').read_text()),{})
+
+    async def test_the_saved_file_wins_over_config_json(self):
+        from dashboard import Dashboard
+        self.core.CONFIG={'cloudflare_access':{'team_domain':TEAM,'aud':AUD,'hostname':HOST}}
+        self.assertTrue(Dashboard(self.core,self.store,self.engine).access.enabled)
+        (Path(self.tmp.name)/'cloudflare_access.json').write_text('{}')   # turned off in Settings
+        self.assertFalse(Dashboard(self.core,self.store,self.engine).access.enabled)
+
+    async def test_test_button(self):
+        import cloudflare_access,dashboard
+        async def fake_probe(team,hostname,get=None):return 'protected',f'https://{hostname} asks for a Google sign-in.'
+        async def fake_fetch(self):return {'keys':[jwk('key-1',KEYS['key-1'])]}
+        old=dashboard.probe_access,cloudflare_access.Access.fetch_keys
+        dashboard.probe_access,cloudflare_access.Access.fetch_keys=fake_probe,fake_fetch
+        try:
+            status,body=await self.post('/api/access/test',self.settings())
+        finally:
+            dashboard.probe_access,cloudflare_access.Access.fetch_keys=old
+        self.assertEqual(status,200);self.assertTrue(body['keys']['ok']);self.assertIn('1 signing keys',body['keys']['text'])
+        self.assertEqual(body['address']['state'],'protected')
+
+    async def test_status_icon(self):
+        await self.post('/api/access',self.settings(lan='full'))
+        a=self.dashboard.access
+        async def down():raise OSError('no route to host')
+        a.fetch=down;await a.warm()
+        self.dashboard.tunnel=False
+        keys=[i['key'] for i in self.dashboard.access_status()]
+        self.assertEqual(keys,['access-keys','access-tunnel']);self.assertIn('no route to host',self.dashboard.access_status()[0]['detail'])
+        a.fetch=Certs('key-1');await a.warm();self.dashboard.tunnel=True
+        self.assertEqual(self.dashboard.access_status(),[]);self.assertEqual(a.status()['keys'],1)
+
+
+class SettingsTests(unittest.IsolatedAsyncioTestCase):
+    def test_settings_are_checked(self):
+        good={'hostname':'https://Printers.Example.org/','team_domain':'PrintRoom','aud':AUD.upper(),'admins':'Boss@Example.org\n@staff.example.org, boss@example.org','lan':'full'}
+        self.assertEqual(clean(good),{'hostname':HOST,'team_domain':TEAM,'aud':AUD,'admins':['boss@example.org','@staff.example.org'],'lan':'full'})
+        self.assertEqual(clean({**good,'admins':'','lan':None})['admins'],[])
+        for key,bad in (('hostname','printers'),('hostname','printers .example.org'),('team_domain','printroom.example.com'),
+                        ('aud','abc'),('aud',AUD+'0'),('admins','not an email'),('lan','sometimes')):
+            with self.assertRaises(ValueError,msg=(key,bad)):clean({**good,key:bad})
+        with self.assertRaises(ValueError):clean('nope')
+
+    async def test_is_the_address_behind_access(self):
+        def answer(*result):
+            async def get(url):
+                self.assertEqual(url,f'https://{HOST}/');return result
+            return get
+        login=f'https://{TEAM}/cdn-cgi/access/login/{HOST}?kid=abc'
+        self.assertEqual((await probe(TEAM,HOST,answer(302,login,'')))[0],'protected')
+        self.assertEqual((await probe(TEAM,HOST,answer(302,'https://other.cloudflareaccess.com/cdn-cgi/access/login/x','')))[0],'other-team')
+        self.assertEqual((await probe(TEAM,HOST,answer(200,'','<html>3D Printer Management')))[0],'open')
+        self.assertEqual((await probe(TEAM,HOST,answer(403,'','{"error":"Unknown address"}')))[0],'open')   # it reached the Pi
+        self.assertEqual((await probe(TEAM,HOST,answer(530,'','error code: 1033')))[0],'tunnel')
+        async def down(url):raise OSError('no route')
+        self.assertEqual((await probe(TEAM,HOST,down))[0],'unreachable')
+
+    def test_who_did_it(self):
+        self.assertEqual(actor({'identity':{'email':'boss@example.org','admin':True}}),'boss@example.org')
+        self.assertEqual(actor({'identity':None}),'web administrator');self.assertEqual(actor({}),'web administrator')
+
+
 class PageTests(unittest.TestCase):
     def test_the_page(self):
         page,app=(ROOT/'static/index.html').read_text(),(ROOT/'static/app.js').read_text()
@@ -223,8 +341,16 @@ class PageTests(unittest.TestCase):
     def test_the_setup_script(self):
         script=(ROOT/'cloudflare-tunnel.sh').read_text()
         self.assertEqual(subprocess.run(['bash','-n',str(ROOT/'cloudflare-tunnel.sh')]).returncode,0)
-        for part in ('cloudflared service install "$TOKEN"','https://pkg.cloudflare.com/cloudflare-main.gpg',"config['cloudflare_access']",'--remove'):
+        for part in ('cloudflared service install "$TOKEN"','https://pkg.cloudflare.com/cloudflare-main.gpg','SETTINGS="$DATA/cloudflare_access.json"',
+                     '--remove','--domain) HOST="printers.${2:-}"','from cloudflare_access import clean','asks for a Google sign-in'):
             self.assertIn(part,script)
+
+    def test_the_settings_panel(self):
+        page,app=(ROOT/'static/index.html').read_text(),(ROOT/'static/app.js').read_text()
+        for id in ('accessForm','accessHostname','accessTeam','accessAud','accessAdmins','accessLan','accessTest','accessRemove','accessConfirm','whoami'):
+            self.assertIn(f'id="{id}"',page)
+        self.assertIn("api('access/test',accessData())",app);self.assertIn('err.result?.confirm',app)
+        self.assertIn("throw Object.assign(new Error(result.error||'Request failed'),{result});",app)
 
 
 if __name__=='__main__':

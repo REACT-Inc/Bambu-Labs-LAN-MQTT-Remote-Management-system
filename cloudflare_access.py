@@ -5,7 +5,8 @@ Cloudflare Access application in front of it asks for a Google sign-in before an
 then carries Cloudflare's signed token (the Cf-Access-Jwt-Assertion header, or the CF_Authorization cookie); this
 module checks it: signed by your Cloudflare team's keys (RS256), for your Access application (aud), not expired.
 
-config.json, "cloudflare_access":
+The settings (Settings & help → Google sign-in saves them in DATA_DIR/cloudflare_access.json, as does
+cloudflare-tunnel.sh; "cloudflare_access" in config.json is read when that file doesn't exist):
 - team_domain: your Zero Trust team domain, e.g. "yourteam.cloudflareaccess.com".
 - aud: the Access application's Application Audience (AUD) tag (a list is allowed, for several applications).
 - hostname: the public hostname, e.g. "printers.example.org".
@@ -21,6 +22,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import time
 
 import aiohttp
@@ -29,6 +31,10 @@ LEEWAY = 60                 # seconds of clock difference allowed on exp/nbf
 KEYS_FOR = 3600             # Cloudflare rotates its keys every 6 weeks; look again hourly
 KEYS_RETRY = 60             # an unknown key id looks again at most once a minute
 LAN_MODES = ('printing', 'full', 'off')
+TEAM = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com')
+AUD = re.compile(r'[0-9a-f]{64}')
+HOSTNAME = re.compile(r'(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}')
+ADMIN = re.compile(r'(?:[^@\s]+)?@[a-z0-9.-]+\.[a-z]{2,63}')
 # DigestInfo prefix for SHA-256 in EMSA-PKCS1-v1_5 (RFC 8017, section 9.2)
 SHA256_PREFIX = bytes.fromhex('3031300d060960864801650304020105000420')
 
@@ -36,6 +42,39 @@ SHA256_PREFIX = bytes.fromhex('3031300d060960864801650304020105000420')
 def b64url(text):
     text = text if isinstance(text, bytes) else text.encode()
     return base64.urlsafe_b64decode(text + b'=' * (-len(text) % 4))
+
+
+def actor(request):
+    """Who did it, for Activity: the Google account signed in through Cloudflare Access, else the dashboard."""
+    identity = request.get('identity') if hasattr(request, 'get') else None
+    return str(identity.get('email') or 'web administrator') if identity else 'web administrator'
+
+
+def clean(data):
+    """Settings from the dashboard (or the setup script), checked: (settings, problems)."""
+    if not isinstance(data, dict):
+        raise ValueError('Send the Google sign-in settings.')
+    team = str(data.get('team_domain') or '').strip().lower().removeprefix('https://').rstrip('/')
+    if team and '.' not in team:
+        team += '.cloudflareaccess.com'   # just the team name
+    hostname = str(data.get('hostname') or '').strip().lower().removeprefix('https://').rstrip('/').rstrip('.')
+    aud = data.get('aud') or ''
+    aud = [a.strip().lower() for a in (aud.replace('\n', ',').split(',') if isinstance(aud, str) else aud) if str(a).strip()]
+    admins = data.get('admins') or ''
+    admins = [a.strip().lower() for a in (admins.replace('\n', ',').split(',') if isinstance(admins, str) else admins) if str(a).strip()]
+    lan = str(data.get('lan') or 'printing')
+    if not TEAM.fullmatch(team):
+        raise ValueError('Team domain: your Zero Trust team, like yourteam.cloudflareaccess.com (Zero Trust → Settings → Custom pages).')
+    if not HOSTNAME.fullmatch(hostname):
+        raise ValueError('Address: the full hostname, like printers.example.org.')
+    if not aud or len(aud) > 5 or not all(AUD.fullmatch(a) for a in aud):
+        raise ValueError('Application Audience (AUD) tag: the 64-character code on the Access application\'s Overview page.')
+    if len(admins) > 100 or not all(ADMIN.fullmatch(a) for a in admins):
+        raise ValueError('Admins: Google addresses (you@example.org) or whole domains (@example.org), one per line.')
+    if lan not in LAN_MODES:
+        raise ValueError('The Pi\'s own addresses: printing, full or off.')
+    return dict(team_domain=team, aud=aud[0] if len(aud) == 1 else aud, hostname=hostname,
+                admins=list(dict.fromkeys(admins)), lan=lan)
 
 
 def rsa_verify(n, e, message, signature):
@@ -64,7 +103,9 @@ class Access:
         self.enabled = bool(self.team and self.aud and self.hostname)
         self.fetch, self.clock = fetch or self.fetch_keys, clock
         self.keys, self.keys_at, self.tried_at = {}, 0.0, 0.0
+        self.error = ''   # why Cloudflare's keys couldn't be read last time
         self.lock = asyncio.Lock()
+        self.config = dict(team_domain=self.team, aud=sorted(self.aud), hostname=self.hostname, admins=self.admins, lan=self.lan)
 
     @property
     def issuer(self):
@@ -72,6 +113,9 @@ class Access:
 
     def public(self):
         return dict(enabled=self.enabled, hostname=self.hostname, lan=self.lan, admins=len(self.admins))
+
+    def status(self):
+        return dict(enabled=self.enabled, keys=len(self.keys), keys_at=self.keys_at or None, error=self.error)
 
     # ---- which requests came through Cloudflare ----
 
@@ -109,7 +153,12 @@ class Access:
             stale = now - self.keys_at >= KEYS_FOR
             if (stale or kid not in self.keys) and now - self.tried_at >= KEYS_RETRY:
                 self.tried_at = now
-                data = await self.fetch()
+                try:
+                    data = await self.fetch()
+                except Exception as exc:
+                    self.error = f'Can\'t read Cloudflare\'s keys from {self.issuer}: {exc.__class__.__name__}: {exc}'[:300]
+                    raise
+                self.error = ''
                 self.keys = {k['kid']: (int.from_bytes(b64url(k['n']), 'big'), int.from_bytes(b64url(k['e']), 'big'))
                              for k in data.get('keys', []) if k.get('kty') == 'RSA' and k.get('kid')}
                 self.keys_at = now
@@ -142,6 +191,16 @@ class Access:
             raise ValueError('The Cloudflare Access token isn\'t valid yet (check the Pi\'s clock).')
         return claims
 
+    async def warm(self):
+        """Read Cloudflare's keys ahead of the first sign-in (and notice early when they can't be read)."""
+        if not self.enabled:
+            return
+        try:
+            self.tried_at = 0
+            await self.key(None)
+        except Exception:
+            pass   # (self.error says why; an unknown key id is expected here)
+
     async def identity(self, request):
         """Who is signed in: {'email': ...} from a checked token, or None when the request has none or a bad one."""
         token = self.token(request)
@@ -155,3 +214,28 @@ class Access:
             return None   # Cloudflare's keys couldn't be read: nobody is let in rather than everybody
         email = str(claims.get('email') or claims.get('common_name') or '')
         return {'email': email, 'admin': self.is_admin(claims.get('email'))}
+
+
+async def probe(team, hostname, get=None):
+    """Is https://<hostname> really behind Cloudflare Access? Asked from the Pi, like a visitor without a sign-in.
+    -> (state, text): protected / open (the dashboard answers with no sign-in!) / tunnel / unreachable."""
+    async def fetch(url):
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            async with session.get(url, allow_redirects=False) as response:
+                return response.status, response.headers.get('Location', ''), (await response.text())[:2000]
+    try:
+        status, location, body = await (get or fetch)(f'https://{hostname}/')
+    except Exception as exc:
+        return 'unreachable', f'https://{hostname} doesn\'t answer ({exc.__class__.__name__}): check the domain is on Cloudflare and the tunnel has this public hostname.'
+    if status in (301, 302, 303, 307, 308) and 'cloudflareaccess.com' in location:
+        if f'//{team}/' not in location:
+            return 'other-team', f'https://{hostname} asks for a sign-in, but with another Zero Trust team ({location.split("/")[2]}): check the team domain.'
+        return 'protected', f'https://{hostname} asks for a Google sign-in through Cloudflare Access.'
+    if status in (502, 503, 530) or 'error code: 1033' in body or 'Error 1033' in body:
+        return 'tunnel', f'Cloudflare can\'t reach the Pi (HTTP {status}): the tunnel isn\'t connected, or its public hostname doesn\'t point at http://localhost:8080.'
+    if status >= 500:
+        return 'unreachable', f'https://{hostname} answered HTTP {status}.'
+    # anything else got through without a sign-in (the Pi still refuses its API without Access's token)
+    return 'open', (f'https://{hostname} reaches the Pi WITHOUT a Google sign-in (HTTP {status}): add a Cloudflare Access application '
+                    'for this hostname (step 3 of the guide).')
+

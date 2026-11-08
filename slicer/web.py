@@ -231,7 +231,8 @@ class Slicer:
         return web.json_response(self.jobs.public(job))
 
     def owner(self, request):
-        return str((request.get('session') or {}).get('name') or 'web administrator')[:60]
+        identity = request.get('identity') or {}   # the Google account, through Cloudflare Access
+        return str(identity.get('email') or (request.get('session') or {}).get('name') or 'web administrator')[:60]
 
     def job_id(self, request):
         job_id = request.match_info['id']

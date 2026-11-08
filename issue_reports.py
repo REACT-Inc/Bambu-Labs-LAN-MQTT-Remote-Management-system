@@ -14,6 +14,7 @@ import aiohttp
 from aiohttp import web
 
 import diagnostics
+from cloudflare_access import actor
 
 DEFAULT_REPOSITORY = 'REACT-Inc/Bambu-Labs-LAN-MQTT-Remote-Management-system'
 REPOSITORY = re.compile(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}')
@@ -177,7 +178,7 @@ class IssueReports:
 
     async def send_route(self, request):
         data = await request.json()
-        link = await self.send(data.get('title'), data.get('description'), 'dashboard administrator')
+        link = await self.send(data.get('title'), data.get('description'), actor(request))
         return web.json_response({'url': link})
 
 

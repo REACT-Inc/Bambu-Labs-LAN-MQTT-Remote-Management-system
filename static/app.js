@@ -11,7 +11,7 @@ async function api(path,body,method='POST'){
  if(body!==undefined&&!(body instanceof FormData)){headers['Content-Type']='application/json';payload=JSON.stringify(body);}
  const r=await fetch('/api/'+path,{method,headers,body:payload});
  let result;try{result=await r.json();}catch{throw new Error('The server returned an unexpected response.');}
- if(!r.ok){if(r.status===401)showLogin();throw new Error(result.error||'Request failed');}
+ if(!r.ok){if(r.status===401)showLogin();throw Object.assign(new Error(result.error||'Request failed'),{result});}
  return result;
 }
 // Signing in is off unless "require_login": true in config.json: then there's nothing to sign out of.
@@ -20,7 +20,8 @@ function showAccess(){$('logout').hidden=!state.login;$('passwordSave').textCont
  state.identity?`Signed in with Google as ${state.identity.email} through Cloudflare Access${state.manage?' (dashboard admin)':' (printing only: not a dashboard admin)'}.`:
  state.access.lan==='full'?`This is one of the Pi's own addresses, which can use everything ("lan": "full"). Everyone else signs in with Google at https://${state.access.hostname}.`:
  `This is one of the Pi's own addresses: printing only. Sign in with Google at https://${state.access.hostname} for management.`;
- $('accessSignOut').hidden=!state.identity;}
+ $('accessSignOut').hidden=!state.identity;
+ $('whoami').hidden=!state.identity;if(state.identity)$('whoami').innerHTML=`Signed in as <b>${esc(state.identity.email)}</b>${state.manage?' · admin':''} · <a href="/cdn-cgi/access/logout">Sign out</a>`;}
 // Management (MANAGED tabs and their settings) is for Cloudflare Access admins once it's set up (state.manage).
 const MANAGED=new Set(['team','devices','server','settings']);
 function showManage(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('locked',MANAGED.has(b.dataset.tab)&&!state.manage));}
@@ -472,6 +473,32 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-rest
  try{const r=await api('setup/restart',{});notice(r.message);}catch(err){notice(err.message);b.disabled=false;}});
 $('setupAddPrinter').onclick=()=>{tab('settings');printerForm(null);$('printersPanel').scrollIntoView({behavior:'smooth',block:'start'});$('printerName').focus();};
 const tabWithSetup=tab;tab=function(name){tabWithSetup(name);if(name==='settings')loadSetup();};
+// Google sign-in through Cloudflare Access (cloudflare_access.py): set up, tested and saved here.
+let accessConfirming=null;
+function accessData(){return {hostname:$('accessHostname').value,team_domain:$('accessTeam').value,aud:$('accessAud').value,admins:$('accessAdmins').value,lan:$('accessLan').value};}
+function accessAsk(text,mode){accessConfirming=mode;$('accessConfirmText').textContent=text+' Tick this and press '+(mode==='remove'?'Turn off':'Save')+' again to go ahead.';$('accessConfirm').checked=false;$('accessConfirmRow').hidden=false;}
+function accessDone(){accessConfirming=null;$('accessConfirmRow').hidden=true;$('accessConfirm').checked=false;}
+function renderAccess(r){
+ const st=r.status,set=r.settings;
+ $('accessState').textContent=!set?'Off: anyone who can reach the Pi can use the dashboard, management included.':
+  [`On: https://${set.hostname}`,st.error?'can\'t read Cloudflare\'s keys':st.keys?`${st.keys} signing keys read`:'signing keys not read yet',
+   r.tunnel===true?'tunnel running':r.tunnel===false?'tunnel NOT running':'',r.identity?`you: ${r.identity.email}`:'you: one of the Pi\'s own addresses'].filter(Boolean).join(' · ');
+ $('accessState').classList.toggle('error',!!(set&&(st.error||r.tunnel===false)));
+ if(set){$('accessHostname').value=set.hostname;$('accessTeam').value=set.team_domain;$('accessAud').value=set.aud.join('\n');$('accessAdmins').value=set.admins.join('\n');$('accessLan').value=set.lan;}
+ $('accessRemove').hidden=!set;}
+async function loadAccess(){try{renderAccess(await api('access',undefined,'GET'));}catch(e){$('accessState').textContent=e.message;}}
+$('accessTest').onclick=async()=>{const b=$('accessTest');b.disabled=true;$('accessStatus').textContent='Testing: reading the team\'s keys and opening the address from the Pi…';
+ try{const r=await api('access/test',accessData());$('accessChecks').hidden=false;
+  $('accessChecks').innerHTML=[['Cloudflare team',r.keys],['Address',r.address]].map(([k,c])=>`<li class="${c.ok?'ok':'bad'}"><b>${c.ok?'✓':'✕'} ${k}:</b> ${esc(c.text)}</li>`).join('');
+  $('accessStatus').textContent=r.keys.ok&&r.address.ok?'Both look right: save to turn the Google sign-in on.':'Fix what\'s marked ✕ before saving.';}
+ catch(e){$('accessStatus').textContent=e.message;}finally{b.disabled=false;}};
+$('accessForm').onsubmit=async e=>{e.preventDefault();const confirmed=accessConfirming==='save'&&$('accessConfirm').checked;
+ try{renderAccess(await api('access',{...accessData(),confirmed}));accessDone();$('accessStatus').textContent='Saved.';await refresh();}
+ catch(err){const ask=err.result?.confirm&&!confirmed;if(ask)accessAsk(err.message,'save');$('accessStatus').textContent=ask?'':err.message;}};
+$('accessRemove').onclick=async()=>{const confirmed=accessConfirming==='remove'&&$('accessConfirm').checked;
+ try{renderAccess(await api('access',{remove:true,confirmed}));accessDone();$('accessStatus').textContent='Google sign-in is off.';await refresh();}
+ catch(err){const ask=err.result?.confirm&&!confirmed;if(ask)accessAsk(err.message,'remove');$('accessStatus').textContent=ask?'':err.message;}};
+const tabWithAccess=tab;tab=function(name){tabWithAccess(name);if(name==='settings')loadAccess();};
 // Phones: the bottom tab bar keeps the four main pages; More opens the rest above it (style.css).
 const tabWithNav=tab;tab=function(name){tabWithNav(name);document.body.dataset.tab=name;$('navMore').classList.toggle('active',!!document.querySelector('nav .nav-extra.active'));closeNav();};
 function closeNav(){document.querySelector('nav').classList.remove('open');document.body.classList.remove('nav-open');$('navMore').setAttribute('aria-expanded','false');}
