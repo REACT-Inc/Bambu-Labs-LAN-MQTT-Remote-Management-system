@@ -5,7 +5,8 @@
 #
 #   sudo bash cloudflare-tunnel.sh                       # asks for each value
 #   sudo bash cloudflare-tunnel.sh --token <tunnel token> --domain example.org --team yourteam \
-#        --aud <Application Audience tag> --admin you@example.org [--admin @example.org] [--lan printing|full|off]
+#        --aud <Application Audience tag> --admin you@example.org [--admin @example.org] [--operator @example.org]
+#        [--lan printing|full|view|off]
 #   (--hostname printers.example.org instead of --domain for another name; --tunnel-only to keep the settings)
 #   sudo bash cloudflare-tunnel.sh --remove              # stop the tunnel and turn the Google sign-in off
 set -euo pipefail
@@ -18,7 +19,8 @@ SETTINGS="$DATA/cloudflare_access.json"
 PYTHON=/opt/3d-printer-management/venv/bin/python
 TOKEN='' HOST='' TEAM='' AUD='' LAN='' REMOVE=0 TUNNEL_ONLY=0
 ADMINS=()
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+OPERATORS=()   # who else may print (none: everyone Access lets in); anyone else can only look
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --token) TOKEN="${2:-}"; shift 2 ;;
@@ -27,6 +29,7 @@ while [ $# -gt 0 ]; do
     --team) TEAM="${2:-}"; shift 2 ;;
     --aud) AUD="${2:-}"; shift 2 ;;
     --admin) ADMINS+=("${2:-}"); shift 2 ;;
+    --operator) OPERATORS+=("${2:-}"); shift 2 ;;
     --lan) LAN="${2:-}"; shift 2 ;;
     --tunnel-only) TUNNEL_ONLY=1; shift ;;
     --remove) REMOVE=1; shift ;;
@@ -67,21 +70,23 @@ if [ "$TUNNEL_ONLY" = 0 ]; then
     ask ADMIN_LIST 'Admin Google accounts, separated by spaces (@example.org for a whole domain; empty: everyone Access lets in)'
     read -r -a ADMINS <<< "${ADMIN_LIST:-}"
   fi
-  [ -n "$LAN" ] || ask LAN "What the Pi's own addresses (IP, .local, Tailscale) may use: printing, full or off" printing
+  [ -n "$LAN" ] || ask LAN "What the Pi's own addresses (IP, .local, Tailscale) may use: printing, full, view or off" printing
 fi
 [ -n "$TOKEN" ] || { echo 'A tunnel token is needed.'; exit 1; }
 
 # Check and save the settings first (the same checks as Settings & help -> Google sign-in), so a typo stops here.
 if [ "$TUNNEL_ONLY" = 0 ]; then
   ADMINS_TEXT="$(printf '%s\n' "${ADMINS[@]+"${ADMINS[@]}"}")"
+  OPERATORS_TEXT="$(printf '%s\n' "${OPERATORS[@]+"${OPERATORS[@]}"}")"
   SETTINGS_JSON="$(cd /opt/3d-printer-management 2>/dev/null || cd "$(dirname "$0")"; "$PYTHON" -c '
 import json, sys
 sys.path.insert(0, ".")
 from cloudflare_access import clean
 try:
-    print(json.dumps(clean({"hostname": sys.argv[1], "team_domain": sys.argv[2], "aud": sys.argv[3], "admins": sys.argv[4], "lan": sys.argv[5]})))
+    print(json.dumps(clean({"hostname": sys.argv[1], "team_domain": sys.argv[2], "aud": sys.argv[3], "admins": sys.argv[4], "lan": sys.argv[5],
+                            "operators": sys.argv[6]})))
 except ValueError as exc:
-    sys.exit(str(exc))' "$HOST" "$TEAM" "$AUD" "$ADMINS_TEXT" "$LAN")" || exit 1
+    sys.exit(str(exc))' "$HOST" "$TEAM" "$AUD" "$ADMINS_TEXT" "$LAN" "$OPERATORS_TEXT")" || exit 1
   HOST="$("$PYTHON" -c 'import json,sys;print(json.loads(sys.argv[1])["hostname"])' "$SETTINGS_JSON")"
   TEAM="$("$PYTHON" -c 'import json,sys;print(json.loads(sys.argv[1])["team_domain"])' "$SETTINGS_JSON")"
   [ ${#ADMINS[@]} -gt 0 ] || echo 'No admins given: every Google account your Access policy lets in can use management.'

@@ -12,8 +12,10 @@ cloudflare-tunnel.sh; "cloudflare_access" in config.json is read when that file 
 - hostname: the public hostname, e.g. "printers.example.org".
 - admins: Google accounts that may use management (Discord, team tools, laptops, the server, settings, updates):
   emails, or "@example.org" for a whole domain. Empty: everyone Access lets in.
+- operators: who else may print and control printers (queue, slicer, controls), the same way. Empty: everyone Access
+  lets in. Anyone else may only look (view only).
 - lan: what the dashboard's local addresses (IP, .local, Tailscale) may do without Cloudflare: "printing" (the
-  default: printers, queue, slicer, activity), "full", or "off".
+  default: printers, queue, slicer, activity), "full", "view" (look only), or "off".
 
 See docs/cloudflare-access.md.
 """
@@ -30,7 +32,7 @@ import aiohttp
 LEEWAY = 60                 # seconds of clock difference allowed on exp/nbf
 KEYS_FOR = 3600             # Cloudflare rotates its keys every 6 weeks; look again hourly
 KEYS_RETRY = 60             # an unknown key id looks again at most once a minute
-LAN_MODES = ('printing', 'full', 'off')
+LAN_MODES = ('printing', 'full', 'view', 'off')
 TEAM = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.cloudflareaccess\.com')
 AUD = re.compile(r'[0-9a-f]{64}')
 HOSTNAME = re.compile(r'(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}')
@@ -60,8 +62,10 @@ def clean(data):
     hostname = str(data.get('hostname') or '').strip().lower().removeprefix('https://').rstrip('/').rstrip('.')
     aud = data.get('aud') or ''
     aud = [a.strip().lower() for a in (aud.replace('\n', ',').split(',') if isinstance(aud, str) else aud) if str(a).strip()]
-    admins = data.get('admins') or ''
-    admins = [a.strip().lower() for a in (admins.replace('\n', ',').split(',') if isinstance(admins, str) else admins) if str(a).strip()]
+    def people(value):   # one per line or comma-separated
+        value = value or ''
+        return [a.strip().lower() for a in (value.replace('\n', ',').split(',') if isinstance(value, str) else value) if str(a).strip()]
+    admins, operators = people(data.get('admins')), people(data.get('operators'))
     lan = str(data.get('lan') or 'printing')
     if not TEAM.fullmatch(team):
         raise ValueError('Team domain: your Zero Trust team, like yourteam.cloudflareaccess.com (Zero Trust → Settings → Custom pages).')
@@ -71,10 +75,12 @@ def clean(data):
         raise ValueError('Application Audience (AUD) tag: the 64-character code on the Access application\'s Overview page.')
     if len(admins) > 100 or not all(ADMIN.fullmatch(a) for a in admins):
         raise ValueError('Admins: Google addresses (you@example.org) or whole domains (@example.org), one per line.')
+    if len(operators) > 500 or not all(ADMIN.fullmatch(a) for a in operators):
+        raise ValueError('Who may print: Google addresses (you@example.org) or whole domains (@example.org), one per line.')
     if lan not in LAN_MODES:
-        raise ValueError('The Pi\'s own addresses: printing, full or off.')
+        raise ValueError('The Pi\'s own addresses: printing, full, view or off.')
     return dict(team_domain=team, aud=aud[0] if len(aud) == 1 else aud, hostname=hostname,
-                admins=list(dict.fromkeys(admins)), lan=lan)
+                admins=list(dict.fromkeys(admins)), operators=list(dict.fromkeys(operators)), lan=lan)
 
 
 def rsa_verify(n, e, message, signature):
@@ -99,13 +105,14 @@ class Access:
         self.aud = {str(a).strip() for a in ([aud] if isinstance(aud, str) else aud) if str(a).strip()}
         self.hostname = str(config.get('hostname') or '').strip().lower().rstrip('.')
         self.admins = [str(a).strip().lower() for a in config.get('admins') or [] if str(a).strip()]
+        self.operators = [str(a).strip().lower() for a in config.get('operators') or [] if str(a).strip()]
         self.lan = config.get('lan', 'printing') if config.get('lan', 'printing') in LAN_MODES else 'printing'
         self.enabled = bool(self.team and self.aud and self.hostname)
         self.fetch, self.clock = fetch or self.fetch_keys, clock
         self.keys, self.keys_at, self.tried_at = {}, 0.0, 0.0
         self.error = ''   # why Cloudflare's keys couldn't be read last time
         self.lock = asyncio.Lock()
-        self.config = dict(team_domain=self.team, aud=sorted(self.aud), hostname=self.hostname, admins=self.admins, lan=self.lan)
+        self.config = dict(team_domain=self.team, aud=sorted(self.aud), hostname=self.hostname, admins=self.admins, operators=self.operators, lan=self.lan)
 
     @property
     def issuer(self):
@@ -128,13 +135,20 @@ class Access:
     def token(self, request):
         return request.headers.get('Cf-Access-Jwt-Assertion') or request.cookies.get('CF_Authorization') or ''
 
-    def is_admin(self, email):
+    @staticmethod
+    def listed(email, people):
+        """In the list (an email, or "@domain"); an empty list means everyone."""
         email = str(email or '').lower()
         if not email:
             return False
-        if not self.admins:
-            return True
-        return any(email == a or (a.startswith('@') and email.endswith(a)) for a in self.admins)
+        return not people or any(email == a or (a.startswith('@') and email.endswith(a)) for a in people)
+
+    def is_admin(self, email):
+        return self.listed(email, self.admins)
+
+    def can_print(self, email):
+        """Queue, slice and control printers: admins, and the operators (everyone, with no operators listed)."""
+        return self.is_admin(email) or self.listed(email, self.operators)
 
     # ---- checking Cloudflare's token ----
 
@@ -213,7 +227,7 @@ class Access:
         except (aiohttp.ClientError, OSError, asyncio.TimeoutError, KeyError, TypeError):
             return None   # Cloudflare's keys couldn't be read: nobody is let in rather than everybody
         email = str(claims.get('email') or claims.get('common_name') or '')
-        return {'email': email, 'admin': self.is_admin(claims.get('email'))}
+        return {'email': email, 'admin': self.is_admin(claims.get('email')), 'print': self.can_print(claims.get('email'))}
 
 
 async def probe(team, hostname, get=None):

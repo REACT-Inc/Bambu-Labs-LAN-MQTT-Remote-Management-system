@@ -5,7 +5,10 @@ Open the dashboard at your own address, for example `https://printers.example.or
 - **Cloudflare Tunnel:** `cloudflared` runs on the Pi and connects out to Cloudflare. Cloudflare then serves the dashboard at `printers.<your domain>` over HTTPS.
 - **Cloudflare Access:** before anything reaches the Pi, Access asks for a Google sign-in and checks it against your rules (for example, only these people, or anyone `@example.org`).
 - **The dashboard checks it too:** every request carries Cloudflare's signed token. The dashboard checks the token is signed by your Cloudflare team for your Access application, and reads the Google account from it. Requests without a valid token get nothing.
-- **Admins manage, everyone else prints.** Google accounts listed as admins can use management: Team tools (Discord), Laptops, Server, Settings & help, and adding or changing slicing workers. Everyone else Access lets in can use the printers, the queue, the slicer and the activity feed.
+- **Three levels, by Google account:**
+  - **Admins** can do everything, including management: Team tools (Discord), Laptops, Server, Settings & help, and adding or changing slicing workers.
+  - **Who may print** (operators) can use the printers, the queue, the slicer and Activity. With nobody listed, everyone Access lets in can.
+  - **Everyone else Access lets in can only look:** they can watch the printers, cameras, queue and Activity, but can't queue, slice, control a printer or change anything.
 
 This replaces the dashboard password for management. The password is still used by the [pm-doctor page](doctor.md), and by the dashboard if you turn on `"require_login": true`.
 
@@ -88,8 +91,15 @@ sudo bash cloudflare-tunnel.sh
 Then open `https://printers.example.org`. Cloudflare asks you to sign in with Google, then the dashboard opens.
 - **The sidebar** shows who you're signed in as, with **Sign out**.
 - **Activity** records changes under the Google account that made them, instead of "web administrator".
+- **Recent sign-ins:** at the bottom of **Settings & help → Google sign-in**, admins see which Google accounts used the dashboard. The list shows each account's level, when it was last there and first seen, and its IP address as Cloudflare saw it.
+- **View-only accounts** see a banner saying so, and no **+ Queue a print** button.
+- **When a Google sign-in expires** while the page is open, a **Sign in again** banner appears. Pressing it reloads the page through Google.
 
-**Admins:** each one is a Google address, or `@example.org` for everyone in that domain. With no admins, every account your Access policy allows is an admin.
+**Admins and who may print:** each entry is a Google address, or `@example.org` for everyone in that domain.
+- **With no admins,** every account your Access policy allows is an admin.
+- **With nobody under Who may print,** every account can print.
+- **Example for a school:** Access lets in `@school.org`, Who may print lists `@club.school.org`, and the admins are the two coaches. Then the whole school can watch, the club can print, and the coaches manage.
+- **In the script:** `--operator`, the same as `--admin`.
 
 **Where the settings are saved:** `/var/lib/3d-printer-management/cloudflare_access.json`, by both the script and Settings. You can also put the same settings under `"cloudflare_access"` in `config.json`, which is used only when that file doesn't exist:
 
@@ -113,6 +123,7 @@ The dashboard still answers on the Pi's own addresses, such as `http://192.168.1
 |---|---|
 | `printing` (default) | Use the printers, the queue, the slicer and Activity. Management is only at `https://printers.<your domain>`. |
 | `full` | Everything, management included (as before Cloudflare Access was set up). |
+| `view` | Look only: the printers, cameras, queue and Activity, with no changes. |
 | `off` | Nothing: the dashboard is only at `https://printers.<your domain>`. |
 
 Set it in **Settings & help → Google sign-in**, or with `--lan` when you run the script.
@@ -138,7 +149,7 @@ Set it in **Settings & help → Google sign-in**, or with `--lan` when you run t
 
 | Problem | What to check |
 |---|---|
-| **"Sign in with Google again: reload the page."** | The Access sign-in expired, or the token doesn't match the settings. Check that `aud` is this application's Audience tag and `team_domain` is your team. The Pi must also reach `https://<team>.cloudflareaccess.com` (it downloads Cloudflare's keys from there) and have the right time (`timedatectl`). |
+| **"Your Google sign-in has expired" banner, again right after Sign in again** | The Access sign-in expired, or the token doesn't match the settings. Check that `aud` is this application's Audience tag and `team_domain` is your team. The Pi must also reach `https://<team>.cloudflareaccess.com` (it downloads Cloudflare's keys from there) and have the right time (`timedatectl`). |
 | **Cloudflare shows error 1033 or 502** | The tunnel isn't connected (`sudo systemctl status cloudflared`), or its public hostname doesn't point at `http://localhost:8080`. |
 | **"Your Google account (…) isn't a dashboard admin"** | An admin adds it in **Settings & help → Google sign-in**. |
 | **The status icon says "Google sign-in can't check sign-ins"** | The Pi can't download your team's keys from `https://<team>.cloudflareaccess.com`. Check its internet connection, DNS, and the team domain. Nobody can use the public address until it can. |

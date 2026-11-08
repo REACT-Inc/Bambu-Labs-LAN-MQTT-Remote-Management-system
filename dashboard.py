@@ -75,6 +75,9 @@ class Dashboard:
         self.access_file = core.DATA_DIR/'cloudflare_access.json'
         self.access = Access(self.access_settings())
         self.tunnel = None   # is the cloudflared service running (None: no systemd to ask)
+        self.seen_at = {}
+        store.db.executescript('CREATE TABLE IF NOT EXISTS access_seen (email TEXT PRIMARY KEY, first REAL NOT NULL, last REAL NOT NULL, '
+                               'admin INTEGER NOT NULL, print INTEGER NOT NULL, address TEXT NOT NULL, visits INTEGER NOT NULL DEFAULT 1)')
         self.allowed_hosts = {str(h).lower() for h in (getattr(core, 'CONFIG', None) or {}).get('allowed_hosts') or []}
         self.anonymous = {'csrf': secrets.token_urlsafe(32), 'expires': float('inf')}   # reading only: its token is never sent
         self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
@@ -214,7 +217,7 @@ class Dashboard:
     def access_public(self, request):
         return dict(settings=self.access.config if self.access.enabled else None, status=self.access.status(), tunnel=self.tunnel,
                     through_cloudflare=self.access.enabled and self.access.through_cloudflare(request),
-                    identity=request.get('identity'), file=str(self.access_file))
+                    identity=request.get('identity'), file=str(self.access_file), seen=self.seen())
 
     async def access_get(self, request):
         return web.json_response(self.access_public(request))
@@ -301,6 +304,39 @@ class Dashboard:
         identity = request.get('identity')
         return identity['admin'] if identity else self.access.lan == 'full'
 
+    def can_print(self, request):
+        """Queue, slice and control printers (any change at all): with Cloudflare Access set up, its operators and
+        admins, and the Pi's own addresses unless "lan" is "view". Otherwise everyone."""
+        if self.require_login or not self.access.enabled:
+            return True
+        identity = request.get('identity')
+        return identity['print'] if identity else self.access.lan in ('printing', 'full')
+
+    def view_only_message(self, request):
+        identity = request.get('identity')
+        if identity:
+            return f"{identity['email']} can look but not print or change anything: an admin can add it under Who may print (Settings & help → Google sign-in)."
+        return f'This address can only look: sign in with Google at https://{self.access.hostname} to print.'
+
+    def access_seen(self, request):
+        """Recent sign-ins for Settings & help → Google sign-in: each Google account's first and last visit, and from where."""
+        identity, now = request['identity'], time.time()
+        email = identity['email'][:200]
+        if now - self.seen_at.get(email, 0) < 60:
+            return
+        if len(self.seen_at) > 5000: self.seen_at.clear()
+        self.seen_at[email] = now
+        address = request.headers.get('Cf-Connecting-Ip', '')[:64]
+        with self.store.db:
+            self.store.db.execute('INSERT INTO access_seen(email,first,last,admin,print,address,visits) VALUES(?,?,?,?,?,?,1) '
+                                  'ON CONFLICT(email) DO UPDATE SET last=excluded.last,admin=excluded.admin,print=excluded.print,'
+                                  'address=excluded.address,visits=visits+1', (email, now, now, int(identity['admin']), int(identity['print']), address))
+
+    def seen(self, limit=50):
+        rows = self.store.db.execute('SELECT * FROM access_seen ORDER BY last DESC LIMIT ?', (limit,)).fetchall()
+        return [dict(email=r['email'], first=r['first'], last=r['last'], admin=bool(r['admin']), print=bool(r['print']),
+                     address=r['address'], visits=r['visits']) for r in rows]
+
     def locked_message(self, request):
         identity = request.get('identity')
         if identity:
@@ -332,6 +368,7 @@ class Dashboard:
                         request['identity'] = await self.access.identity(request)
                         if not request['identity']:
                             return web.json_response({'error':'Sign in with Google again: reload the page.','signin':True}, status=403)
+                        self.access_seen(request)
                     elif self.access.lan == 'off':
                         raise web.HTTPForbidden(text=f'This dashboard is open at https://{self.access.hostname} only.')
                 token = request.cookies.get('pm_session','')
@@ -351,6 +388,8 @@ class Dashboard:
                 request['session'] = session
                 if self.management_route(request) and not self.can_manage(request):
                     return web.json_response({'error':self.locked_message(request),'locked':True}, status=403)
+                if request.method != 'GET' and not self.can_print(request):
+                    return web.json_response({'error':self.view_only_message(request),'viewonly':True}, status=403)
                 if request.method != 'GET' and not hmac.compare_digest(request.headers.get('X-CSRF',''),session['csrf']):
                     raise web.HTTPForbidden(text='Invalid session token.')
             if request.method != 'GET' and request.path not in ('/api/login','/api/logout') and not request.path.startswith('/api/update/') and self.updater.busy():
@@ -635,7 +674,7 @@ class Dashboard:
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
             discord=self.core.bot.is_ready(), discord_configured=bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
             setup_needed=self.core.EXAMPLE_MODE and not getattr(self.core,'CONFIG',{}).get('demo'), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
-            settings=settings,csrf=request['session']['csrf'],login=self.require_login,manage=manage,
+            settings=settings,csrf=request['session']['csrf'],login=self.require_login,manage=manage,can_print=self.can_print(request),
             identity=request.get('identity'),access=self.access.public()))
 
     async def desktop(self, request):

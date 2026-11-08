@@ -149,7 +149,7 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         cf={'Host':HOST,'Cf-Ray':'8a1b2c3d4e5f-AMS','Cf-Access-Jwt-Assertion':sign()}
         status,state=await self.state(cf)
         self.assertEqual(status,200);self.assertTrue(state['manage'])
-        self.assertEqual(state['identity'],{'email':'admin@example.org','admin':True});self.assertTrue(state['access']['enabled'])
+        self.assertEqual(state['identity'],{'email':'admin@example.org','admin':True,'print':True});self.assertTrue(state['access']['enabled'])
         self.assertEqual(state['settings']['notification_channel_id'],'123456789012345678')
         self.assertEqual((await self.client.get('/api/alerttargets',headers=cf)).status,200)
         self.assertEqual(await self.queue(state['csrf'],cf),200)
@@ -213,6 +213,51 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get('/api/alerttargets')).status,200)
 
 
+class ViewOnlyTests(unittest.IsolatedAsyncioTestCase):
+    start,state,queue,asyncTearDown=DashboardTests.start,DashboardTests.state,DashboardTests.queue,DashboardTests.asyncTearDown
+
+    async def test_people_not_allowed_to_print_can_only_look(self):
+        await self.start(operators=['@club.example.org'])
+        student={'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='student@club.example.org')}
+        visitor={'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='parent@gmail.com')}
+        admin={'Host':HOST,'Cf-Access-Jwt-Assertion':sign()}
+        status,state=await self.state(student)
+        self.assertTrue(state['can_print']);self.assertFalse(state['manage'])
+        self.assertEqual(await self.queue(state['csrf'],student),200)
+        status,state=await self.state(visitor)
+        self.assertEqual(status,200);self.assertFalse(state['can_print']);self.assertFalse(state['identity']['print'])
+        self.assertEqual(len(state['printers']),1)   # can look
+        r=await self.client.post('/api/jobs',json={'printer':'Mini','label':'Part','remote':'part.3mf'},headers={'X-PM':'1','X-CSRF':state['csrf'],**visitor})
+        self.assertEqual(r.status,403);body=await r.json();self.assertTrue(body['viewonly']);self.assertIn('parent@gmail.com',body['error'])
+        r=await self.client.post('/api/printers/Mini/light',json={'on':True},headers={'X-PM':'1','X-CSRF':state['csrf'],**visitor})
+        self.assertEqual(r.status,403)
+        self.assertTrue((await self.state(admin))[1]['can_print'])   # admins always may
+        self.assertEqual(len(self.store.jobs('Mini')),1)
+
+    async def test_the_pis_own_addresses_can_look_only(self):
+        await self.start(lan='view')
+        status,state=await self.state({'Host':'192.168.1.50'})
+        self.assertEqual(status,200);self.assertFalse(state['can_print'])
+        r=await self.client.post('/api/jobs',json={'printer':'Mini','label':'Part','remote':'part.3mf'},headers={'X-PM':'1','X-CSRF':state['csrf'],'Host':'192.168.1.50'})
+        self.assertEqual(r.status,403);self.assertIn(f'https://{HOST}',(await r.json())['error'])
+
+    async def test_recent_sign_ins(self):
+        await self.start(lan='full')
+        for email,ip in (('admin@example.org','203.0.113.5'),('parent@gmail.com','198.51.100.7'),('admin@example.org','203.0.113.5')):
+            await self.state({'Host':HOST,'Cf-Connecting-Ip':ip,'Cf-Access-Jwt-Assertion':sign(email=email)})
+        seen={p['email']:p for p in self.dashboard.seen()}
+        self.assertEqual(set(seen),{'admin@example.org','parent@gmail.com'})
+        self.assertEqual(seen['admin@example.org']['visits'],1)   # (once a minute at most)
+        self.assertEqual((seen['parent@gmail.com']['address'],seen['parent@gmail.com']['admin']),('198.51.100.7',False))
+        self.dashboard.seen_at.clear()
+        await self.state({'Host':HOST,'Cf-Connecting-Ip':'203.0.113.9','Cf-Access-Jwt-Assertion':sign()})
+        again={p['email']:p for p in self.dashboard.seen()}['admin@example.org']
+        self.assertEqual((again['visits'],again['address']),(2,'203.0.113.9'))
+        body=await (await self.client.get('/api/access',headers={'Host':HOST,'Cf-Access-Jwt-Assertion':sign()})).json()
+        self.assertEqual(body['seen'][0]['email'],'admin@example.org')
+        self.assertEqual((await self.client.get('/api/access',headers={'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='parent@gmail.com')})).status,403)   # admins only
+
+
 class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from aiohttp.test_utils import TestClient,TestServer
@@ -243,7 +288,7 @@ class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
         status,body=await self.post('/api/access',self.settings(lan='full'))   # keeps management here: no question
         self.assertEqual(status,200);self.assertEqual(body['settings']['hostname'],HOST);self.assertTrue(self.dashboard.access.enabled)
         saved=json.loads((Path(self.tmp.name)/'cloudflare_access.json').read_text())
-        self.assertEqual(saved,{'team_domain':TEAM,'aud':AUD,'hostname':HOST,'admins':['admin@example.org'],'lan':'full'})
+        self.assertEqual(saved,{'team_domain':TEAM,'aud':AUD,'hostname':HOST,'admins':['admin@example.org'],'operators':[],'lan':'full'})
         self.assertIn('Google sign-in saved',[e['title'] for e in self.store.events()])
         status,body=await self.post('/api/access',{**self.settings(),'confirmed':True})
         self.assertEqual(status,200);self.assertEqual(self.dashboard.access.lan,'printing')
@@ -305,7 +350,10 @@ class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
 class SettingsTests(unittest.IsolatedAsyncioTestCase):
     def test_settings_are_checked(self):
         good={'hostname':'https://Printers.Example.org/','team_domain':'PrintRoom','aud':AUD.upper(),'admins':'Boss@Example.org\n@staff.example.org, boss@example.org','lan':'full'}
-        self.assertEqual(clean(good),{'hostname':HOST,'team_domain':TEAM,'aud':AUD,'admins':['boss@example.org','@staff.example.org'],'lan':'full'})
+        self.assertEqual(clean(good),{'hostname':HOST,'team_domain':TEAM,'aud':AUD,'admins':['boss@example.org','@staff.example.org'],'operators':[],'lan':'full'})
+        self.assertEqual(clean({**good,'operators':'Student@Example.org\n@club.example.org'})['operators'],['student@example.org','@club.example.org'])
+        with self.assertRaises(ValueError):clean({**good,'operators':'everyone'})
+        self.assertEqual(clean({**good,'lan':'view'})['lan'],'view')
         self.assertEqual(clean({**good,'admins':'','lan':None})['admins'],[])
         for key,bad in (('hostname','printers'),('hostname','printers .example.org'),('team_domain','printroom.example.com'),
                         ('aud','abc'),('aud',AUD+'0'),('admins','not an email'),('lan','sometimes')):
@@ -342,15 +390,18 @@ class PageTests(unittest.TestCase):
         script=(ROOT/'cloudflare-tunnel.sh').read_text()
         self.assertEqual(subprocess.run(['bash','-n',str(ROOT/'cloudflare-tunnel.sh')]).returncode,0)
         for part in ('cloudflared service install "$TOKEN"','https://pkg.cloudflare.com/cloudflare-main.gpg','SETTINGS="$DATA/cloudflare_access.json"',
-                     '--remove','--domain) HOST="printers.${2:-}"','from cloudflare_access import clean','asks for a Google sign-in'):
+                     '--remove','--domain) HOST="printers.${2:-}"','--operator) OPERATORS+=','from cloudflare_access import clean','asks for a Google sign-in'):
             self.assertIn(part,script)
 
     def test_the_settings_panel(self):
         page,app=(ROOT/'static/index.html').read_text(),(ROOT/'static/app.js').read_text()
-        for id in ('accessForm','accessHostname','accessTeam','accessAud','accessAdmins','accessLan','accessTest','accessRemove','accessConfirm','whoami'):
+        for id in ('accessForm','accessHostname','accessTeam','accessAud','accessAdmins','accessOperators','accessLan','accessTest','accessRemove','accessConfirm','whoami',
+                   'accessSeen','signinBanner','signinAgain','viewBanner'):
             self.assertIn(f'id="{id}"',page)
-        self.assertIn("api('access/test',accessData())",app);self.assertIn('err.result?.confirm',app)
-        self.assertIn("throw Object.assign(new Error(result.error||'Request failed'),{result});",app)
+        self.assertIn("api('access/test',accessData())",app);self.assertIn('<option value="view">',page)
+        self.assertIn("if(r.status===403&&result.signin)$('signinBanner').hidden=false;",app);self.assertIn("document.body.classList.toggle('view-only',state.can_print===false)",app)
+        self.assertIn('err.result?.confirm',app)
+        self.assertIn("throw Object.assign(new Error(result.error||'Request failed'),{result});",app.replace("if(r.status===403&&result.signin)$('signinBanner').hidden=false;",''))
 
 
 if __name__=='__main__':
