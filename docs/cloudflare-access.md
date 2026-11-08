@@ -142,7 +142,7 @@ Set it in **Settings & help → Google sign-in**, or with `--lan` when you run t
 
 - **Slicing workers:** they sign in with their own token, not Google, so connect them to the Pi's own address. For example, `--server http://192.168.1.50:8080/` in the worker install command.
   - **If a worker can only reach the public hostname:** add a second **Self-hosted** Access application for `printers.<your domain>` with the paths `api/slicer/worker` and `slicer/worker`, and a policy with action **Bypass** that includes **Everyone**. The worker routes still need the worker's token.
-- **Desktop app (Windows):** connect it to the Pi's own address. Google doesn't allow signing in from inside other apps' windows, so the public address may not work there. With `"lan": "printing"` the app can print. Use a browser at `https://printers.<your domain>` for management.
+- **Desktop app (Windows):** connect it to the Pi's own address, and keep `"lan"` at anything but `off`, or the app can't connect. Google doesn't allow signing in from inside other apps' windows, so the public address may not work there. With `"lan": "printing"` the app can print. Use a browser at `https://printers.<your domain>` for management.
 
 ## Changing or removing it
 

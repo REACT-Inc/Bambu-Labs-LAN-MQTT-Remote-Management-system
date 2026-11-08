@@ -35,8 +35,8 @@ from status_center import StatusCenter
 from printer_setup import Setup
 from Updater.web_updates import BUSY as UPDATE_BUSY
 from Updater.version import VERSION
-import shutil
-from cloudflare_access import Access, actor, clean as clean_access, probe as probe_access
+from cloudflare_access import actor
+from access_web import SignIn
 
 # Management: Discord and team tools, laptops, the server, settings, problem reports and installing updates. With
 # Cloudflare Access set up (cloudflare_access.py), only its admins' Google accounts may use these.
@@ -72,17 +72,7 @@ class Dashboard:
         self.require_login = bool((getattr(core, 'CONFIG', None) or {}).get('require_login', False))
         # Google sign-in through Cloudflare Access at printers.<your domain> ("cloudflare_access"): its admins manage;
         # the Pi's own addresses get its "lan" mode (printing only, by default). Not set up: open as before.
-        self.access_file = core.DATA_DIR/'cloudflare_access.json'
-        self.access = Access(self.access_settings())
-        self.tunnel = None   # is the cloudflared service running (None: no systemd to ask)
-        self.seen_at = {}
-        store.db.executescript('CREATE TABLE IF NOT EXISTS access_seen (email TEXT PRIMARY KEY, first REAL NOT NULL, last REAL NOT NULL, '
-                               'admin INTEGER NOT NULL, print INTEGER NOT NULL, address TEXT NOT NULL, visits INTEGER NOT NULL DEFAULT 1)')
-        columns = {r[1] for r in store.db.execute('PRAGMA table_info(access_seen)')}
-        for column in ('wants TEXT', 'wants_at REAL', 'note TEXT'):   # Ask to print: the level someone asked for
-            if column.split()[0] not in columns:
-                store.db.execute(f'ALTER TABLE access_seen ADD COLUMN {column}')
-        store.db.commit()
+        self.signin = SignIn(core, store, self)   # (access_web.py)
         self.allowed_hosts = {str(h).lower() for h in (getattr(core, 'CONFIG', None) or {}).get('allowed_hosts') or []}
         self.anonymous = {'csrf': secrets.token_urlsafe(32), 'expires': float('inf')}   # reading only: its token is never sent
         self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
@@ -165,144 +155,15 @@ class Dashboard:
             web.get('/api/alerttargets', self.alert_targets_get), web.post('/api/alerttargets', self.alert_targets_save),
             web.post('/api/alerttargets/test', self.alert_targets_test),
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
-            web.get('/api/access', self.access_get), web.post('/api/access', self.access_save), web.post('/api/access/test', self.access_test),
-            web.post('/api/access/person', self.access_person), web.post('/api/ask-access', self.access_request),
         ])
-        self.app.on_startup.append(self.access_start);self.app.on_shutdown.append(self.access_stop)
-        self.status.add_source(self.access_status)
+        self.app.add_routes(self.signin.routes())
+        self.app.on_startup.append(self.signin.start);self.app.on_shutdown.append(self.signin.stop)
+        self.status.add_source(self.signin.status)
 
-    # ---- Google sign-in through Cloudflare Access (cloudflare_access.py) ----
-
-    def access_settings(self):
-        """Saved from Settings (or by cloudflare-tunnel.sh) in DATA_DIR; else "cloudflare_access" in config.json."""
-        try:
-            return json.loads(self.access_file.read_text())
-        except FileNotFoundError:
-            return (getattr(self.core, 'CONFIG', None) or {}).get('cloudflare_access')
-        except ValueError:
-            self.core.log.error('%s is not valid JSON: Google sign-in is off until it is fixed.', self.access_file)
-            return None
-
-    async def access_start(self, app):
-        self.access_task = asyncio.create_task(self.access_watch())
-
-    async def access_stop(self, app):
-        task = getattr(self, 'access_task', None)
-        if task: task.cancel()
-
-    async def access_watch(self):
-        """Every 5 minutes: Cloudflare's keys readable? the tunnel running? Both show in the status icon."""
-        while True:
-            try:
-                if self.access.enabled:
-                    await self.access.warm()
-                    self.tunnel = await self.tunnel_running()
-            except Exception as exc:
-                self.core.log.warning('Checking Google sign-in failed: %s', exc)
-            await asyncio.sleep(300)
-
-    async def tunnel_running(self):
-        if not shutil.which('systemctl'):
-            return None
-        proc = await asyncio.create_subprocess_exec('systemctl', 'is-active', '--quiet', 'cloudflared',
-                                                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-        return await proc.wait() == 0
-
-    def access_status(self):
-        if not self.access.enabled:
-            return []
-        items = []
-        if self.access.error:
-            items.append(dict(key='access-keys', title="Google sign-in can't check sign-ins", level='error',
-                              detail=self.access.error + ' Nobody can use https://' + self.access.hostname + ' until it can.'))
-        if self.tunnel is False:
-            items.append(dict(key='access-tunnel', title='Cloudflare Tunnel is not running', level='warn',
-                              detail=f'https://{self.access.hostname} is down. On the Pi: sudo systemctl status cloudflared'))
-        return items
-
-    def access_public(self, request):
-        return dict(settings=self.access.config if self.access.enabled else None, status=self.access.status(), tunnel=self.tunnel,
-                    through_cloudflare=self.access.enabled and self.access.through_cloudflare(request),
-                    identity=request.get('identity'), file=str(self.access_file), seen=self.seen())
-
-    async def access_get(self, request):
-        return web.json_response(self.access_public(request))
-
-    async def access_test(self, request):
-        """Before saving: can the Pi read the team's keys, and does https://<hostname> ask for a Google sign-in?"""
-        data = await request.json()
-        settings = clean_access(data)
-        trial = Access(settings)
-        try:
-            await trial.key(None)
-        except Exception:
-            pass
-        keys = dict(ok=bool(trial.keys), text=f'{len(trial.keys)} signing keys read from https://{trial.team}.' if trial.keys else
-                    (trial.error or f'https://{trial.team} has no signing keys: check the team domain.'))
-        state, text = await probe_access(trial.team, trial.hostname)
-        return web.json_response(dict(keys=keys, address=dict(ok=state == 'protected', state=state, text=text)))
-
-    async def access_save(self, request):
-        data = await request.json()
-        who = actor(request)
-        if data.get('remove') is True:
-            if request.get('identity') and data.get('confirmed') is not True:
-                return web.json_response({'error': f'https://{self.access.hostname} stops working (and anyone who can reach the Pi can manage): '
-                                          "use the Pi's own address afterwards.", 'confirm': True}, status=409)
-            atomic_json(self.access_file, {})   # (an empty file, so "cloudflare_access" in config.json isn't used either)
-            self.access = Access(None)
-            self.store.event('Settings', 'Google sign-in turned off', f'Cloudflare Access • {who}')
-            return web.json_response(self.access_public(request))
-        if 'people' not in data:   # (the panel's form doesn't edit them: Recent sign-ins does)
-            data = {**data, 'people': self.access.people}
-        settings = clean_access(data)
-        new = Access(settings)
-        # Don't lock out the person saving: say what they would lose, and save only once they've confirmed it.
-        identity = request.get('identity')
-        if identity and new.hostname == self.access.hostname and not new.is_admin(identity['email']):
-            lose = f"{identity['email']} would no longer be an admin, so you couldn't change these settings again from here."
-        elif not identity and new.lan != 'full':
-            lose = (f"This is one of the Pi's own addresses: it would {'only print' if new.lan == 'printing' else 'stop working'}, and management "
-                    f'would be at https://{new.hostname} only. Use Test first, and make sure you can sign in there as an admin.')
-        else:
-            lose = ''
-        if lose and data.get('confirmed') is not True:
-            return web.json_response({'error': lose, 'confirm': True}, status=409)
-        atomic_json(self.access_file, settings)
-        self.access = Access(settings)
-        asyncio.create_task(self.access.warm())
-        admins = ', '.join(settings['admins']) or 'everyone Access lets in'
-        self.store.event('Settings', 'Google sign-in saved', f"https://{settings['hostname']} • admins: {admins} • the Pi's own addresses: {settings['lan']} • {who}"[:1800])
-        return web.json_response(self.access_public(request))
-
-    async def access_person(self, request):
-        """One person's level from Recent sign-ins: admin / print / view / block, or null for "from the lists"."""
-        if not self.access.enabled:
-            raise ValueError('Turn the Google sign-in on first.')
-        data = await request.json()
-        email, level = str(data.get('email') or '').strip().lower(), data.get('level')
-        if data.get('dismiss') is True:   # a request to print, turned down
-            wanted = self.clear_request(email)
-            self.store.event('Settings', f'Google sign-in: request from {email} dismissed', f'asked for: {wanted or "nothing"} • {actor(request)}')
-            return web.json_response(self.access_public(request))
-        identity = request.get('identity')
-        if identity and email == identity['email'].lower():
-            raise ValueError("You can't change your own level: ask another admin.")
-        people = dict(self.access.people)
-        if level is None:
-            people.pop(email, None)
-        else:
-            people[email] = level
-        settings = clean_access({**self.access.config, 'people': people})
-        atomic_json(self.access_file, settings)
-        fetch, keys, keys_at = self.access.fetch, self.access.keys, self.access.keys_at
-        self.access = Access(settings)
-        self.access.fetch, self.access.keys, self.access.keys_at = fetch, keys, keys_at   # (same team: keep its keys)
-        if self.access.level(email) in ('admin', 'print', 'block'):
-            self.clear_request(email)   # answered
-        text = {'admin': 'is an admin', 'print': 'can print', 'view': 'can only look', 'block': 'is blocked', None: 'follows the lists again'}[level]
-        self.store.event('Settings', f'Google sign-in: {email} {text}', f'{email} is now: {self.access.level(email)} • {actor(request)}')
-        return web.json_response(self.access_public(request))
+    @property
+    def access(self):
+        """The Cloudflare Access settings in use (cloudflare_access.Access)."""
+        return self.signin.access
 
     def new_session(self, hours):
         now = time.time()
@@ -325,7 +186,7 @@ class Dashboard:
         except ValueError:
             pass
         return ('.' not in name or name.endswith(('.local', '.lan', '.home.arpa', '.internal', '.ts.net')) or name in self.allowed_hosts
-                or (self.access.enabled and name == self.access.hostname))   # (its requests must carry Access's token)
+                or self.signin.allows_host(name))
 
     def management_route(self, request):
         path = request.path
@@ -334,90 +195,11 @@ class Dashboard:
         return path.startswith(MANAGEMENT_ROUTES) or path in MANAGEMENT_PATHS
 
     def can_manage(self, request):
-        """Signed in with the password ("require_login"); else, with Cloudflare Access set up, one of its admins (or
-        the Pi's own addresses when "lan" is "full"). Without Cloudflare Access, everyone."""
-        if self.require_login or not self.access.enabled:
-            return True
-        identity = request.get('identity')
-        return identity['admin'] if identity else self.access.lan == 'full'
+        """Signed in with the password ("require_login"); else as Cloudflare Access says (access_web.py)."""
+        return self.require_login or self.signin.can_manage(request)
 
     def can_print(self, request):
-        """Queue, slice and control printers (any change at all): with Cloudflare Access set up, its operators and
-        admins, and the Pi's own addresses unless "lan" is "view". Otherwise everyone."""
-        if self.require_login or not self.access.enabled:
-            return True
-        identity = request.get('identity')
-        return identity['print'] if identity else self.access.lan in ('printing', 'full')
-
-    def view_only_message(self, request):
-        identity = request.get('identity')
-        if identity:
-            return f"{identity['email']} can look but not print or change anything: an admin can add it under Who may print (Settings & help → Google sign-in)."
-        return f'This address can only look: sign in with Google at https://{self.access.hostname} to print.'
-
-    def access_seen(self, request):
-        """Recent sign-ins for Settings & help → Google sign-in: each Google account's first and last visit, and from where."""
-        identity, now = request['identity'], time.time()
-        email = identity['email'][:200]
-        if now - self.seen_at.get(email, 0) < 60:
-            return
-        if len(self.seen_at) > 5000: self.seen_at.clear()
-        self.seen_at[email] = now
-        address = request.headers.get('Cf-Connecting-Ip', '')[:64]
-        with self.store.db:
-            self.store.db.execute('INSERT INTO access_seen(email,first,last,admin,print,address,visits) VALUES(?,?,?,?,?,?,1) '
-                                  'ON CONFLICT(email) DO UPDATE SET last=excluded.last,admin=excluded.admin,print=excluded.print,'
-                                  'address=excluded.address,visits=visits+1', (email, now, now, int(identity['admin']), int(identity['print']), address))
-
-    def seen(self, limit=50):
-        """Recent sign-ins, those asking to print first: online in the last 5 minutes, new in the last day."""
-        rows = self.store.db.execute('SELECT * FROM access_seen ORDER BY wants IS NULL, last DESC LIMIT ?', (limit,)).fetchall()
-        now = time.time()
-        return [dict(email=r['email'], first=r['first'], last=r['last'], address=r['address'], visits=r['visits'],
-                     level=self.access.level(r['email']), own=r['email'] in self.access.people,
-                     online=now - r['last'] < 300, new=now - r['first'] < 86400,
-                     wants=r['wants'], wants_at=r['wants_at'], note=r['note'] or '') for r in rows]
-
-    def requests_waiting(self):
-        return self.store.db.execute('SELECT COUNT(*) FROM access_seen WHERE wants IS NOT NULL').fetchone()[0]
-
-    def clear_request(self, email):
-        row = self.store.db.execute('SELECT wants FROM access_seen WHERE email=?', (email,)).fetchone()
-        with self.store.db:
-            self.store.db.execute('UPDATE access_seen SET wants=NULL,wants_at=NULL,note=NULL WHERE email=?', (email,))
-        return row['wants'] if row else None
-
-    async def access_request(self, request):
-        """Ask to print: someone who can only look asks the admins for more (shown first in their Recent sign-ins)."""
-        identity = request.get('identity')
-        if not identity:
-            raise ValueError('Sign in with Google at https://' + self.access.hostname + ' to ask for access.' if self.access.enabled else 'Nothing to ask for.')
-        data = await request.json()
-        wants = data.get('level', 'print')
-        if wants not in ('print', 'admin'):
-            raise ValueError('Ask to print, or to be an admin.')
-        level = self.access.level(identity['email'])
-        if level == wants or (level == 'admin' and wants == 'print'):
-            raise ValueError('You already can.')
-        note = str(data.get('note') or '').strip()[:300]
-        self.seen_at.pop(identity['email'][:200], None);self.access_seen(request)   # (make sure there's a row)
-        with self.store.db:
-            self.store.db.execute('UPDATE access_seen SET wants=?,wants_at=?,note=? WHERE email=?', (wants, time.time(), note, identity['email'][:200]))
-        return web.json_response({'ok': True, 'wants': wants})
-
-    def my_request(self, request):
-        identity = request.get('identity')
-        if not identity:
-            return None
-        row = self.store.db.execute('SELECT wants FROM access_seen WHERE email=?', (identity['email'][:200],)).fetchone()
-        return row['wants'] if row else None
-
-    def locked_message(self, request):
-        identity = request.get('identity')
-        if identity:
-            return (f"Your Google account ({identity['email']}) isn't a dashboard admin: ask for it to be added to "
-                    '"admins" under "cloudflare_access" in config.json.')
-        return f'Management is open at https://{self.access.hostname} (sign in with Google there).'
+        return self.require_login or self.signin.can_print(request)
 
     @web.middleware
     async def guard(self, request, handler):
@@ -431,23 +213,14 @@ class Dashboard:
             if request.method != 'GET':
                 origin = request.headers.get('Origin')
                 # Through Cloudflare Tunnel the Pi sees plain http, but the browser's page is https://<hostname>
-                expected = {f'{request.scheme}://{request.host}'} | ({f'https://{self.access.hostname}'} if self.access.enabled and self.access.through_cloudflare(request) else set())
-                if request.headers.get('X-PM') != '1' or (origin and origin not in expected):
+                if request.headers.get('X-PM') != '1' or (origin and origin not in (f'{request.scheme}://{request.host}', self.signin.public_origin(request))):
                     raise web.HTTPForbidden(text='Invalid request origin.')
             if request.path.startswith('/api/') and request.path != '/api/login':
                 if not self.require_login and not self.host_allowed(request.host):
                     raise web.HTTPForbidden(text=f'Unknown address {request.host[:80]}: add it to "allowed_hosts" in config.json, or set "require_login": true.')
-                if self.access.enabled:
-                    if self.access.through_cloudflare(request):
-                        # Cloudflare Access let this through: its signed token says who (no token, no access)
-                        request['identity'] = await self.access.identity(request)
-                        if not request['identity']:
-                            return web.json_response({'error':'Sign in with Google again: reload the page.','signin':True}, status=403)
-                        self.access_seen(request)
-                        if request['identity'].get('blocked'):   # an admin blocked this account (Recent sign-ins): at once
-                            return web.json_response({'error':f"This Google account ({request['identity']['email']}) has been blocked from this dashboard by an admin.",'blocked':True}, status=403)
-                    elif self.access.lan == 'off':
-                        raise web.HTTPForbidden(text=f'This dashboard is open at https://{self.access.hostname} only.')
+                denied = await self.signin.check(request)   # Google sign-in through Cloudflare Access: who it is
+                if denied:
+                    return denied
                 token = request.cookies.get('pm_session','')
                 session = self.sessions.get(token)
                 if not session or session['expires'] < time.time():
@@ -464,9 +237,9 @@ class Dashboard:
                     session['expires'] = max(session['expires'], time.time()+30*24*3600)
                 request['session'] = session
                 if self.management_route(request) and not self.can_manage(request):
-                    return web.json_response({'error':self.locked_message(request),'locked':True}, status=403)
-                if request.method != 'GET' and not self.can_print(request) and request.path != '/api/ask-access':
-                    return web.json_response({'error':self.view_only_message(request),'viewonly':True}, status=403)
+                    return web.json_response({'error':self.signin.locked_message(request),'locked':True}, status=403)
+                if request.method != 'GET' and not self.can_print(request) and not self.signin.may_ask(request):
+                    return web.json_response({'error':self.signin.view_only_message(request),'viewonly':True}, status=403)
                 if request.method != 'GET' and not hmac.compare_digest(request.headers.get('X-CSRF',''),session['csrf']):
                     raise web.HTTPForbidden(text='Invalid session token.')
             if request.method != 'GET' and request.path not in ('/api/login','/api/logout') and not request.path.startswith('/api/update/') and self.updater.busy():
@@ -752,8 +525,7 @@ class Dashboard:
             discord=self.core.bot.is_ready(), discord_configured=bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
             setup_needed=self.core.EXAMPLE_MODE and not getattr(self.core,'CONFIG',{}).get('demo'), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
             settings=settings,csrf=request['session']['csrf'],login=self.require_login,manage=manage,can_print=self.can_print(request),
-            access_requests=self.requests_waiting() if manage and self.access.enabled else 0,my_request=self.my_request(request) if self.access.enabled else None,
-            identity=request.get('identity'),access=self.access.public()))
+            **self.signin.state(request,manage)))
 
     async def desktop(self, request):
         """What the desktop app's tray icon shows (desktop/): each printer's state and the status icon with its

@@ -26,7 +26,9 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
+import tempfile
 import time
 
 import aiohttp
@@ -48,6 +50,20 @@ SHA256_PREFIX = bytes.fromhex('3031300d060960864801650304020105000420')
 def b64url(text):
     text = text if isinstance(text, bytes) else text.encode()
     return base64.urlsafe_b64decode(text + b'=' * (-len(text) % 4))
+
+
+def atomic_write(path, value):
+    """The settings file, written whole or not at all (only the dashboard's user may read it)."""
+    fd, name = tempfile.mkstemp(dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(value, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 
 def actor(request):
@@ -131,6 +147,7 @@ class Access:
         self.fetch, self.clock = fetch or self.fetch_keys, clock
         self.keys, self.keys_at, self.tried_at = {}, 0.0, 0.0
         self.error = ''   # why Cloudflare's keys couldn't be read last time
+        self.checked = {}   # token -> its claims: the page asks every few seconds with the same token
         self.lock = asyncio.Lock()
         self.config = dict(team_domain=self.team, aud=sorted(self.aud), hostname=self.hostname, admins=self.admins, operators=self.operators, people=self.people, lan=self.lan)
 
@@ -211,6 +228,9 @@ class Access:
 
     async def verify(self, token):
         """The token's claims (email, ...) when Cloudflare Access signed it for this application; else ValueError."""
+        known = self.checked.get(token)
+        if known and known['exp'] >= self.clock() - LEEWAY:
+            return known
         try:
             head, body, signature = token.split('.')
             header, claims = json.loads(b64url(head)), json.loads(b64url(body))
@@ -234,6 +254,9 @@ class Access:
             raise ValueError('The Cloudflare Access sign-in has expired: reload the page.')
         if isinstance(claims.get('nbf'), (int, float)) and claims['nbf'] > now + LEEWAY:
             raise ValueError('The Cloudflare Access token isn\'t valid yet (check the Pi\'s clock).')
+        if len(self.checked) > 500:
+            self.checked.clear()
+        self.checked[token] = claims
         return claims
 
     async def warm(self):

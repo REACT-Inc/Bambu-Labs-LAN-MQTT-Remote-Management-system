@@ -101,6 +101,20 @@ class TokenTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError,msg=name):await a.verify(token)
         self.assertEqual((await a.verify(sign(exp=now-30)))['email'],'admin@example.org')   # (a minute's clock difference is fine)
 
+    async def test_checked_tokens_are_kept_until_they_expire(self):
+        a=access();token=sign()
+        import cloudflare_access as ca
+        real=ca.rsa_verify;calls=[]
+        ca.rsa_verify=lambda *args:calls.append(1) or real(*args)
+        try:
+            for _ in range(5):self.assertEqual((await a.verify(token))['email'],'admin@example.org')
+        finally:
+            ca.rsa_verify=real
+        self.assertEqual(len(calls),1)   # the page asks every few seconds: the signature is checked once
+        a.clock=lambda:time.time()+7200   # an hour after it expired
+        with self.assertRaises(ValueError):await a.verify(token)
+        with self.assertRaises(ValueError):await a.verify(token[:-4]+'AAAA')   # (a different token: checked again, and refused)
+
     async def test_unknown_keys_are_looked_up_again_but_not_too_often(self):
         a=Access({'team_domain':TEAM,'aud':AUD,'hostname':HOST},fetch=Certs('key-1'))
         await a.verify(sign())
@@ -245,13 +259,13 @@ class ViewOnlyTests(unittest.IsolatedAsyncioTestCase):
         await self.start(lan='full')
         for email,ip in (('admin@example.org','203.0.113.5'),('parent@gmail.com','198.51.100.7'),('admin@example.org','203.0.113.5')):
             await self.state({'Host':HOST,'Cf-Connecting-Ip':ip,'Cf-Access-Jwt-Assertion':sign(email=email)})
-        seen={p['email']:p for p in self.dashboard.seen()}
+        seen={p['email']:p for p in self.dashboard.signin.recent()}
         self.assertEqual(set(seen),{'admin@example.org','parent@gmail.com'})
         self.assertEqual(seen['admin@example.org']['visits'],1)   # (once a minute at most)
         self.assertEqual((seen['parent@gmail.com']['address'],seen['parent@gmail.com']['level']),('198.51.100.7','print'))   # (nobody under Who may print: everyone may)
-        self.dashboard.seen_at.clear()
+        self.dashboard.signin.seen_at.clear()
         await self.state({'Host':HOST,'Cf-Connecting-Ip':'203.0.113.9','Cf-Access-Jwt-Assertion':sign()})
-        again={p['email']:p for p in self.dashboard.seen()}['admin@example.org']
+        again={p['email']:p for p in self.dashboard.signin.recent()}['admin@example.org']
         self.assertEqual((again['visits'],again['address']),(2,'203.0.113.9'))
         body=await (await self.client.get('/api/access',headers={'Host':HOST,'Cf-Access-Jwt-Assertion':sign()})).json()
         self.assertEqual(body['seen'][0]['email'],'admin@example.org')
@@ -344,6 +358,24 @@ class AskTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status,400);self.assertIn(f'https://{HOST}',body['error'])
 
 
+class SeenTests(unittest.IsolatedAsyncioTestCase):
+    start,state,queue,asyncTearDown=DashboardTests.start,DashboardTests.state,DashboardTests.queue,DashboardTests.asyncTearDown
+
+    async def test_one_row_per_account_whatever_the_case(self):
+        await self.start(lan='full')
+        await self.state({'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='Parent@Gmail.com')})
+        self.dashboard.signin.seen_at.clear()
+        await self.state({'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='parent@gmail.com')})
+        rows=self.dashboard.signin.recent()
+        self.assertEqual([(r['email'],r['visits']) for r in rows],[('parent@gmail.com',2)])
+
+    async def test_no_email_no_row(self):
+        await self.start(lan='full')
+        status,state=await self.state({'Host':HOST,'Cf-Access-Jwt-Assertion':sign(email='')})   # (a service token has none)
+        self.assertEqual(status,200);self.assertFalse(state['can_print'])
+        self.assertEqual(self.dashboard.signin.recent(),[])
+
+
 class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from aiohttp.test_utils import TestClient,TestServer
@@ -412,12 +444,12 @@ class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
         import cloudflare_access,dashboard
         async def fake_probe(team,hostname,get=None):return 'protected',f'https://{hostname} asks for a Google sign-in.'
         async def fake_fetch(self):return {'keys':[jwk('key-1',KEYS['key-1'])]}
-        old=dashboard.probe_access,cloudflare_access.Access.fetch_keys
-        dashboard.probe_access,cloudflare_access.Access.fetch_keys=fake_probe,fake_fetch
+        old=cloudflare_access.probe,cloudflare_access.Access.fetch_keys
+        cloudflare_access.probe,cloudflare_access.Access.fetch_keys=fake_probe,fake_fetch
         try:
             status,body=await self.post('/api/access/test',self.settings())
         finally:
-            dashboard.probe_access,cloudflare_access.Access.fetch_keys=old
+            cloudflare_access.probe,cloudflare_access.Access.fetch_keys=old
         self.assertEqual(status,200);self.assertTrue(body['keys']['ok']);self.assertIn('1 signing keys',body['keys']['text'])
         self.assertEqual(body['address']['state'],'protected')
 
@@ -426,11 +458,11 @@ class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
         a=self.dashboard.access
         async def down():raise OSError('no route to host')
         a.fetch=down;await a.warm()
-        self.dashboard.tunnel=False
-        keys=[i['key'] for i in self.dashboard.access_status()]
-        self.assertEqual(keys,['access-keys','access-tunnel']);self.assertIn('no route to host',self.dashboard.access_status()[0]['detail'])
-        a.fetch=Certs('key-1');await a.warm();self.dashboard.tunnel=True
-        self.assertEqual(self.dashboard.access_status(),[]);self.assertEqual(a.status()['keys'],1)
+        self.dashboard.signin.tunnel=False
+        keys=[i['key'] for i in self.dashboard.signin.status()]
+        self.assertEqual(keys,['access-keys','access-tunnel']);self.assertIn('no route to host',self.dashboard.signin.status()[0]['detail'])
+        a.fetch=Certs('key-1');await a.warm();self.dashboard.signin.tunnel=True
+        self.assertEqual(self.dashboard.signin.status(),[]);self.assertEqual(a.status()['keys'],1)
 
 
 class SettingsTests(unittest.IsolatedAsyncioTestCase):
