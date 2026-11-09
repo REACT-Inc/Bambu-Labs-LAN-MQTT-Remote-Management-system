@@ -13,6 +13,11 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Bigger Slicer buttons:** the Slicer's tool buttons (Move, Rotate, Scale, …) are bigger to tap.
   - **No sideways scroll from long links:** long addresses in help text wrap instead of pushing the page sideways.
 
+### Fixed
+- **Uploads nobody queued no longer pile up on the Pi.** A file picked in **+ Queue a print** and never queued (up to 256 MB each) stayed on the Pi's SD card for good.
+  - **Now:** they're deleted after a day, checked every 6 hours.
+  - **Kept:** every job's own file stays, so **Reprint** works, and so does the Recent files library. See [Files the Pi already has](docs/print-queue.md#files-the-pi-already-has).
+
 ## 1.9.21-beta.1
 
 Built on 1.9.19-beta.1: management (Discord, team tools, laptops, the server, settings and updates) needs the dashboard password again while printing stays open, and a new phone layout with a tab bar at the bottom.

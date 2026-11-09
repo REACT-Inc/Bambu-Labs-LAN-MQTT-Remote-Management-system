@@ -83,7 +83,11 @@ The Pi keeps the sliced files you upload, so queueing and reprinting the same fi
 
 **How a file is recognised:** by a fingerprint of its size, its first 64 KB and its last 64 KB. Two different files of the same size never match. A sliced `.3mf` is a zip file whose last bytes list every file inside it with a checksum, so a change anywhere in the file is noticed.
 
-**Space:** the Pi keeps up to 5 GB of recent files, dropping the least recently used ones first, plus anything unused for 180 days. A file in the library and the same file in the queue share one copy on the disk.
+**Space:**
+- **Recent files:** the Pi keeps up to 5 GB, dropping the least recently used ones first, plus anything unused for 180 days.
+- **Shared copies:** a file in the library and the same file in the queue share one copy on the disk.
+- **Uploads nobody queued are deleted after a day:** for example, a file picked in **+ Queue a print** when the dialog was then closed. This is checked every 6 hours.
+- **A job's own file stays as long as the job does,** so **Reprint** keeps working.
 
 ## Starting a job
 
