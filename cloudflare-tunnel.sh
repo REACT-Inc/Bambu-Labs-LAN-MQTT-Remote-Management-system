@@ -78,7 +78,9 @@ fi
 if [ "$TUNNEL_ONLY" = 0 ]; then
   ADMINS_TEXT="$(printf '%s\n' "${ADMINS[@]+"${ADMINS[@]}"}")"
   OPERATORS_TEXT="$(printf '%s\n' "${OPERATORS[@]+"${OPERATORS[@]}"}")"
-  SETTINGS_JSON="$(cd /opt/3d-printer-management 2>/dev/null || cd "$(dirname "$0")"; "$PYTHON" -c '
+  # (this release's own cloudflare_access.py when run from its folder: the installed one may be older)
+  CHECKER="$(cd "$(dirname "$0")" && pwd)"; [ -f "$CHECKER/cloudflare_access.py" ] || CHECKER=/opt/3d-printer-management
+  SETTINGS_JSON="$(cd "$CHECKER"; "$PYTHON" -c '
 import json, sys
 sys.path.insert(0, ".")
 from cloudflare_access import clean

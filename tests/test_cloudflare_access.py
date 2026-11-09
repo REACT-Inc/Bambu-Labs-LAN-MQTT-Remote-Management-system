@@ -101,6 +101,22 @@ class TokenTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError,msg=name):await a.verify(token)
         self.assertEqual((await a.verify(sign(exp=now-30)))['email'],'admin@example.org')   # (a minute's clock difference is fine)
 
+    async def test_keys_read_before_still_work_when_cloudflare_cant_be_reached(self):
+        a=access();await a.verify(sign())
+        async def down():raise OSError('network is unreachable')
+        a.fetch=down;a.keys_at-=7200;a.tried_at=0   # stale, and Cloudflare out of reach
+        self.assertEqual((await a.verify(sign(email='other@example.org')))['email'],'other@example.org')   # (a new token: checked with the kept key)
+        self.assertIn('network is unreachable',a.error)   # the status icon says so
+        a.keys={};a.tried_at=0
+        with self.assertRaises(OSError):await a.verify(sign(email='third@example.org'))   # nothing kept: refused
+
+    async def test_a_keys_answer_that_makes_no_sense_is_a_refusal(self):
+        a=access()
+        async def nonsense():return ['not','keys']
+        a.fetch=nonsense
+        identity=await a.identity(type('R',(),{'headers':{'Cf-Access-Jwt-Assertion':sign()},'cookies':{}})())
+        self.assertIsNone(identity);self.assertIn("Can't read Cloudflare's keys",a.error)
+
     async def test_checked_tokens_are_kept_until_they_expire(self):
         a=access();token=sign()
         import cloudflare_access as ca
@@ -432,6 +448,17 @@ class SettingsRouteTests(unittest.IsolatedAsyncioTestCase):
         status,body=await self.post('/api/access',{'remove':True,'confirmed':True},{**cf,'Cf-Access-Jwt-Assertion':sign()})
         self.assertEqual(status,200);self.assertIsNone(body['settings']);self.assertFalse(self.dashboard.access.enabled)
         self.assertEqual(json.loads((Path(self.tmp.name)/'cloudflare_access.json').read_text()),{})
+
+    async def test_changing_the_address_from_the_public_address_asks_first(self):
+        await self.post('/api/access',self.settings(lan='full'))
+        self.keys()
+        cf={'Host':HOST,'Cf-Access-Jwt-Assertion':sign()}
+        status,body=await self.post('/api/access',self.settings(hostname='printers.example.net'),cf)
+        self.assertEqual(status,409);self.assertIn('would stop working',body['error']);self.assertEqual(self.dashboard.access.hostname,HOST)
+        status,body=await self.post('/api/access',{**self.settings(hostname='printers.example.net'),'confirmed':True},cf)
+        self.assertEqual(status,200);self.assertEqual(self.dashboard.access.hostname,'printers.example.net')
+        import stat
+        self.assertEqual(stat.S_IMODE((Path(self.tmp.name)/'cloudflare_access.json').stat().st_mode),0o600)   # only the service may read it
 
     async def test_the_saved_file_wins_over_config_json(self):
         from dashboard import Dashboard

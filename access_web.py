@@ -17,6 +17,7 @@ from aiohttp import web
 
 import cloudflare_access
 from cloudflare_access import Access, actor, clean
+from printer_setup import write
 
 ASK_PATH = '/api/ask-access'   # (not under /api/access, which is management: view-only people may ask)
 
@@ -28,7 +29,7 @@ class SignIn:
         self.access = Access(self.settings())
         self.tunnel = None   # is the cloudflared service running (None: no systemd to ask)
         self.seen_at = {}    # email -> when its Recent sign-ins row was last written (once a minute at most)
-        self.task = None
+        self.task = self.warming = None   # (kept: asyncio holds tasks only weakly)
         db = store.db
         db.executescript('CREATE TABLE IF NOT EXISTS access_seen (email TEXT PRIMARY KEY, first REAL NOT NULL, last REAL NOT NULL, '
                          'admin INTEGER NOT NULL, print INTEGER NOT NULL, address TEXT NOT NULL, visits INTEGER NOT NULL DEFAULT 1)')
@@ -55,12 +56,12 @@ class SignIn:
     def apply(self, settings, keep_keys=False):
         """Save and use new settings at once (no restart). The same team keeps the keys already read."""
         old = self.access
-        cloudflare_access.atomic_write(self.file, settings)
+        write(self.file, settings)
         self.access = Access(settings)
         if keep_keys and old.team == self.access.team:
             self.access.fetch, self.access.keys, self.access.keys_at = old.fetch, old.keys, old.keys_at
         elif self.access.enabled:
-            asyncio.get_running_loop().create_task(self.access.warm())
+            self.warming = asyncio.get_running_loop().create_task(self.access.warm())
 
     # ---- each request ----
 
@@ -244,7 +245,10 @@ class SignIn:
         settings = clean(data)
         new = Access(settings)
         # Don't lock out the person saving: say what they would lose, and save only once they've confirmed it.
-        if identity and new.hostname == self.access.hostname and not new.is_admin(identity['email']):
+        if identity and new.hostname != self.access.hostname:
+            lose = (f'You are using https://{self.access.hostname}: it would stop working once the address is https://{new.hostname}. '
+                    'Make sure the tunnel and the Access application have the new address first.')
+        elif identity and not new.is_admin(identity['email']):
             lose = f"{identity['email']} would no longer be an admin, so you couldn't change these settings again from here."
         elif not identity and new.lan != 'full':
             lose = (f"This is one of the Pi's own addresses: it would {'only print' if new.lan == 'printing' else 'only look' if new.lan == 'view' else 'stop working'}, "

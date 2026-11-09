@@ -26,9 +26,7 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import re
-import tempfile
 import time
 
 import aiohttp
@@ -52,20 +50,6 @@ def b64url(text):
     return base64.urlsafe_b64decode(text + b'=' * (-len(text) % 4))
 
 
-def atomic_write(path, value):
-    """The settings file, written whole or not at all (only the dashboard's user may read it)."""
-    fd, name = tempfile.mkstemp(dir=path.parent)
-    try:
-        with os.fdopen(fd, 'w') as f:
-            json.dump(value, f, indent=2)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(name, path)
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
-
-
 def actor(request):
     """Who did it, for Activity: the Google account signed in through Cloudflare Access, else the dashboard."""
     identity = request.get('identity') if hasattr(request, 'get') else None
@@ -73,7 +57,7 @@ def actor(request):
 
 
 def clean(data):
-    """Settings from the dashboard (or the setup script), checked: (settings, problems)."""
+    """Settings from the dashboard (or the setup script), checked and tidied; ValueError says what's wrong."""
     if not isinstance(data, dict):
         raise ValueError('Send the Google sign-in settings.')
     team = str(data.get('team_domain') or '').strip().lower().removeprefix('https://').rstrip('/')
@@ -215,13 +199,17 @@ class Access:
                 self.tried_at = now
                 try:
                     data = await self.fetch()
+                    keys = {k['kid']: (int.from_bytes(b64url(k['n']), 'big'), int.from_bytes(b64url(k['e']), 'big'))
+                            for k in data['keys'] if k.get('kty') == 'RSA' and k.get('kid')}
                 except Exception as exc:
                     self.error = f'Can\'t read Cloudflare\'s keys from {self.issuer}: {exc.__class__.__name__}: {exc}'[:300]
-                    raise
-                self.error = ''
-                self.keys = {k['kid']: (int.from_bytes(b64url(k['n']), 'big'), int.from_bytes(b64url(k['e']), 'big'))
-                             for k in data.get('keys', []) if k.get('kty') == 'RSA' and k.get('kid')}
-                self.keys_at = now
+                    if kid not in self.keys:
+                        raise
+                    # Cloudflare keeps a key for weeks: one that was read before still checks sign-ins (no lock-out
+                    # because the Pi's internet blinked); the status icon says the keys couldn't be read again.
+                else:
+                    self.error = ''
+                    self.keys, self.keys_at = keys, now
         if kid not in self.keys:
             raise ValueError('Signed with a key this Cloudflare team doesn\'t have.')
         return self.keys[kid]
@@ -278,8 +266,8 @@ class Access:
             claims = await self.verify(token)
         except ValueError:
             return None
-        except (aiohttp.ClientError, OSError, asyncio.TimeoutError, KeyError, TypeError):
-            return None   # Cloudflare's keys couldn't be read: nobody is let in rather than everybody
+        except Exception:
+            return None   # Cloudflare's keys couldn't be read (or made no sense): nobody is let in rather than everybody
         email = str(claims.get('email') or claims.get('common_name') or '')
         level = self.level(claims.get('email'))
         return {'email': email, 'admin': level == 'admin', 'print': level in ('admin', 'print'), 'blocked': level == 'block'}
