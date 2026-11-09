@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.9.21-beta.2
+
+Built on 1.9.21-beta.1: sign in with Google at printers.<your domain> through Cloudflare (it replaces the management password, with admins, who may print and view-only accounts), uploads nobody queued deleted after a day, and easier Settings and Team tools on phones and computers.
 
 ### Changed
 - **Sign in with Google at your own address, through Cloudflare, instead of the management password.** The dashboard can be served at `https://printers.<your domain>` with Cloudflare Tunnel (no open port). Cloudflare Access asks for a Google sign-in first. See [Google sign-in (Cloudflare Access)](docs/cloudflare-access.md).
