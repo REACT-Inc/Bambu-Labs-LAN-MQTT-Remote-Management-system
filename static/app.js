@@ -11,17 +11,29 @@ async function api(path,body,method='POST'){
  if(body!==undefined&&!(body instanceof FormData)){headers['Content-Type']='application/json';payload=JSON.stringify(body);}
  const r=await fetch('/api/'+path,{method,headers,body:payload});
  let result;try{result=await r.json();}catch{throw new Error('The server returned an unexpected response.');}
- if(!r.ok){if(r.status===401)showLogin();if(r.status===403&&result.locked)askUnlock();throw new Error(result.error||'Request failed');}
+ if(!r.ok){if(r.status===401)showLogin();if(r.status===403&&result.signin)$('signinBanner').hidden=false;throw Object.assign(new Error(result.error||'Request failed'),{result});}
  return result;
 }
 // Signing in is off unless "require_login": true in config.json: then there's nothing to sign out of.
 function showAccess(){$('logout').hidden=!state.login;$('passwordSave').textContent=state.login?'Change password & sign out':'Change password';$('accessNote').textContent=state.login?'Everyone using this dashboard password has management access.':
- 'Signing in is turned off: anyone who can open this address can print. Management (Discord, team tools, laptops, the server, settings and updates) asks for this password first, and stays unlocked in that browser for 12 hours. The password is also used by the pm-doctor page. See docs/configuration.md.';}
-// Without signing in, management (MANAGED tabs and their settings) asks for the dashboard password first (state.manage).
+ !state.access.enabled?'Anyone who can open this address can use the dashboard, management included. To sign in with Google at your own address (printers.your-domain), set up Cloudflare Access: see docs/cloudflare-access.md. The password below is used by the pm-doctor page.':
+ state.identity?`Signed in with Google as ${state.identity.email} through Cloudflare Access${state.manage?' (dashboard admin)':' (printing only: not a dashboard admin)'}.`:
+ state.access.lan==='full'?`This is one of the Pi's own addresses, which can use everything ("lan": "full"). Everyone else signs in with Google at https://${state.access.hostname}.`:
+ `This is one of the Pi's own addresses: printing only. Sign in with Google at https://${state.access.hostname} for management.`;
+ $('accessSignOut').hidden=!state.identity;
+ $('whoami').hidden=!state.identity;if(state.identity)$('whoami').innerHTML=`Signed in as <b>${esc(state.identity.email)}</b> · ${state.manage?'admin':state.can_print?'can print':'view only'} · <a href="/cdn-cgi/access/logout">Sign out</a>`;
+ // View only (Cloudflare Access "operators", or "lan": "view"): look, but no queueing or controls.
+ document.body.classList.toggle('view-only',state.can_print===false);$('viewBanner').hidden=state.can_print!==false;
+ if(state.can_print===false)$('viewBanner').innerHTML=state.identity?`<span>View only: ${esc(state.identity.email)} can watch the printers but not print or change anything.</span> `+
+  (state.my_request?'<b>You\'ve asked to print: an admin will see it in Settings.</b>':'<button type="button" id="askPrint" class="primary small-btn">Ask to print</button>'):
+  `View only: this address can watch the printers. Sign in with Google at https://${esc(state.access.hostname)} to print.`;
+ // Admins: requests to print waiting in Settings & help → Google sign-in (a count on the tab, and on More on phones)
+ const waiting=state.access_requests?String(state.access_requests):'';document.querySelector('nav button[data-tab=settings]').dataset.badge=waiting;$('navMore').dataset.badge=waiting;
+ $('signinBanner').hidden=true;}
+// Management (MANAGED tabs and their settings) is for Cloudflare Access admins once it's set up (state.manage).
 const MANAGED=new Set(['team','devices','server','settings']);
-let afterUnlock=null;
-function showManage(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('locked',MANAGED.has(b.dataset.tab)&&!state.manage));$('manageLock').hidden=state.login||!state.manage;}
-function askUnlock(then=null){afterUnlock=then;$('manageError').textContent='';$('managePassword').value='';if(!$('manageDialog').open)$('manageDialog').showModal();$('managePassword').focus();}
+function showManage(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('locked',MANAGED.has(b.dataset.tab)&&!state.manage));}
+function lockedText(){return state.identity?`Management is for dashboard admins: ${state.identity.email} isn't one.`:`Management is open at https://${state.access.hostname}: sign in with Google there.`;}
 function showLogin(){ $('app').hidden=true;$('loginScreen').hidden=false;state=null;settingsLoaded=false; }
 function notice(text){$('notice').textContent=text;$('notice').hidden=false;setTimeout(()=>$('notice').hidden=true,7000);}
 function tab(name){document.querySelectorAll('.tab').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('nav button').forEach(n=>n.classList.toggle('active',n.dataset.tab===name));$('crumb').textContent=name.toUpperCase();$('pageTitle').textContent={overview:'Your print room.',queue:'Make room for the next idea.',activity:'Every update, together.',settings:'Set up your workspace.',team:'Keep the team in sync.',devices:'Your laptops, connected.',server:'The system behind it all.',slicer:'Slice it here, print it there.'}[name];window.dispatchEvent(new CustomEvent('tab',{detail:name}));}
@@ -115,7 +127,7 @@ function renderJobs(){
  $('jobs').innerHTML=jobs.filter(j=>!terminal.has(j.status)).map(row).join('')||'<div class="empty">The queue is clear. Add a print here or use /queueadd in Discord.</div>';
  $('history').innerHTML=jobs.filter(j=>terminal.has(j.status)).sort((a,b)=>b.updated-a.updated).slice(0,30).map(row).join('')||'<p class="muted">Completed and removed jobs will appear here.</p>';
 }
-async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;showAccess();showManage();$('connectionBanner').hidden=true;render();}catch(e){if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
+async function refresh(){if(polling)return;polling=true;try{state=await api('state',undefined,'GET');csrf=state.csrf;$('loginScreen').hidden=true;$('app').hidden=false;showAccess();showManage();$('connectionBanner').hidden=true;render();}catch(e){if(e.result?.signin||e.result?.blocked){$('loginScreen').hidden=true;$('app').hidden=false;$('logout').hidden=true;$('connectionBanner').hidden=!e.result.blocked;$('connectionBanner').textContent=e.message;if(e.result.blocked)$('signinBanner').hidden=true;}else if(!$('app').hidden){$('connectionBanner').textContent='Connection interrupted. Displayed readings may be stale. '+e.message;$('connectionBanner').hidden=false;}}finally{polling=false;}}
 // No confirmation screens in the dashboard: every action runs straight away (the server still checks it is safe,
 // e.g. temperature limits and an idle printer for moves). Discord keeps its confirmations.
 async function confirmAction(title,text,label,callback){notice(title.replace(/\?$/,'')+'…');try{await callback();await refresh();}catch(e){notice(e.message);}}
@@ -348,7 +360,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-acti
  }catch(e){notice(e.message);}});
 $('takeSnapshot').onclick=async()=>{$('takeSnapshot').disabled=true;$('cameraMessage').textContent='Requesting snapshot…';try{const r=await fetch('/api/camera/'+encodeURIComponent(selectedPrinter));if(!r.ok){const data=await r.json();throw new Error(data.error||'Camera unavailable.');}if(cameraUrl)URL.revokeObjectURL(cameraUrl);cameraUrl=URL.createObjectURL(await r.blob());$('cameraImage').src=cameraUrl;$('cameraImage').hidden=false;$('cameraMessage').textContent='Snapshot captured '+new Date().toLocaleTimeString();}catch(e){$('cameraMessage').textContent=e.message;}finally{$('takeSnapshot').disabled=false;}};
 $('settingsForm').onsubmit=async e=>{e.preventDefault();try{await api('settings',{notification_channel_id:$('notificationChannel').value,commands_channel_id:$('commandsChannel').value,admin_user_ids:$('adminIds').value,alert_ping_users:$('alertPingUsers').value});notice('Settings saved.');}catch(e){notice(e.message);}};
-$('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';if(state?.login)showLogin();else{notice('Password changed. Management is locked again in every browser: unlock it with the new password.');await refresh();tab('overview');}}catch(e){notice(e.message);}};
+$('passwordForm').onsubmit=async e=>{e.preventDefault();try{await api('password',{password:$('newPassword').value});$('newPassword').value='';if(state?.login)showLogin();else notice('Password changed.');}catch(e){notice(e.message);}};
 $('testNotification').onclick=async()=>{try{await api('testnotification',{});notice('Test requested. Check Discord and the activity feed.');}catch(e){notice(e.message);}};
 refresh();setInterval(()=>{if(state&&!document.hidden)refresh();},5000);
 let permissionState=null;
@@ -469,6 +481,45 @@ document.addEventListener('click',async e=>{const b=e.target.closest('[data-rest
  try{const r=await api('setup/restart',{});notice(r.message);}catch(err){notice(err.message);b.disabled=false;}});
 $('setupAddPrinter').onclick=()=>{tab('settings');printerForm(null);$('printersPanel').scrollIntoView({behavior:'smooth',block:'start'});$('printerName').focus();};
 const tabWithSetup=tab;tab=function(name){tabWithSetup(name);if(name==='settings')loadSetup();};
+// Google sign-in through Cloudflare Access (cloudflare_access.py): set up, tested and saved here.
+let accessConfirming=null;
+function accessData(){return {hostname:$('accessHostname').value,team_domain:$('accessTeam').value,aud:$('accessAud').value,admins:$('accessAdmins').value,operators:$('accessOperators').value,lan:$('accessLan').value};}
+function accessAsk(text,mode){accessConfirming=mode;$('accessConfirmText').textContent=text+' Tick this and press '+(mode==='remove'?'Turn off':'Save')+' again to go ahead.';$('accessConfirm').checked=false;$('accessConfirmRow').hidden=false;}
+function accessDone(){accessConfirming=null;$('accessConfirmRow').hidden=true;$('accessConfirm').checked=false;}
+function renderAccess(r){
+ const st=r.status,set=r.settings;
+ $('accessState').textContent=!set?'Off: anyone who can reach the Pi can use the dashboard, management included.':
+  [`On: https://${set.hostname}`,st.error?'can\'t read Cloudflare\'s keys':st.keys?`${st.keys} signing keys read`:'signing keys not read yet',
+   r.tunnel===true?'tunnel running':r.tunnel===false?'tunnel NOT running':'',r.identity?`you: ${r.identity.email}`:'you: one of the Pi\'s own addresses'].filter(Boolean).join(' · ');
+ $('accessState').classList.toggle('error',!!(set&&(st.error||r.tunnel===false)));
+ if(set){$('accessHostname').value=set.hostname;$('accessTeam').value=set.team_domain;$('accessAud').value=set.aud.join('\n');$('accessAdmins').value=set.admins.join('\n');$('accessOperators').value=(set.operators||[]).join('\n');$('accessLan').value=set.lan;}
+ $('accessRemove').hidden=!set;
+ $('accessSeenBlock').hidden=!(set&&r.seen&&r.seen.length);
+ const me=(r.identity?.email||'').toLowerCase(),levels={admin:'Admin',print:'Can print',view:'View only',block:'Blocked'};
+ // Each person's level, changed right here: their own level wins over the lists above ("From the lists" goes back).
+ $('accessSeen').innerHTML=(r.seen||[]).map(p=>`<li class="${p.level==='block'?'blocked':''}${p.wants?' asking':''}"><div>${p.online?'<span class="online-dot" title="Online now"></span>':''}<b>${esc(p.email)}</b>${p.new?' <span class="tag">new</span>':''} <span class="muted">${p.online?'online now':esc(timeAgo(p.last))}${p.address?' · from '+esc(p.address):''} · first ${esc(new Date(p.first*1000).toLocaleDateString())}</span>${p.wants?`<p class="ask">Asked ${esc(timeAgo(p.wants_at))} ${p.wants==='admin'?'to be an admin':'to print'}${p.note?': “'+esc(p.note)+'”':''} <button type="button" class="primary small-btn" data-allow="${esc(p.email)}" data-level="${esc(p.wants)}">Allow</button> <button type="button" class="small-btn" data-dismiss="${esc(p.email)}">Dismiss</button></p>`:''}</div>
+  <select data-person="${esc(p.email)}" aria-label="Level for ${esc(p.email)}"${p.email===me?' disabled title="Another admin can change your level"':''}>${p.own?'':`<option value="" selected>From the lists: ${levels[p.level]}</option>`}${Object.entries(levels).map(([k,v])=>`<option value="${k}"${p.own&&p.level===k?' selected':''}>${v}</option>`).join('')}${p.own?'<option value="">From the lists</option>':''}</select></li>`).join('');}
+$('accessSeen').addEventListener('click',async e=>{const b=e.target.closest('[data-allow],[data-dismiss]');if(!b)return;b.disabled=true;
+ try{renderAccess(await api('access/person',b.dataset.allow?{email:b.dataset.allow,level:b.dataset.level}:{email:b.dataset.dismiss,dismiss:true}));$('accessStatus').textContent=b.dataset.allow?`${b.dataset.allow} ${b.dataset.level==='admin'?'is an admin':'can print'} now.`:'Dismissed.';refresh();}
+ catch(err){$('accessStatus').textContent=err.message;b.disabled=false;}});
+$('viewBanner').addEventListener('click',async e=>{if(!e.target.closest('#askPrint'))return;e.target.disabled=true;
+ try{await api('ask-access',{level:'print'});notice('Asked: an admin will see it in Settings & help → Google sign-in.');await refresh();}catch(err){notice(err.message);e.target.disabled=false;}});
+$('accessSeen').addEventListener('change',async e=>{const sel=e.target.closest('[data-person]');if(!sel)return;sel.disabled=true;
+ try{renderAccess(await api('access/person',{email:sel.dataset.person,level:sel.value||null}));$('accessStatus').textContent=`${sel.dataset.person}: saved.`;}
+ catch(err){$('accessStatus').textContent=err.message;loadAccess();}});
+async function loadAccess(){try{renderAccess(await api('access',undefined,'GET'));}catch(e){$('accessState').textContent=e.message;}}
+$('accessTest').onclick=async()=>{const b=$('accessTest');b.disabled=true;$('accessStatus').textContent='Testing: reading the team\'s keys and opening the address from the Pi…';
+ try{const r=await api('access/test',accessData());$('accessChecks').hidden=false;
+  $('accessChecks').innerHTML=[['Cloudflare team',r.keys],['Address',r.address]].map(([k,c])=>`<li class="${c.ok?'ok':'bad'}"><b>${c.ok?'✓':'✕'} ${k}:</b> ${esc(c.text)}</li>`).join('');
+  $('accessStatus').textContent=r.keys.ok&&r.address.ok?'Both look right: save to turn the Google sign-in on.':'Fix what\'s marked ✕ before saving.';}
+ catch(e){$('accessStatus').textContent=e.message;}finally{b.disabled=false;}};
+$('accessForm').onsubmit=async e=>{e.preventDefault();const confirmed=accessConfirming==='save'&&$('accessConfirm').checked;
+ try{renderAccess(await api('access',{...accessData(),confirmed}));accessDone();$('accessStatus').textContent='Saved.';await refresh();}
+ catch(err){const ask=err.result?.confirm&&!confirmed;if(ask)accessAsk(err.message,'save');$('accessStatus').textContent=ask?'':err.message;}};
+$('accessRemove').onclick=async()=>{const confirmed=accessConfirming==='remove'&&$('accessConfirm').checked;
+ try{renderAccess(await api('access',{remove:true,confirmed}));accessDone();$('accessStatus').textContent='Google sign-in is off.';await refresh();}
+ catch(err){const ask=err.result?.confirm&&!confirmed;if(ask)accessAsk(err.message,'remove');$('accessStatus').textContent=ask?'':err.message;}};
+const tabWithAccess=tab;tab=function(name){tabWithAccess(name);if(name==='settings')loadAccess();};
 // Phones: the bottom tab bar keeps the four main pages; More opens the rest above it (style.css).
 const tabWithNav=tab;tab=function(name){tabWithNav(name);document.body.dataset.tab=name;$('navMore').classList.toggle('active',!!document.querySelector('nav .nav-extra.active'));closeNav();};
 function closeNav(){document.querySelector('nav').classList.remove('open');document.body.classList.remove('nav-open');$('navMore').setAttribute('aria-expanded','false');}
@@ -476,11 +527,8 @@ $('navMore').onclick=e=>{e.stopPropagation();const open=document.querySelector('
 document.addEventListener('click',e=>{if(!e.target.closest('nav'))closeNav();});
 document.body.dataset.tab='overview';
 
-const tabUnlocked=tab;tab=function(name){if(MANAGED.has(name)&&state&&!state.manage){askUnlock(()=>tabUnlocked(name));return;}tabUnlocked(name);};
-$('manageForm').onsubmit=async e=>{e.preventDefault();
- try{await api('manage/unlock',{password:$('managePassword').value});$('managePassword').value='';settingsLoaded=false;closeDialog($('manageDialog'));await refresh();const then=afterUnlock;afterUnlock=null;if(then)then();else notice('Management unlocked for 12 hours in this browser.');}
- catch(err){$('manageError').textContent=err.message;}};
-$('manageLock').onclick=async()=>{try{await api('manage/lock',{});await refresh();if(MANAGED.has(document.querySelector('nav button.active')?.dataset.tab))tab('overview');notice('Management locked.');}catch(err){notice(err.message);}};
+const tabUnlocked=tab;tab=function(name){if(MANAGED.has(name)&&state&&!state.manage){notice(lockedText());return;}tabUnlocked(name);};
+$('signinAgain').onclick=()=>location.reload();   // Cloudflare Access sends the page through Google again
 // Settings is long (on a phone especially): a row of its sections at the top, each jumping to its panel.
 function buildSettingsJump(){const box=$('settingsJump');if(box.childElementCount)return;
  box.innerHTML=[...document.querySelectorAll('#settings .panel')].filter(p=>p.querySelector(':scope>h2')).map((p,i)=>{if(!p.id)p.id='settingsPanel'+i;return `<button type="button" data-jump="${esc(p.id)}">${esc(p.querySelector(':scope>h2').textContent)}</button>`;}).join('');}

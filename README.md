@@ -51,6 +51,7 @@ The guides below are in the `docs/` folder of the [GitHub repository](https://gi
 | Guide | Covers |
 |---|---|
 | [Installation](docs/installation.md) | Requirements, installing, network access, first login, demo mode, migrating from the old bot, uninstalling |
+| [Google sign-in (Cloudflare Access)](docs/cloudflare-access.md) | The dashboard at `printers.<your domain>` behind a Google sign-in: Cloudflare Tunnel, Access, admins, the Pi's own addresses |
 | [Configuration](docs/configuration.md) | Every `config.json` setting, printer entries, files and folders, service commands, password reset |
 | [Web dashboard](docs/dashboard.md) | Each tab and what it does |
 | [Desktop app](docs/desktop-app.md) | The Windows app for laptops: download, connecting, the tray icon, notifications, Start with Windows |

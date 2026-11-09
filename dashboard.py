@@ -35,11 +35,12 @@ from status_center import StatusCenter
 from printer_setup import Setup
 from Updater.web_updates import BUSY as UPDATE_BUSY
 from Updater.version import VERSION
+from cloudflare_access import actor
+from access_web import SignIn
 
-# Management: Discord and team tools, laptops, the server, settings, problem reports and installing updates. Without
-# signing in ("require_login"), these ask for the dashboard password once per browser, for MANAGE_HOURS.
-MANAGE_HOURS = 12
-MANAGEMENT_ROUTES = ('/api/team', '/api/setup', '/api/permissions', '/api/alerttargets', '/api/report')
+# Management: Discord and team tools, laptops, the server, settings, problem reports and installing updates. With
+# Cloudflare Access set up (cloudflare_access.py), only its admins' Google accounts may use these.
+MANAGEMENT_ROUTES = ('/api/team', '/api/setup', '/api/permissions', '/api/alerttargets', '/api/report', '/api/access')
 MANAGEMENT_CHANGES = ('/api/slicer/workers', '/api/update/', '/api/github/')   # anyone may look; changes are management
 MANAGEMENT_PATHS = {'/api/settings', '/api/password', '/api/testnotification', '/api/diagnostics', '/api/errors'}
 
@@ -69,9 +70,9 @@ class Dashboard:
         # Signing in is off unless "require_login": true in config.json: anyone who can reach the dashboard can use it.
         # The page still gets a session with a CSRF token, so other websites can't send commands through a browser.
         self.require_login = bool((getattr(core, 'CONFIG', None) or {}).get('require_login', False))
-        # Without signing in, printing stays open but management (Discord, team tools, laptops, the server, settings and
-        # updates) asks for the dashboard password first: unlocked per browser for MANAGE_HOURS ("protect_management").
-        self.protect_management = bool((getattr(core, 'CONFIG', None) or {}).get('protect_management', True))
+        # Google sign-in through Cloudflare Access at printers.<your domain> ("cloudflare_access"): its admins manage;
+        # the Pi's own addresses get its "lan" mode (printing only, by default). Not set up: open as before.
+        self.signin = SignIn(core, store, self)   # (access_web.py)
         self.allowed_hosts = {str(h).lower() for h in (getattr(core, 'CONFIG', None) or {}).get('allowed_hosts') or []}
         self.anonymous = {'csrf': secrets.token_urlsafe(32), 'expires': float('inf')}   # reading only: its token is never sent
         self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
@@ -139,7 +140,6 @@ class Dashboard:
             web.get('/', self.index), web.get('/assets/{name}', self.asset),
             web.get('/health', self.health), web.get('/api/files/{name}', self.files),
             web.post('/api/login', self.login), web.post('/api/logout', self.logout),
-            web.post('/api/manage/unlock', self.manage_unlock), web.post('/api/manage/lock', self.manage_lock),
             web.get('/api/state', self.state), web.get('/api/desktop', self.desktop), web.post('/api/upload', self.upload),
             web.post('/api/jobs', self.add_job), web.post('/api/jobs/{id}/{action}', self.job_action),
             web.get('/api/jobs/{id}/targets', self.job_targets),
@@ -157,6 +157,14 @@ class Dashboard:
             web.post('/api/alerttargets/test', self.alert_targets_test),
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
         ])
+        self.app.add_routes(self.signin.routes())
+        self.app.on_startup.append(self.signin.start);self.app.on_shutdown.append(self.signin.stop)
+        self.status.add_source(self.signin.status)
+
+    @property
+    def access(self):
+        """The Cloudflare Access settings in use (cloudflare_access.Access)."""
+        return self.signin.access
 
     # ---- uploads nobody queued (file_cache.FileCache.tidy) ----
 
@@ -200,7 +208,8 @@ class Dashboard:
             return True
         except ValueError:
             pass
-        return '.' not in name or name.endswith(('.local', '.lan', '.home.arpa', '.internal', '.ts.net')) or name in self.allowed_hosts
+        return ('.' not in name or name.endswith(('.local', '.lan', '.home.arpa', '.internal', '.ts.net')) or name in self.allowed_hosts
+                or self.signin.allows_host(name))
 
     def management_route(self, request):
         path = request.path
@@ -208,9 +217,12 @@ class Dashboard:
             return request.method != 'GET'
         return path.startswith(MANAGEMENT_ROUTES) or path in MANAGEMENT_PATHS
 
-    def can_manage(self, session):
-        """Signed in with the password ("require_login"), or this browser unlocked management with it."""
-        return self.require_login or not self.protect_management or session.get('manage_until', 0) > time.time()
+    def can_manage(self, request):
+        """Signed in with the password ("require_login"); else as Cloudflare Access says (access_web.py)."""
+        return self.require_login or self.signin.can_manage(request)
+
+    def can_print(self, request):
+        return self.require_login or self.signin.can_print(request)
 
     @web.middleware
     async def guard(self, request, handler):
@@ -223,11 +235,15 @@ class Dashboard:
                 return response
             if request.method != 'GET':
                 origin = request.headers.get('Origin')
-                if request.headers.get('X-PM') != '1' or (origin and origin != f'{request.scheme}://{request.host}'):
+                # Through Cloudflare Tunnel the Pi sees plain http, but the browser's page is https://<hostname>
+                if request.headers.get('X-PM') != '1' or (origin and origin not in (f'{request.scheme}://{request.host}', self.signin.public_origin(request))):
                     raise web.HTTPForbidden(text='Invalid request origin.')
             if request.path.startswith('/api/') and request.path != '/api/login':
                 if not self.require_login and not self.host_allowed(request.host):
                     raise web.HTTPForbidden(text=f'Unknown address {request.host[:80]}: add it to "allowed_hosts" in config.json, or set "require_login": true.')
+                denied = await self.signin.check(request)   # Google sign-in through Cloudflare Access: who it is
+                if denied:
+                    return denied
                 token = request.cookies.get('pm_session','')
                 session = self.sessions.get(token)
                 if not session or session['expires'] < time.time():
@@ -243,8 +259,10 @@ class Dashboard:
                 elif not self.require_login:
                     session['expires'] = max(session['expires'], time.time()+30*24*3600)
                 request['session'] = session
-                if self.management_route(request) and not self.can_manage(session):
-                    return web.json_response({'error':'Management is locked: unlock it with the dashboard password.','locked':True}, status=403)
+                if self.management_route(request) and not self.can_manage(request):
+                    return web.json_response({'error':self.signin.locked_message(request),'locked':True}, status=403)
+                if request.method != 'GET' and not self.can_print(request) and not self.signin.may_ask(request):
+                    return web.json_response({'error':self.signin.view_only_message(request),'viewonly':True}, status=403)
                 if request.method != 'GET' and not hmac.compare_digest(request.headers.get('X-CSRF',''),session['csrf']):
                     raise web.HTTPForbidden(text='Invalid session token.')
             if request.method != 'GET' and request.path not in ('/api/login','/api/logout') and not request.path.startswith('/api/update/') and self.updater.busy():
@@ -292,13 +310,13 @@ class Dashboard:
         reprints=self.failure.reprints
         if action=='available':   # "Mark available": someone looked at that printer (target) and vouches for it
             if type(data.get('on')) is not bool:raise ValueError('Say whether to mark the printer available.')
-            reprints.mark(data.get('target'),data['on'],'web administrator')   # the lists shown update without a camera
+            reprints.mark(data.get('target'),data['on'],actor(request))   # the lists shown update without a camera
             return web.json_response(self.failure.state(name))
         if action=='now':
-            copy=await reprints.reprint(name,'web administrator')
+            copy=await reprints.reprint(name,actor(request))
             return web.json_response({'ok':True,'job':copy['id'],'printer':copy['printer'],'swap':copy['swap']})
         if action=='cancel':
-            reprints.cancel(name,'web administrator')
+            reprints.cancel(name,actor(request))
         elif action=='check':
             job_id,_=reprints.for_printer(name)
             job=self.store.get(job_id) if job_id else self.store.active(name)
@@ -382,7 +400,7 @@ class Dashboard:
     async def ai_training_clear(self, request):
         if not self.failure.enabled:raise ValueError('AI failure detection is not enabled in config.json.')
         await asyncio.to_thread(self.failure.training.clear)
-        self.failure.store_event('','Training pictures cleared','web administrator')
+        self.failure.store_event('','Training pictures cleared',actor(request))
         return web.json_response(self.failure.training.summary())
     async def list_objects(self, request):
         name=request.match_info['name']
@@ -398,7 +416,7 @@ class Dashboard:
         name=request.match_info['name']
         if name not in self.core.names():raise ValueError('Unknown printer.')
         data=await request.json()
-        message=self.objects.skip(name,data.get('ids'),data.get('confirmed'),'web administrator')
+        message=self.objects.skip(name,data.get('ids'),data.get('confirmed'),actor(request))
         return web.json_response({'message':message})
 
     async def objects_picture(self, request):
@@ -432,7 +450,7 @@ class Dashboard:
         if name not in ('app.js','team.js','controls.js','updates.js','style.css','slicer.js','three.module.min.js','OrbitControls.js','TransformControls.js','STLLoader.js'): raise web.HTTPNotFound()
         return web.FileResponse(Path(__file__).parent/'static'/name)
 
-    async def check_password(self, request, status=web.HTTPUnauthorized):
+    async def check_password(self, request):
         """The dashboard password from the request body; eight wrong tries from one address wait five minutes."""
         peer=request.remote or '?'
         recent=[t for t in self.failures.get(peer,[]) if t>time.time()-300]
@@ -446,29 +464,15 @@ class Dashboard:
         if not hmac.compare_digest(result['hash'],auth['hash']):
             if len(self.failures)>1000: self.failures.clear()
             self.failures[peer]=recent+[time.time()]
-            raise status(text='Incorrect password.')
+            raise web.HTTPUnauthorized(text='Incorrect password.')
         self.failures.pop(peer,None)
 
     async def login(self, request):
         await self.check_password(request)
         token,session=self.new_session(12)
-        session['manage_until']=session['expires']   # signed in with the password: management too
         response=web.json_response({'csrf':session['csrf']})
         response.set_cookie('pm_session',token,httponly=True,samesite='Strict',secure=request.secure,max_age=43200,path='/')
         return response
-
-    async def manage_unlock(self, request):
-        session=request['session']
-        if session is self.anonymous: raise web.HTTPForbidden(text='This page is out of date: reload it.')
-        # 403, not 401: a 401 sends the page to the sign-in screen
-        await self.check_password(request, web.HTTPForbidden)
-        session['manage_until']=time.time()+MANAGE_HOURS*3600
-        self.store.event('Settings','Management unlocked',f'For {MANAGE_HOURS} hours in one browser ({request.remote or "unknown address"})')
-        return web.json_response({'ok':True,'manage':True})
-
-    async def manage_lock(self, request):
-        request['session'].pop('manage_until',None)
-        return web.json_response({'ok':True,'manage':self.can_manage(request['session'])})
 
     async def logout(self, request):
         self.sessions.pop(request.cookies.get('pm_session'),None)
@@ -534,16 +538,17 @@ class Dashboard:
             printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),condition=self.triage.condition(name,error,data),storage=self.storage(name,data,connected),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
-        manage=self.can_manage(request['session'])
+        manage=self.can_manage(request)
         settings={**{k:v for k,v in self.core.settings.items() if k!='alert_targets'}, 'notification_channel_id':str(self.core.settings.get('notification_channel_id') or ''), 'commands_channel_id':str(self.core.settings.get('commands_channel_id') or ''), 'admin_user_ids':[str(x) for x in sorted(self.core.SETTINGS_USER_IDS)],
                   # Discord IDs are sent as text: they are larger than JavaScript numbers can hold exactly.
                   'alert_ping_users':[str(x) for x in self.core.settings.get('alert_ping_users') or []]}
-        if not manage:   # Discord's channels and people only once management is unlocked
+        if not manage:   # Discord's channels and people only for those who may manage
             for key in ('notification_channel_id','commands_channel_id','admin_user_ids','alert_ping_users'): settings.pop(key,None)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
             discord=self.core.bot.is_ready(), discord_configured=bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
             setup_needed=self.core.EXAMPLE_MODE and not getattr(self.core,'CONFIG',{}).get('demo'), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
-            settings=settings,csrf=request['session']['csrf'],login=self.require_login,manage=manage))
+            settings=settings,csrf=request['session']['csrf'],login=self.require_login,manage=manage,can_print=self.can_print(request),
+            **self.signin.state(request,manage)))
 
     async def desktop(self, request):
         """What the desktop app's tray icon shows (desktop/): each printer's state and the status icon with its
@@ -695,8 +700,8 @@ class Dashboard:
     async def add_job(self,request):
         data=await request.json()
         if data.get('print_now'):
-            return web.json_response(await self.print_now(data,'web administrator'))
-        job=self.add(data,'web administrator')
+            return web.json_response(await self.print_now(data,actor(request)))
+        job=self.add(data,actor(request))
         await self.core.notify(job['printer'],'📋 Job queued',job['label'],self.core.BLUE)
         return web.json_response({'id':job['id']})
 
@@ -727,22 +732,22 @@ class Dashboard:
     async def job_action(self,request):
         data=await request.json();job_id=request.match_info['id'];action=request.match_info['action']
         if action=='start':
-            await self.engine.start(job_id,data.get('confirmed'),'web administrator',data.get('override_error',False))
+            await self.engine.start(job_id,data.get('confirmed'),actor(request),data.get('override_error',False))
         elif action=='resolve':
-            self.engine.resolve(job_id,data.get('outcome'),data.get('confirmed'),'web administrator')
-        elif action=='reprint': self.copy_job(job_id,'web administrator')
+            self.engine.resolve(job_id,data.get('outcome'),data.get('confirmed'),actor(request))
+        elif action=='reprint': self.copy_job(job_id,actor(request))
         elif action=='sendto':
             # Send a finished print to another printer's queue (#57). It still needs the normal start confirmation.
             # A file that's only on the original printer is copied to the Pi first, then uploaded to the new one at start.
             printer,checked=data.get('printer'),data.get('checked')
             job=job_transfer.validate(self.core,self.store,job_id,printer,checked)
             asset=await asyncio.to_thread(job_transfer.fetch,self.core,job,self.uploads) if job_transfer.needs_fetch(self.core,job) else None
-            try:copy=job_transfer.send(self.core,self.store,job_id,printer,data.get('use_ams',False),data.get('mapping',''),checked,'web administrator',asset)
+            try:copy=job_transfer.send(self.core,self.store,job_id,printer,data.get('use_ams',False),data.get('mapping',''),checked,actor(request),asset)
             except Exception:
                 if asset:Path(asset).unlink(missing_ok=True)
                 raise
             return web.json_response({'ok':True,'id':copy['id'],'copied':bool(asset)})
-        else: self.store.edit(job_id,action,'web administrator')
+        else: self.store.edit(job_id,action,actor(request))
         return web.json_response({'ok':True})
 
     async def job_targets(self,request):
@@ -758,12 +763,12 @@ class Dashboard:
         if action=='clearerrors':
             ids=data.get('ids','all')
             if ids!='all' and not (isinstance(ids,list) and all(isinstance(x,str) for x in ids)):raise ValueError('Choose the alerts to clear.')
-            return web.json_response({'ok':True,**await self.alerts.clear(name,ids,data.get('confirmed'),author='web administrator')})
+            return web.json_response({'ok':True,**await self.alerts.clear(name,ids,data.get('confirmed'),author=actor(request))})
         if action in ('nozzle','nozzle_left','nozzle_right','bed','chamber','speed','fan','fanall','move','home','filament','nozzle_size') or action.startswith('fan_'):
-            message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'),author='web administrator')
+            message=self.controls.apply(name,action,data.get('value'),data.get('axis'),data.get('confirmed'),data.get('homed'),author=actor(request))
             return web.json_response({'ok':True,'message':message})
         if action=='stop' and data.get('confirmed') is not True: raise ValueError('Confirm stopping the print.')
-        await self.engine.control(name,action,'web administrator')
+        await self.engine.control(name,action,actor(request))
         return web.json_response({'ok':True,'message':'Command submitted; wait for printer telemetry.'})
 
     async def plate_swap(self,request):
@@ -771,7 +776,7 @@ class Dashboard:
         if name not in self.core.names():raise ValueError('Unknown printer.')
         swap=self.engine.plate_swap
         if action=='configure':   # Swapmod on/off
-            return web.json_response(swap.configure(name,data.get('enabled'),'web administrator'))
+            return web.json_response(swap.configure(name,data.get('enabled'),actor(request)))
         if action=='file':        # the swap print file: an upload from /api/upload
             asset=str(data.get('asset',''))
             if not __import__('re').fullmatch('[0-9a-f]{32}',asset): raise ValueError('Upload the swap print file first.')
@@ -780,9 +785,9 @@ class Dashboard:
             plate=int(data.get('plate') or 1);validate_archive(str(path),plate)
             try:label=path.with_suffix('.name').read_text().strip()
             except OSError:label='plate-swap.gcode.3mf'
-            return web.json_response(swap.set_file(name,path,label,plate,'web administrator'))
+            return web.json_response(swap.set_file(name,path,label,plate,actor(request)))
         if action=='now':         # Swap plate now
-            job=await swap.swap_now(self.engine,name,'web administrator')
+            job=await swap.swap_now(self.engine,name,actor(request))
             return web.json_response({'ok':True,'job':job['id'],**swap.state(name)})
         raise ValueError('Unknown Swapmod action.')
 
@@ -845,8 +850,8 @@ class Dashboard:
         changes=[f'/{n}: {core.LEVEL_LABELS[before[n]]} → {core.LEVEL_LABELS[core.command_level(n)]}' for n in sorted(known) if before[n]!=core.command_level(n)]
         if sorted(before_roles)!=sorted(roles):changes.append('allowed role IDs: '+(', '.join(map(str,roles)) or 'none'))
         if changes:
-            self.store.event(None,'Discord permissions changed','; '.join(changes)[:1800]+' • web administrator')
-            core.log.info('Discord permissions changed by web administrator: %s','; '.join(changes))
+            self.store.event(None,'Discord permissions changed','; '.join(changes)[:1800]+' • '+actor(request))
+            core.log.info('Discord permissions changed by %s: %s',actor(request),'; '.join(changes))
         return web.json_response(dict(self.permission_state(),changed=changes))
 
     async def change_password(self,request):
@@ -854,8 +859,6 @@ class Dashboard:
         if not 12<=len(password)<=1024: raise ValueError('Use at least 12 characters.')
         atomic_json(self.auth_file,await asyncio.to_thread(password_hash,password))
         if self.require_login: self.sessions.clear()
-        else:   # without signing in, the pages keep working: only management locks again everywhere
-            for session in self.sessions.values(): session.pop('manage_until',None)
         return web.json_response({'ok':True})
 
     async def alert_targets_get(self,request):
@@ -864,7 +867,7 @@ class Dashboard:
     async def alert_targets_save(self,request):
         data=await request.json()
         targets=self.alert_targets.save(data.get('targets'))
-        self.store.event('Settings','Other alerts saved',f'{len(targets)} target(s) • web administrator')
+        self.store.event('Settings','Other alerts saved',f'{len(targets)} target(s) • {actor(request)}')
         return web.json_response({'targets':targets})
 
     async def alert_targets_test(self,request):

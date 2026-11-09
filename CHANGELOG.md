@@ -5,6 +5,29 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased
 
 ### Changed
+- **Sign in with Google at your own address, through Cloudflare, instead of the management password.** The dashboard can be served at `https://printers.<your domain>` with Cloudflare Tunnel (no open port). Cloudflare Access asks for a Google sign-in first. See [Google sign-in (Cloudflare Access)](docs/cloudflare-access.md).
+  - **The Pi checks each request too:** it checks Cloudflare's signed token (your team, your Access application, not expired) and reads the Google account from it.
+  - **Who can do what:** Google accounts listed as admins (emails, or `@example.org` for a domain) can use management: Team tools, Laptops, Server, Settings & help, and slicing workers.
+    - **Who may print:** an optional list (operators) of who else may queue, slice and control printers.
+    - **Everyone else Access lets in can only look:** they see a "View only" banner, and their changes are refused by the Pi.
+  - **Setting it up:** `sudo bash cloudflare-tunnel.sh` asks for each value (or `--token … --domain example.org --team … --aud … --admin you@example.org`). It installs `cloudflared` and connects the tunnel. It then checks that `https://printers.<domain>` really asks for a Google sign-in, and warns you if it answers without one.
+  - **Or from the dashboard:** **Settings & help → Google sign-in** sets it up and changes it, with no restart.
+    - **Test** checks that the Pi can read your team's keys, and that the address is behind Access.
+    - **No lock-out without asking:** it asks first before taking management away from the address you're using, or removing you from the admins.
+  - **Who did it:** Activity records changes under the Google account that made them. That covers queue actions, printer controls, settings, Discord permissions, printers, team tools and slicer jobs.
+  - **Sidebar:** shows who's signed in, with **Sign out**.
+  - **Status icon:** warns when the Pi can't read Cloudflare's keys, or when the `cloudflared` service has stopped. Both are checked every 5 minutes.
+  - **The Pi's own addresses** (IP, `.local`, Tailscale) can print by default: `"lan"` is `printing`, `full`, `view` (look only) or `off`.
+  - **Recent sign-ins:** admins see which Google accounts used the dashboard, when, and from which IP address.
+    - **Change a person's level from that list** (Admin, Can print, View only, Blocked) without editing the lists.
+    - **Blocking takes effect at once,** even with a valid Cloudflare sign-in.
+    - **Your own level** can only be changed by another admin.
+    - **Ask to print:** view-only people can ask from their banner. Admins see a count on Settings, and **Allow** or **Dismiss** it in one click.
+    - **Online now and new:** the list marks who's online now, and accounts first seen in the last day.
+  - **Only Cloudflare Access *application* tokens are accepted** (not the team-wide one).
+  - **Sign in again:** when a Google sign-in expires, a **Sign in again** banner replaces failed requests.
+  - **Settings & help → Dashboard access** shows who's signed in, with **Sign out of Google**.
+  - **The password unlock from 1.9.21 is gone:** the **Unlock management** dialog, **Lock management** and `"protect_management"`. Without Cloudflare Access set up, the dashboard is open as in 1.9.19. The password stays for pm-doctor and `"require_login"`.
 - **Settings and Team tools are easier to get around.**
   - **Jump row:** Settings has a row of its sections at the top (Printers, Discord, Other alerts, …). On a phone it stays at the top while you scroll and slides sideways.
   - **On a computer:** the panels in Settings and Team tools fill two columns instead of piling up in one. Settings is about 40% shorter, and a short panel no longer stretches into an empty box beside a long one.

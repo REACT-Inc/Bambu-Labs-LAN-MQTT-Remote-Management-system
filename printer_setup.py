@@ -22,6 +22,7 @@ import signal
 from aiohttp import web
 
 import printer_models
+from cloudflare_access import actor
 
 PRINTERS_FILE = 'printers.json'
 DISCORD_FILE = 'discord.json'
@@ -224,14 +225,14 @@ class Setup:
         return web.json_response(self.state())
 
     async def printer_route(self, request):
-        return web.json_response(self.save_printer(await request.json(), 'web administrator'))
+        return web.json_response(self.save_printer(await request.json(), actor(request)))
 
     async def remove_route(self, request):
-        return web.json_response(self.remove_printer(str((await request.json()).get('name', '')), 'web administrator'))
+        return web.json_response(self.remove_printer(str((await request.json()).get('name', '')), actor(request)))
 
     async def discord_route(self, request):
-        return web.json_response(self.save_discord(await request.json(), 'web administrator'))
+        return web.json_response(self.save_discord(await request.json(), actor(request)))
 
     async def restart_route(self, request):
-        self.restart('web administrator')
+        self.restart(actor(request))
         return web.json_response({'ok': True, 'message': 'Restarting. The dashboard is back in about 15 seconds.'})
