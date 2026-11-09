@@ -49,6 +49,22 @@ class LibraryTests(unittest.TestCase):
         path=make_3mf(self.d/'uploads'/'a1b2.3mf',**kw)
         return path,self.cache.remember(path,name,{'plates':[{'index':1,'sliced':True}],'model':'A1 mini'})
 
+    def test_uploads_nobody_queued_are_tidied(self):
+        up=self.d/'uploads';up.mkdir(exist_ok=True)
+        def file(name,age,data=b'x'*1000):
+            p=up/name;p.write_bytes(data);os.utime(p,(self.now[0]-age,)*2);return p
+        a,b,c='a'*32,'b'*32,'c'*32
+        old=[file(f'{a}.3mf',2*86400),file(f'{a}.name',2*86400)]          # picked, never queued, two days ago
+        queued=[file(f'{b}.3mf',2*86400),file(f'{b}.name',2*86400)]       # a job's file: kept (Reprint needs it)
+        fresh=file(f'{c}.3mf',3600)                                          # the dialog may still be open
+        other=file('notes.txt',9*86400)                                     # not an upload
+        path,key=self.upload()                                               # the library's own folder: untouched
+        linked=up/f'{"d"*32}.3mf';os.link(self.cache.path(key),linked);os.utime(linked,(self.now[0]-2*86400,)*2)
+        deleted,freed=self.cache.tidy({b})
+        self.assertEqual(deleted,3);self.assertEqual(freed,2000)   # (the hard link to a library file freed nothing)
+        self.assertFalse(any(p.exists() for p in old+[linked]))
+        self.assertTrue(all(p.exists() for p in queued+[fresh,other]));self.assertTrue(self.cache.path(key).exists())
+
     def test_remember_use_and_list(self):
         path,key=self.upload('Bracket.gcode.3mf')
         self.assertEqual(key,file_cache.fingerprint(path))
@@ -193,6 +209,19 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await check(key='nope')).status,400)
         job=await (await self.client.post('/api/jobs',json={'printer':'Mini','label':'Bracket','asset':again['asset'],'plate':1},headers=self.headers)).json()
         self.assertEqual(self.store.get(job['id'])['remote'],'Bracket_copy.gcode.3mf')   # the name it was picked under
+
+    async def test_tidying_keeps_every_jobs_file(self):
+        first=await self.upload(make_3mf(self.d/'Bracket.gcode.3mf'))
+        await self.client.post('/api/jobs',json={'printer':'Mini','label':'Bracket','asset':first['asset'],'plate':1},headers=self.headers)
+        abandoned=await self.upload(make_3mf(self.d/'Other.gcode.3mf',plates=((1,'Other',True),)))
+        self.assertEqual(self.dashboard.uploads_in_use(),{first['asset']})
+        for p in (self.dashboard.uploads).glob('*.*'):os.utime(p,(time.time()-2*86400,)*2)
+        self.dashboard.file_library.clock=time.time
+        deleted,freed=self.dashboard.file_library.tidy(self.dashboard.uploads_in_use())
+        self.assertEqual(deleted,2)   # the abandoned upload and its .name
+        self.assertTrue((self.dashboard.uploads/f"{first['asset']}.3mf").exists())
+        self.assertFalse((self.dashboard.uploads/f"{abandoned['asset']}.3mf").exists())
+        self.assertTrue((await (await self.client.get('/api/library')).json())['files'])   # Recent files still there
 
     async def test_recent_files(self):
         first=await self.upload(make_3mf(self.d/'Bracket.gcode.3mf'))

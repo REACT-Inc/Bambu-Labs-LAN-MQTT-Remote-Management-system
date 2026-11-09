@@ -25,6 +25,8 @@ from pathlib import Path
 SAMPLE = 64 * 1024
 LIBRARY_BYTES = 5 * 1024 ** 3          # the library's size limit (least recently used files go first)
 LIBRARY_DAYS = 180                     # unused this long: dropped
+ABANDONED = 24 * 3600                  # an upload no job uses, this old: deleted (closed the dialog without queueing)
+UPLOAD_NAME = re.compile(r'([0-9a-f]{32})\.[a-z0-9]+')   # uploads/<asset>.3mf and its <asset>.name
 FINGERPRINT = re.compile(r'[0-9a-f]{64}')
 
 
@@ -129,6 +131,27 @@ class FileCache:
             total += row['size']
             if total > LIBRARY_BYTES or row['used'] < cutoff:
                 self.forget(row['fingerprint'])
+
+    def tidy(self, used):
+        """Delete uploads no job uses once they're a day old: files picked in Queue a print (or Recent files) and
+        never queued. A job's own file stays as long as the job does (Reprint needs it); `used` is their asset names.
+        Runs in a worker thread (files only). Returns (files deleted, bytes freed)."""
+        deleted = freed = 0
+        cutoff = self.clock() - ABANDONED
+        for path in self.uploads.iterdir():
+            match = UPLOAD_NAME.fullmatch(path.name)
+            if not match or match.group(1) in used or not path.is_file():
+                continue
+            try:
+                info = path.stat()
+                if info.st_mtime > cutoff:
+                    continue
+                path.unlink()
+            except OSError:
+                continue
+            deleted += 1
+            freed += info.st_size if info.st_nlink <= 1 else 0   # (a hard link to a library file frees nothing)
+        return deleted, freed
 
     # ---- files already on a printer ----
 
