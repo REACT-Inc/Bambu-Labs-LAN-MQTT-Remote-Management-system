@@ -112,6 +112,7 @@ class Dashboard:
         self.cameras.drawer = self.failure.drawn   # ... drawn onto the frames of the raw live stream (/api/live)
         self.snapshots.ai = self.failure.look   # ... and on every dashboard still
         self.app.on_startup.append(self.failure.start);self.app.on_shutdown.append(self.failure.stop)
+        self.app.on_startup.append(self.start_tidying);self.app.on_shutdown.append(self.stop_tidying)
         # Printer errors: does each one need a person, or can it be cleared by itself? It looks at the bed with the
         # bed check AI, else the empty-bed picture comparison (error_triage.py).
         self.triage = engine.triage = core.error_triage = Triage(core, store, self.alerts,
@@ -164,6 +165,28 @@ class Dashboard:
     def access(self):
         """The Cloudflare Access settings in use (cloudflare_access.Access)."""
         return self.signin.access
+
+    # ---- uploads nobody queued (file_cache.FileCache.tidy) ----
+
+    async def start_tidying(self, app):
+        self.tidying = asyncio.create_task(self.tidy_uploads())
+
+    async def stop_tidying(self, app):
+        self.tidying.cancel()
+
+    def uploads_in_use(self):
+        """The uploads jobs use (any job, finished ones too: Reprint needs its file)."""
+        return {Path(r[0]).stem for r in self.store.db.execute('SELECT asset FROM jobs WHERE asset IS NOT NULL')}
+
+    async def tidy_uploads(self, every=6 * 3600):
+        while True:
+            try:
+                deleted, freed = await asyncio.to_thread(self.file_library.tidy, self.uploads_in_use())
+                if deleted:
+                    self.core.log.info('Deleted %d uploads no job used (%.1f MB freed).', deleted, freed / 1e6)
+            except Exception as exc:
+                self.core.log.warning('Tidying uploads failed: %s', exc)
+            await asyncio.sleep(every)
 
     def new_session(self, hours):
         now = time.time()

@@ -28,6 +28,18 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Sign in again:** when a Google sign-in expires, a **Sign in again** banner replaces failed requests.
   - **Settings & help → Dashboard access** shows who's signed in, with **Sign out of Google**.
   - **The password unlock from 1.9.21 is gone:** the **Unlock management** dialog, **Lock management** and `"protect_management"`. Without Cloudflare Access set up, the dashboard is open as in 1.9.19. The password stays for pm-doctor and `"require_login"`.
+- **Settings and Team tools are easier to get around.**
+  - **Jump row:** Settings has a row of its sections at the top (Printers, Discord, Other alerts, …). On a phone it stays at the top while you scroll and slides sideways.
+  - **On a computer:** the panels in Settings and Team tools fill two columns instead of piling up in one. Settings is about 40% shorter, and a short panel no longer stretches into an empty box beside a long one.
+- **Phones:**
+  - **No big titles:** the big page title is hidden except on Overview. The tab bar already says where you are, and each page has its own heading.
+  - **Bigger Slicer buttons:** the Slicer's tool buttons (Move, Rotate, Scale, …) are bigger to tap.
+  - **No sideways scroll from long links:** long addresses in help text wrap instead of pushing the page sideways.
+
+### Fixed
+- **Uploads nobody queued no longer pile up on the Pi.** A file picked in **+ Queue a print** and never queued (up to 256 MB each) stayed on the Pi's SD card for good.
+  - **Now:** they're deleted after a day, checked every 6 hours.
+  - **Kept:** every job's own file stays, so **Reprint** works, and so does the Recent files library. See [Files the Pi already has](docs/print-queue.md#files-the-pi-already-has).
 
 ## 1.9.21-beta.1
 

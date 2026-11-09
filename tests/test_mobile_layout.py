@@ -22,5 +22,15 @@ class MobileLayoutTests(unittest.TestCase):
         self.assertNotIn('backdrop-filter',aside)
 
 
+    def test_polish(self):
+        page,app,css=((ROOT/'static'/name).read_text() for name in ('index.html','app.js','style.css'))
+        self.assertIn('<div id="settingsJump" class="settings-jump" role="navigation"',page)   # (not <nav>: the tab bar's CSS styles every nav)
+        self.assertIn('function buildSettingsJump()',app)
+        polish=css[css.index('/* ---- Polish:'):]
+        self.assertIn('code{overflow-wrap:anywhere}',polish);self.assertIn('.settings-grid{align-items:start}',polish)
+        self.assertIn(':is(#settings,#team) .settings-grid{display:block;columns:2',polish)
+        self.assertIn('body:not([data-tab=overview]) header h1{display:none}',polish)
+        self.assertIn('.slicer-tools button{min-height:40px',polish)
+
 if __name__=='__main__':
     unittest.main()

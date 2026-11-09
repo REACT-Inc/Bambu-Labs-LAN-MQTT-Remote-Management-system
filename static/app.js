@@ -529,3 +529,9 @@ document.body.dataset.tab='overview';
 
 const tabUnlocked=tab;tab=function(name){if(MANAGED.has(name)&&state&&!state.manage){notice(lockedText());return;}tabUnlocked(name);};
 $('signinAgain').onclick=()=>location.reload();   // Cloudflare Access sends the page through Google again
+// Settings is long (on a phone especially): a row of its sections at the top, each jumping to its panel.
+function buildSettingsJump(){const box=$('settingsJump');if(box.childElementCount)return;
+ box.innerHTML=[...document.querySelectorAll('#settings .panel')].filter(p=>p.querySelector(':scope>h2')).map((p,i)=>{if(!p.id)p.id='settingsPanel'+i;return `<button type="button" data-jump="${esc(p.id)}">${esc(p.querySelector(':scope>h2').textContent)}</button>`;}).join('');}
+$('settingsJump').addEventListener('click',e=>{const b=e.target.closest('[data-jump]');if(b)$(b.dataset.jump).scrollIntoView({behavior:'smooth',block:'start'});});
+const tabWithJump=tab;tab=function(name){tabWithJump(name);if(name==='settings'&&!$('settings').hidden)buildSettingsJump();};
+
