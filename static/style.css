@@ -345,3 +345,24 @@ button.pending,button.pending[aria-pressed],.segmented button.pending{background
 }
 
 nav button.locked span::after{content:' 🔒';font-size:11px}
+
+/* ---- Polish: long text, the settings jump row, panels that don't stretch, phone tap targets ---- */
+code{overflow-wrap:anywhere}
+.settings-grid{align-items:start}   /* a short panel next to a long one doesn't stretch into empty space */
+.settings-jump{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}
+.settings-jump button{padding:7px 12px;font-size:12px;border-radius:20px;background:var(--panel)}
+#settings .panel{scroll-margin-top:16px}
+@media(min-width:1051px){   /* Settings and Team tools: panels flow down two columns instead of piling up in one */
+ :is(#settings,#team) .settings-grid{display:block;columns:2;column-gap:24px}
+ :is(#settings,#team) .settings-grid>div{display:contents}
+ :is(#settings,#team) .settings-grid .panel{break-inside:avoid;display:block;width:100%}
+}
+@media(max-width:720px){
+ body:not([data-tab=overview]) header h1{display:none}   /* the tab bar already says where you are; each page has its own heading */
+ body:not([data-tab=overview]) header{margin-bottom:12px}
+ .settings-jump{flex-wrap:nowrap;overflow-x:auto;position:sticky;top:53px;z-index:20;background:var(--bg);margin:0 -16px 14px;padding:8px 16px;scrollbar-width:none}
+ .settings-jump button{flex-shrink:0;min-height:36px}
+ #settings .panel{scroll-margin-top:120px}
+ .slicer-tools button{min-height:40px;padding:8px 12px}
+}
+
