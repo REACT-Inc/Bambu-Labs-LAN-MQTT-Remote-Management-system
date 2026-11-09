@@ -481,3 +481,9 @@ $('manageForm').onsubmit=async e=>{e.preventDefault();
  try{await api('manage/unlock',{password:$('managePassword').value});$('managePassword').value='';settingsLoaded=false;closeDialog($('manageDialog'));await refresh();const then=afterUnlock;afterUnlock=null;if(then)then();else notice('Management unlocked for 12 hours in this browser.');}
  catch(err){$('manageError').textContent=err.message;}};
 $('manageLock').onclick=async()=>{try{await api('manage/lock',{});await refresh();if(MANAGED.has(document.querySelector('nav button.active')?.dataset.tab))tab('overview');notice('Management locked.');}catch(err){notice(err.message);}};
+// Settings is long (on a phone especially): a row of its sections at the top, each jumping to its panel.
+function buildSettingsJump(){const box=$('settingsJump');if(box.childElementCount)return;
+ box.innerHTML=[...document.querySelectorAll('#settings .panel')].filter(p=>p.querySelector(':scope>h2')).map((p,i)=>{if(!p.id)p.id='settingsPanel'+i;return `<button type="button" data-jump="${esc(p.id)}">${esc(p.querySelector(':scope>h2').textContent)}</button>`;}).join('');}
+$('settingsJump').addEventListener('click',e=>{const b=e.target.closest('[data-jump]');if(b)$(b.dataset.jump).scrollIntoView({behavior:'smooth',block:'start'});});
+const tabWithJump=tab;tab=function(name){tabWithJump(name);if(name==='settings'&&!$('settings').hidden)buildSettingsJump();};
+

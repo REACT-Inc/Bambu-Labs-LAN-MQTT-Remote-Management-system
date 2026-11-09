@@ -2,6 +2,17 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Changed
+- **Settings and Team tools are easier to get around.**
+  - **Jump row:** Settings has a row of its sections at the top (Printers, Discord, Other alerts, …). On a phone it stays at the top while you scroll and slides sideways.
+  - **On a computer:** the panels in Settings and Team tools fill two columns instead of piling up in one. Settings is about 40% shorter, and a short panel no longer stretches into an empty box beside a long one.
+- **Phones:**
+  - **No big titles:** the big page title is hidden except on Overview. The tab bar already says where you are, and each page has its own heading.
+  - **Bigger Slicer buttons:** the Slicer's tool buttons (Move, Rotate, Scale, …) are bigger to tap.
+  - **No sideways scroll from long links:** long addresses in help text wrap instead of pushing the page sideways.
+
 ## 1.9.21-beta.1
 
 Built on 1.9.19-beta.1: management (Discord, team tools, laptops, the server, settings and updates) needs the dashboard password again while printing stays open, and a new phone layout with a tab bar at the bottom.
