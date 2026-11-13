@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.9.21-beta.3
+
+Built on 1.9.21-beta.2: member updates by DM, so chosen people get a Discord DM when someone in the server changes their status, nickname, username, profile picture or roles.
 
 ### Added
 - **Member updates by DM:** when someone in your Discord server changes their status or profile, chosen people get a DM from the bot. Set it up in **Settings & help → Member updates by DM**. See [Member updates by DM](docs/discord.md#member-updates-by-dm).
