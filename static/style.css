@@ -374,4 +374,5 @@ code{overflow-wrap:anywhere}
  #settings .panel{scroll-margin-top:120px}
  .slicer-tools button{min-height:40px;padding:8px 12px}
 }
+.mw-kinds{border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:14px 0}.mw-kinds legend{color:#c6d4ca;padding:0 6px}.mw-kinds .checkbox{margin:8px 0}
 

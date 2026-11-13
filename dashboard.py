@@ -37,10 +37,11 @@ from Updater.web_updates import BUSY as UPDATE_BUSY
 from Updater.version import VERSION
 from cloudflare_access import actor
 from access_web import SignIn
+from discord_Intergration import member_watch
 
 # Management: Discord and team tools, laptops, the server, settings, problem reports and installing updates. With
 # Cloudflare Access set up (cloudflare_access.py), only its admins' Google accounts may use these.
-MANAGEMENT_ROUTES = ('/api/team', '/api/setup', '/api/permissions', '/api/alerttargets', '/api/report', '/api/access')
+MANAGEMENT_ROUTES = ('/api/team', '/api/setup', '/api/permissions', '/api/alerttargets', '/api/report', '/api/access', '/api/memberwatch')
 MANAGEMENT_CHANGES = ('/api/slicer/workers', '/api/update/', '/api/github/')   # anyone may look; changes are management
 MANAGEMENT_PATHS = {'/api/settings', '/api/password', '/api/testnotification', '/api/diagnostics', '/api/errors'}
 
@@ -158,6 +159,9 @@ class Dashboard:
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
         ])
         self.app.add_routes(self.signin.routes())
+        self.member_watch=member_watch.MemberWatch(core)   # Member updates by DM (main.py installs its Discord listeners)
+        self.app.add_routes([web.get('/api/memberwatch',self.member_watch_get),web.post('/api/memberwatch',self.member_watch_save)])
+        self.status.add_source(self.member_watch.status)
         self.app.on_startup.append(self.signin.start);self.app.on_shutdown.append(self.signin.stop)
         self.status.add_source(self.signin.status)
 
@@ -543,7 +547,7 @@ class Dashboard:
                   # Discord IDs are sent as text: they are larger than JavaScript numbers can hold exactly.
                   'alert_ping_users':[str(x) for x in self.core.settings.get('alert_ping_users') or []]}
         if not manage:   # Discord's channels and people only for those who may manage
-            for key in ('notification_channel_id','commands_channel_id','admin_user_ids','alert_ping_users'): settings.pop(key,None)
+            for key in ('notification_channel_id','commands_channel_id','admin_user_ids','alert_ping_users','member_watch'): settings.pop(key,None)
         return web.json_response(dict(title='3D Printer Management', demo=self.core.EXAMPLE_MODE,
             discord=self.core.bot.is_ready(), discord_configured=bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
             setup_needed=self.core.EXAMPLE_MODE and not getattr(self.core,'CONFIG',{}).get('demo'), printers=printers,jobs=jobs,events=self.store.events(),status=self.status.snapshot(),
@@ -818,6 +822,31 @@ class Dashboard:
         self.core.settings.clear();self.core.settings.update(updated)
         self.core.SETTINGS_USER_IDS=set(ids)
         return web.json_response({'ok':True})
+
+    # ---- Member updates by DM (discord_Intergration/member_watch.py) ----
+
+    def member_watch_state(self):
+        s=self.member_watch.settings
+        members,presences=member_watch.needs_intents(s)
+        intents=getattr(self.core.bot,'intents',None)
+        return dict(settings={**s,'recipients':[str(r) for r in s['recipients']],'members':[str(m) for m in s['members']]},
+                    kinds=[dict(key=k,label=member_watch.LABELS[k]) for k in member_watch.KINDS],
+                    needs=[n for n,on in (('Server Members',members),('Presence',presences)) if on],
+                    restart=bool(intents) and (members!=intents.members or presences!=intents.presences) and bool(getattr(self.core,'DISCORD_BOT_TOKEN','')),
+                    problem=self.member_watch.problem,sent=self.member_watch.sent)
+
+    async def member_watch_get(self,request):
+        return web.json_response(self.member_watch_state())
+
+    async def member_watch_save(self,request):
+        updated={**self.core.settings,'member_watch':member_watch.clean(await request.json())}
+        atomic_json(Path(self.core.SETTINGS_FILE),updated)
+        self.core.settings.clear();self.core.settings.update(updated)
+        self.member_watch.problem=''
+        s=updated['member_watch']
+        self.store.event('Settings','Member updates '+('on' if s['enabled'] else 'off'),
+                         f"{len(s['recipients'])} recipient(s) • watching: {', '.join(member_watch.LABELS[k] for k in s['watch']) or 'nothing'} • {actor(request)}")
+        return web.json_response(self.member_watch_state())
 
     def permission_state(self):
         """Every top-level Discord command with its default and current permission level."""

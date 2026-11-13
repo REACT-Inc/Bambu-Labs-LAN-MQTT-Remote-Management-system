@@ -7,6 +7,7 @@ Discord is optional: everything is done in the [web dashboard](dashboard.md), an
 - [Using commands](#using-commands)
 - [Command reference](#command-reference)
 - [Notifications](#notifications)
+- [Member updates by DM](#member-updates-by-dm)
 - [Reply visibility](#reply-visibility)
 
 ## Setup
@@ -151,6 +152,40 @@ How repeats are handled:
 - **Starting mid-print:** if the service starts in the middle of a print, it starts from the next milestone.
 - **Skipped milestones:** if several were skipped, only the newest is posted.
 - **Camera failures:** if the camera can't be reached, the notification is still sent, with a note saying so.
+
+## Member updates by DM
+
+When someone in your server changes their Discord status or profile, the people you choose get a direct message from the bot. Set it up in **Settings & help → Member updates by DM**.
+
+**What can be watched:**
+
+| Choice | Sent when someone… |
+|---|---|
+| Status | goes online, idle, do not disturb or offline (off by default: this changes often) |
+| Custom status | changes their custom status text or emoji |
+| Activity | starts or stops playing, streaming or watching something (Spotify songs are left out: they change every few minutes) |
+| Nickname | changes their nickname in your server |
+| Username | changes their Discord username or display name |
+| Profile picture | changes their profile picture (in your server, or everywhere) |
+| Roles | gets a role, or loses one |
+| Time-out | is timed out, or their time-out ends |
+
+**How the messages arrive:**
+- **Batched:** changes are collected for a minute and sent together, one DM per person.
+- **Back-and-forth changes are dropped:** a change that goes back where it started within that minute (online → idle → online) isn't sent.
+- **Who's left out:** bots, and the people receiving the DMs, unless you choose them.
+- **Only some members:** to watch only some members, list their user IDs under **Only these members**.
+
+**Turn on two intents for the bot.** Discord only tells bots about these changes when you allow it:
+1. In the [Discord Developer Portal](https://discord.com/developers/applications), open your bot's application, then **Bot**.
+2. Under **Privileged Gateway Intents**, turn on what your choices need:
+   - **Server Members Intent:** for nickname, username, profile picture, roles and time-out.
+   - **Presence Intent:** for status, custom status and activity.
+3. Save, then restart the app (the panel shows **Restart now** when the change needs one).
+
+**If they aren't on:** the bot asks for these only while member updates are on. If they aren't turned on in the portal, the bot still connects without them, and the status icon (top left) says which intent to turn on.
+
+**Receiving the DMs:** each person who gets them must share a server with the bot, and allow DMs from that server's members (server menu → **Privacy Settings**). If a DM can't be sent, the status icon says so.
 
 ## Reply visibility
 
