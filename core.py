@@ -372,11 +372,13 @@ class PrinterTree(app_commands.CommandTree):
         return True
 
 
-async def run_discord(client, token, sleep=asyncio.sleep, first_delay=15, max_delay=300):
+async def run_discord(client, token, sleep=asyncio.sleep, first_delay=15, max_delay=300, refused=None):
     """Keep the Discord bot connected (#14). Once connected, discord.py reconnects by itself after a dropped
     connection. But if the internet is down when the bot first logs in (a Pi booting before its network, or a router
     restart), start() fails, and the bot used to stay offline until the service was restarted. Now it tries again
-    (15 s, doubling to every 5 min). A rejected token is not retried: that needs fixing in config.json."""
+    (15 s, doubling to every 5 min). A rejected token is not retried: that needs fixing in config.json.
+    refused(): Discord turned down a privileged intent; True when it dropped the intents asked for (member updates,
+    discord_Intergration/member_watch.py), so the bot connects again at once without them."""
     delay = first_delay
     while True:
         try:
@@ -386,6 +388,10 @@ async def run_discord(client, token, sleep=asyncio.sleep, first_delay=15, max_de
             log.error('Discord rejected the bot token. Fix "discord_token" in config.json and restart; the dashboard keeps working.')
             return
         except discord.PrivilegedIntentsRequired:
+            if refused and refused():
+                with contextlib.suppress(Exception):
+                    await client.http.close()
+                continue
             log.error('Discord requires an intent that is not enabled for this bot in the Developer Portal; the dashboard keeps working.')
             return
         except asyncio.CancelledError:

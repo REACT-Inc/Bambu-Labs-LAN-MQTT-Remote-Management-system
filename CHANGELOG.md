@@ -2,6 +2,15 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Added
+- **Member updates by DM:** when someone in your Discord server changes their status or profile, chosen people get a DM from the bot. Set it up in **Settings & help → Member updates by DM**. See [Member updates by DM](docs/discord.md#member-updates-by-dm).
+  - **What can be watched:** status (off by default), custom status, activity (not Spotify songs), nickname, username and display name, profile picture, roles, and time-outs.
+  - **Batched:** changes are sent together once a minute; a change that went back where it started isn't sent.
+  - **Who:** up to 10 people get the DMs. Bots and the recipients themselves are left out unless chosen, or you can watch only some members.
+  - **Discord intents:** this needs the Server Members and/or Presence intent turned on for the bot in the Discord Developer Portal. The bot asks for them only while this is on; if Discord refuses, the bot still connects without them, and the status icon says what to turn on.
+
 ## 1.9.21-beta.2
 
 Built on 1.9.21-beta.1: sign in with Google at printers.<your domain> through Cloudflare (it replaces the management password, with admins, who may print and view-only accounts), uploads nobody queued deleted after a day, and easier Settings and Team tools on phones and computers.

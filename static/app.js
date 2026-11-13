@@ -534,4 +534,16 @@ function buildSettingsJump(){const box=$('settingsJump');if(box.childElementCoun
  box.innerHTML=[...document.querySelectorAll('#settings .panel')].filter(p=>p.querySelector(':scope>h2')).map((p,i)=>{if(!p.id)p.id='settingsPanel'+i;return `<button type="button" data-jump="${esc(p.id)}">${esc(p.querySelector(':scope>h2').textContent)}</button>`;}).join('');}
 $('settingsJump').addEventListener('click',e=>{const b=e.target.closest('[data-jump]');if(b)$(b.dataset.jump).scrollIntoView({behavior:'smooth',block:'start'});});
 const tabWithJump=tab;tab=function(name){tabWithJump(name);if(name==='settings'&&!$('settings').hidden)buildSettingsJump();};
+// Member updates by DM (discord_Intergration/member_watch.py)
+function renderMemberWatch(r){const s=r.settings;
+ $('mwEnabled').checked=s.enabled;$('mwRecipients').value=s.recipients.join('\n');$('mwMembers').value=s.members.join('\n');$('mwBots').checked=s.include_bots;
+ $('mwKinds').innerHTML=r.kinds.map(k=>`<label class="checkbox"><input type="checkbox" value="${esc(k.key)}"${s.watch.includes(k.key)?' checked':''}> ${esc(k.label)}${k.key==='status'?' <span class="muted">(online, idle, offline: changes often)</span>':''}</label>`).join('');
+ $('mwIntents').textContent=r.problem?r.problem:r.needs.length?`Turn on the ${r.needs.join(' and ')} intent for the bot in the Discord Developer Portal (Bot → Privileged Gateway Intents).`+(r.sent?` ${r.sent} updates sent since the app started.`:''):'';
+ $('mwIntents').classList.toggle('error',!!r.problem);$('mwRestart').hidden=!r.restart;}
+async function loadMemberWatch(){try{renderMemberWatch(await api('memberwatch',undefined,'GET'));}catch(e){$('mwStatus').textContent=e.message;}}
+$('memberWatchForm').onsubmit=async e=>{e.preventDefault();
+ try{const r=await api('memberwatch',{enabled:$('mwEnabled').checked,recipients:$('mwRecipients').value,members:$('mwMembers').value,include_bots:$('mwBots').checked,
+  watch:[...document.querySelectorAll('#mwKinds input:checked')].map(i=>i.value)});renderMemberWatch(r);$('mwStatus').textContent='Saved.';}
+ catch(err){$('mwStatus').textContent=err.message;}};
+const tabWithMemberWatch=tab;tab=function(name){tabWithMemberWatch(name);if(name==='settings'&&state?.manage!==false&&!$('settings').hidden)loadMemberWatch();};
 

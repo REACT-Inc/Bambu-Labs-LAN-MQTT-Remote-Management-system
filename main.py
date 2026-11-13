@@ -17,6 +17,7 @@ from discord_Intergration.clear_errors_discord import install as install_clear_e
 from swapMod.plate_swap_discord import install as install_plate_swap
 from team import Team
 from discord_Intergration.team_discord import install as install_team
+from discord_Intergration.member_watch import install as install_member_watch
 from loop_watchdog import LoopWatchdog
 import printer_setup
 
@@ -80,6 +81,7 @@ async def main():
     install_controls(core,dashboard.controls)
     install_clear_errors(core,dashboard.alerts)
     install_plate_swap(core,engine)
+    install_member_watch(core,dashboard.member_watch)   # Member updates by DM
     diagnostics.install_discord(core,store)
     issue_reports.install_discord(core,dashboard.issue_reports)
     # Printer monitoring and web UI do not depend on Discord being connected.
@@ -106,7 +108,9 @@ async def main():
     async def discord_task():
         if not core.DISCORD_BOT_TOKEN:
             core.log.warning('No Discord token configured: dashboard-only mode.');return
-        await core.run_discord(core.bot,core.DISCORD_BOT_TOKEN)   # retries until connected; reconnects by itself after
+        watch=dashboard.member_watch
+        watch.apply_intents(core.bot)   # Member updates need privileged intents: asked for only while they're on
+        await core.run_discord(core.bot,core.DISCORD_BOT_TOKEN,refused=lambda:watch.drop_intents(core.bot))   # retries until connected; reconnects by itself after
     task=asyncio.create_task(discord_task())
     scheduler=asyncio.create_task(team.scheduler())
     try:
@@ -118,6 +122,7 @@ async def main():
         await asyncio.gather(scheduler,return_exceptions=True)
         for t in list(engine.tasks):t.cancel()
         await asyncio.gather(*engine.tasks,return_exceptions=True)
+        await dashboard.member_watch.stop()
         await core.bot.close()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):await task
