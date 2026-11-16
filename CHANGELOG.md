@@ -2,6 +2,15 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
+## Unreleased
+
+### Added
+- **Member updates: Send test DM.** A button in **Settings & help → Member updates by DM** sends each recipient a test DM straight away, and says who can't receive DMs (and why), instead of waiting for someone to change something.
+
+### Fixed
+- **Member updates no longer get stuck:** a change that came in while a batch was being sent waited until the next change, which could be hours later. It now goes in the next batch a minute later.
+- **Member updates with more than one server:** a member's nickname, roles and time-out are kept per server, and say which server. Before, a nickname change in two servers was merged into one wrong line.
+
 ## 1.9.21-beta.3
 
 Built on 1.9.21-beta.2: member updates by DM, so chosen people get a Discord DM when someone in the server changes their status, nickname, username, profile picture or roles.
