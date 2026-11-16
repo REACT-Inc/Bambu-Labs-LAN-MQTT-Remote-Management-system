@@ -20,6 +20,7 @@ from discord_Intergration.team_discord import install as install_team
 from discord_Intergration.member_watch import install as install_member_watch
 from loop_watchdog import LoopWatchdog
 import printer_setup
+from tailscale_address import Listener
 
 
 def exit_soon(seconds=15):
@@ -29,37 +30,10 @@ def exit_soon(seconds=15):
     timer.start()
 
 
-async def listen(runner):
-    """Open the dashboard on every configured address. An address that isn't there yet (for example a hotspot or
-    Wi-Fi address while the network is still starting) is retried every 30 s instead of stopping the whole app."""
-    port=int(core.CONFIG.get('port',8080))
-    hosts=list(dict.fromkeys(core.CONFIG.get('listen',['127.0.0.1'])))
-    missing=[]
-    for host in hosts:
-        try:
-            await web.TCPSite(runner,host,port).start()
-            core.log.info('3D Printer Management listening on %s:%s',host,port)
-        except OSError as exc:
-            core.log.error('Cannot listen on %s:%s (%s).',host,port,exc)
-            missing.append(host)
-    if len(missing)==len(hosts):
-        raise RuntimeError(f"The dashboard could not listen on {', '.join(hosts)} port {port}. Is another copy running, "
-                           'or is "listen" in config.json wrong?')
-    if missing:
-        core.log.warning('Retrying %s every 30 s.',', '.join(missing))
-        asyncio.create_task(retry_listen(runner,missing,port))
-
-
-async def retry_listen(runner,hosts,port,every=30):
-    while hosts:
-        await asyncio.sleep(every)
-        for host in list(hosts):
-            try:
-                await web.TCPSite(runner,host,port).start()
-                core.log.info('3D Printer Management listening on %s:%s',host,port)
-                hosts.remove(host)
-            except OSError:
-                pass
+async def start_site(runner,host,port):
+    site=web.TCPSite(runner,host,port)
+    await site.start()
+    return site
 
 
 async def main():
@@ -93,9 +67,14 @@ async def main():
     watchdog=LoopWatchdog(core.log,stall_file=diagnostics.log_dir(core.DATA_DIR)/'stalls.log')
     watchdog.start()
     runner=web.AppRunner(dashboard.app,access_log=None)
+    # The addresses in "listen": one not there yet is tried again every 30 s, and a Tailscale address that has
+    # changed (the Pi signed in to Tailscale again, e.g. for ACL tags) is followed (tailscale_address.py).
+    listener=Listener(lambda host,port:start_site(runner,host,port),core.CONFIG.get('listen',['127.0.0.1']),int(core.CONFIG.get('port',8080)),
+                      core.log,event=store.event)
+    dashboard.status.add_source(listener.status)
     try:
         await runner.setup()
-        await listen(runner)
+        await listener.start()
     except Exception:
         # Log the reason now (not after shutdown), and make sure the process ends so systemd starts it again.
         core.log.exception('Start-up failed; exiting so systemd restarts the service')
@@ -112,11 +91,13 @@ async def main():
         watch.apply_intents(core.bot)   # Member updates need privileged intents: asked for only while they're on
         await core.run_discord(core.bot,core.DISCORD_BOT_TOKEN,refused=lambda:watch.drop_intents(core.bot))   # retries until connected; reconnects by itself after
     task=asyncio.create_task(discord_task())
+    listening=asyncio.create_task(listener.watch())
     scheduler=asyncio.create_task(team.scheduler())
     try:
         await stopped.wait()
     finally:
         exit_soon(30)   # a background task that won't stop must never keep a stopped service alive
+        listening.cancel()
         await watchdog.stop()
         scheduler.cancel()
         await asyncio.gather(scheduler,return_exceptions=True)

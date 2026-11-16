@@ -61,6 +61,8 @@ The dashboard never listens on every network interface. It always listens on `12
 
 If Tailscale isn't connected and `PM_LISTEN_IP` isn't set, the installer stops without changing anything. The installer never changes Tailscale, your tailnet policy or firewall rules.
 
+**If Tailscale gives the Pi a new address later** (signed in again, for example to add ACL tags), the dashboard and pm-doctor switch to it by themselves, and Activity says so. If you tag the Pi, your Tailscale policy must also allow you to reach the tag: see [Troubleshooting](troubleshooting.md#the-dashboard-stopped-loading-over-tailscale-for-example-after-adding-acl-tags).
+
 The dashboard uses plain HTTP on port 8080 and **doesn't ask for a password by default** ([Signing in](configuration.md#signing-in) turns it on). Use Tailscale, or keep it on a trusted network. Don't forward the port to the internet.
 
 ## Install
