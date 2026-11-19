@@ -131,6 +131,42 @@ class WatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('901',self.watch.problem);self.assertEqual(self.watch.status()[0]['level'],'warn')
 
 
+class ReviewFixTests(unittest.IsolatedAsyncioTestCase):
+    async def test_changes_during_sending_go_in_the_next_batch(self):
+        core=fake_core();sleeps=[]
+        watch=mw.MemberWatch(core,sleep=AsyncMock(side_effect=lambda s:sleeps.append(s)))
+        real=core.bot.fetch_user
+        async def slow_fetch(i):   # while the first batch is on its way, another change comes in
+            watch.add(member(i=8,name='Late'),[('nickname','x','y')])
+            core.bot.fetch_user=real;return await real(i)
+        core.bot.fetch_user=slow_fetch
+        watch.add(member(),[('nickname','a','b')])
+        await watch.task
+        sent=[e.description for e in core.bot.users[900].sent]
+        self.assertEqual(len(sent),2);self.assertIn('<@5>',sent[0]);self.assertIn('<@8>',sent[1])   # (it used to wait for yet another change)
+        self.assertEqual(len(sleeps),2)
+
+    async def test_each_server_keeps_its_own_nickname(self):
+        core=fake_core();core.ALLOWED_GUILD_IDS={GUILD,222}
+        watch=mw.MemberWatch(core,sleep=AsyncMock())
+        a=member(guild=GUILD);a.guild.name='Robotics';b=member(guild=222);b.guild.name='School'
+        watch.add(a,[('nickname','Sam','Sammy')]);watch.add(b,[('nickname','S','Samuel')])
+        watch.add(a,[('status','🟢 online','🌙 idle')]);watch.add(b,[('status','🟢 online','🌙 idle')])   # one presence, two servers
+        await watch.task
+        text=core.bot.users[900].sent[0].description
+        self.assertIn('Nickname in Robotics: Sam → Sammy',text);self.assertIn('Nickname in School: S → Samuel',text)
+        self.assertEqual(text.count('Status'),1)
+
+    async def test_test_dm(self):
+        core=fake_core();core.settings['member_watch']['recipients']=[900,901];core.bot.forbidden={901}
+        core.bot.is_ready=lambda:True
+        results=await mw.MemberWatch(core).test()
+        self.assertEqual(results[0],(900,None));self.assertIn('Privacy Settings',results[1][1])
+        self.assertIn('test',core.bot.users[900].sent[0].title)
+        core.bot.is_ready=lambda:False
+        with self.assertRaises(ValueError):await mw.MemberWatch(core).test()
+
+
 class ConnectTests(unittest.IsolatedAsyncioTestCase):
     async def test_refused_intents_connect_without_them(self):
         from tests.test_issue_fixes import load_core
@@ -174,11 +210,13 @@ class DashboardTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Member updates on',[e['title'] for e in self.store.events()])
         r=await self.client.post('/api/memberwatch',json={'enabled':True,'recipients':'','watch':['roles']},headers={'X-PM':'1','X-CSRF':self.csrf})
         self.assertEqual(r.status,400)
+        r=await self.client.post('/api/memberwatch/test',json={},headers={'X-PM':'1','X-CSRF':self.csrf})   # (the bot isn't connected here)
+        self.assertEqual(r.status,400);self.assertIn("isn't connected",(await r.json())['error'])
 
     def test_the_page(self):
         page,app=(ROOT/'static/index.html').read_text(),(ROOT/'static/app.js').read_text()
         for id in ('memberWatchForm','mwEnabled','mwRecipients','mwKinds','mwMembers','mwBots','mwIntents'):self.assertIn(f'id="{id}"',page)
-        self.assertIn("api('memberwatch',undefined,'GET')",app)
+        self.assertIn("api('memberwatch',undefined,'GET')",app);self.assertIn("api('memberwatch/test',{})",app);self.assertIn('id="mwTest"',page)
 
 
 if __name__=='__main__':
