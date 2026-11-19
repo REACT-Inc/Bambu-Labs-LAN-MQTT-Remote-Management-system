@@ -46,7 +46,7 @@ sudo python3 -m json.tool /etc/3d-printer-management/config.json >/dev/null && e
 | `printers` | list | `[]` | Printers to manage, in addition to the ones added in the dashboard. See [Printer entries](#printer-entries). |
 | `demo` | boolean | `false` | `true` = don't connect to printers; simulate them. Demo printers are also shown while no printers are set up (here or in the dashboard). |
 | `example_data` | object | two demo printers | Demo mode only: fake telemetry per printer name, in the same shape as a Bambu MQTT `print` report. |
-| `listen` | list of IPs | `["127.0.0.1", "<chosen IP>"]` | Addresses the dashboard listens on. Set by the installer. |
+| `listen` | list of IPs | `["127.0.0.1", "<chosen IP>"]` | Addresses the dashboard listens on. Set by the installer. An address that isn't up yet is retried every 30 s. A Tailscale address (100.64.0.0/10) that's no longer the Pi's is replaced by the Pi's Tailscale address now. |
 | `port` | number | `8080` | Dashboard port |
 | `require_login` | boolean | `false` | `true` = the dashboard asks for its password (and sessions last 12 hours). `false` = no sign-in: anyone who can reach the address can use it. See [Signing in](#signing-in). |
 | `allowed_hosts` | list of names | `[]` | Without signing in, extra host names the dashboard answers to, for example `["printers.example.org"]`. IP addresses and local names (no dot, `.local`, `.lan`, `.home.arpa`, `.internal`, Tailscale's `.ts.net`) always work. |

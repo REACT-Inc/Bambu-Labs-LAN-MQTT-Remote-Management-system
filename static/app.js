@@ -545,6 +545,9 @@ $('memberWatchForm').onsubmit=async e=>{e.preventDefault();
  try{const r=await api('memberwatch',{enabled:$('mwEnabled').checked,recipients:$('mwRecipients').value,members:$('mwMembers').value,include_bots:$('mwBots').checked,
   watch:[...document.querySelectorAll('#mwKinds input:checked')].map(i=>i.value)});renderMemberWatch(r);$('mwStatus').textContent='Saved.';}
  catch(err){$('mwStatus').textContent=err.message;}};
+$('mwTest').onclick=async()=>{const b=$('mwTest');b.disabled=true;$('mwStatus').textContent='Sending…';
+ try{const r=await api('memberwatch/test',{});$('mwStatus').textContent=r.results.map(x=>x.ok?`✓ ${x.user}: sent`:`✕ ${x.user}: ${x.error}`).join(' · ');}
+ catch(err){$('mwStatus').textContent=err.message;}finally{b.disabled=false;}};
 const tabWithMemberWatch=tab;tab=function(name){tabWithMemberWatch(name);if(name==='settings'&&state?.manage!==false&&!$('settings').hidden)loadMemberWatch();};
 // Print plans (print_plans.py): steps that change speed, a temperature or the fan at a percentage or layer.
 const PLAN_ICONS={waiting:'⏳',done:'✅',skipped:'⏭️',failed:'⚠️'};

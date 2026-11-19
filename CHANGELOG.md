@@ -10,6 +10,16 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
   - **Speed:** a profile (normal, silent, sport, ludicrous), or any percentage from 10 to 300, sent as the G-code speed override (M220).
   - **Which print:** a plan is for the print running now, or for the next print if the printer is idle. It ends with that print, survives restarts, and says in Activity and the notifications what it changed.
   - **Permissions:** each step follows its own command's permission (`/speed`, `/temperature`, `/fan`, `/chamber`).
+- **Member updates: Send test DM.** A button in **Settings & help → Member updates by DM** sends each recipient a test DM straight away, and says who can't receive DMs (and why), instead of waiting for someone to change something.
+
+### Fixed
+- **Member updates no longer get stuck:** a change that came in while a batch was being sent waited until the next change, which could be hours later. It now goes in the next batch a minute later.
+- **Member updates with more than one server:** a member's nickname, roles and time-out are kept per server, and say which server. Before, a nickname change in two servers was merged into one wrong line.
+- **The dashboard follows a new Tailscale address.** The installer put the Pi's Tailscale address in `listen` (`config.json`). If Tailscale later gave the Pi a new address (signed in again, for example to add ACL tags), the dashboard kept trying the old one for good, so it was out of reach from the tailnet.
+  - **Now:** a Tailscale address in `listen` that isn't the Pi's any more is replaced by the Pi's Tailscale address now, also while running.
+  - **Where it shows:** Activity says *Dashboard address changed*, and the status icon shows the address. The pm-doctor page (port 8081) does the same.
+  - **Problem addresses:** addresses the dashboard can't open now show in the status icon, not only in the log.
+  - **Troubleshooting** explains the Tailscale policy rule needed after tagging the Pi. See [Troubleshooting](docs/troubleshooting.md#the-dashboard-stopped-loading-over-tailscale-for-example-after-adding-acl-tags).
 
 ## 1.9.21-beta.3
 

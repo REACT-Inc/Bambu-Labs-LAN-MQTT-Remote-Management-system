@@ -31,6 +31,7 @@ import discord
 KINDS = ('status', 'custom_status', 'activity', 'nickname', 'username', 'avatar', 'roles', 'timeout')
 DEFAULT_WATCH = ['custom_status', 'activity', 'nickname', 'username', 'avatar', 'roles', 'timeout']   # status: noisy, so opt-in
 PRESENCE_KINDS = {'status', 'custom_status', 'activity'}
+SERVER_KINDS = {'nickname', 'roles', 'timeout'}   # one per server (a member's nickname differs between servers)
 LABELS = dict(status='Status', custom_status='Custom status', activity='Activity', nickname='Nickname', username='Username',
               avatar='Profile picture', roles='Roles', timeout='Time-out')
 STATUS = {'online': '🟢 online', 'idle': '🌙 idle', 'dnd': '⛔ do not disturb', 'offline': '⚫ offline', 'invisible': '⚫ offline'}
@@ -183,12 +184,18 @@ class MemberWatch:
 
     def add(self, member, changes):
         who = getattr(member, 'display_name', None) or getattr(member, 'name', '') or str(member.id)
+        guild = getattr(member, 'guild', None)
+        servers = len(self.core.ALLOWED_GUILD_IDS) > 1
         for kind, before, after in changes:
-            key = (member.id, kind) if kind != 'roles' else (member.id, kind, len(self.order))   # each role change on its own
+            # A presence comes once per shared server: one key merges them. Server things (a nickname) stay per server.
+            key = (member.id, kind, getattr(guild, 'id', None) if kind in SERVER_KINDS or (kind == 'avatar' and guild) else None)
+            if kind == 'roles':
+                key += (len(self.order),)   # each role change on its own
             if key in self.pending:
                 self.pending[key].update(after=after, who=who)   # the first "before", the last "after"
             else:
-                self.pending[key] = dict(id=member.id, who=who, kind=kind, before=before, after=after)
+                server = getattr(guild, 'name', None) if servers and key[2] is not None else None
+                self.pending[key] = dict(id=member.id, who=who, kind=kind, before=before, after=after, server=server)
                 self.order.append(key)
         if changes and (self.task is None or self.task.done()):
             self.task = asyncio.get_running_loop().create_task(self.flush_later())
@@ -215,14 +222,20 @@ class MemberWatch:
             if c['before'] == c['after'] and c['kind'] not in ('roles', 'timeout'):
                 continue
             change = f"{c['before'] or '(none)'} → {c['after'] or '(none)'}" if c['kind'] not in ('roles', 'timeout') else str(c['after'])
-            out.append(f"**{discord.utils.escape_markdown(c['who'])}** (<@{c['id']}>) · {LABELS[c['kind']]}: {discord.utils.escape_markdown(change)}")
+            where = f" in {discord.utils.escape_markdown(c['server'])}" if c.get('server') else ''
+            out.append(f"**{discord.utils.escape_markdown(c['who'])}** (<@{c['id']}>) · {LABELS[c['kind']]}{where}: {discord.utils.escape_markdown(change)}")
         self.pending.clear()
         self.order.clear()
         return out
 
     async def flush_later(self):
-        await self.sleep(self.batch)
-        await self.flush()
+        # Changes that come in while a batch is being sent go in the next one (this task is still running, so add()
+        # doesn't start another): keep going until nothing is waiting.
+        while True:
+            await self.sleep(self.batch)
+            await self.flush()
+            if not self.pending:
+                return
 
     async def flush(self):
         lines = self.lines()
@@ -255,6 +268,27 @@ class MemberWatch:
             if self.problem.startswith("Member updates couldn't be sent") and delivered == len(self.settings['recipients']):
                 self.problem = ''
         return delivered
+
+    async def test(self):
+        """Send each recipient a test DM now: [(user id, None or why it failed)]."""
+        if not self.core.bot.is_ready():
+            raise ValueError('The Discord bot isn\'t connected: connect it first (Settings & help → Discord).')
+        results = []
+        for user_id in self.settings['recipients']:
+            try:
+                user = self.core.bot.get_user(user_id) or await self.core.bot.fetch_user(user_id)
+                await user.send(embed=self.core.card('👤 Member updates: test', 'Member updates from your server will arrive here, '
+                                                     'collected for a minute and sent together.'))
+                results.append((user_id, None))
+            except discord.Forbidden:
+                results.append((user_id, "they don't accept DMs from this server's members (server menu → Privacy Settings)"))
+            except discord.NotFound:
+                results.append((user_id, 'no Discord user has this ID'))
+            except discord.HTTPException as exc:
+                results.append((user_id, str(exc)[:200]))
+        if all(error is None for _, error in results):
+            self.problem = '' if self.problem.startswith("Member updates couldn't be sent") else self.problem
+        return results
 
     def status(self):
         """The status icon (status_center.py)."""

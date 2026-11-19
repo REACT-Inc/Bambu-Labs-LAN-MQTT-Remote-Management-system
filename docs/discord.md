@@ -186,7 +186,9 @@ When someone in your server changes their Discord status or profile, the people 
 
 **If they aren't on:** the bot asks for these only while member updates are on. If they aren't turned on in the portal, the bot still connects without them, and the status icon (top left) says which intent to turn on.
 
-**Receiving the DMs:** each person who gets them must share a server with the bot, and allow DMs from that server's members (server menu → **Privacy Settings**). If a DM can't be sent, the status icon says so.
+**Receiving the DMs:** each person who gets them must share a server with the bot, and allow DMs from that server's members (server menu → **Privacy Settings**). **Send test DM** in the panel checks this straight away; if a real DM can't be sent later, the status icon says so.
+
+**More than one server:** if the bot is in more than one of your servers, nickname, role and time-out changes say which server they happened in.
 
 ## Reply visibility
 

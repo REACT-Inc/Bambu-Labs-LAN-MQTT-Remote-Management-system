@@ -89,6 +89,27 @@ Other destinations, such as a Discord webhook or email, can be added in `issue_r
 - **Only on the Pi?** `http://localhost:8080` only works on the Pi itself.
 - **Did start-up fail?** Search the log for `Start-up failed` or `Cannot listen on`: they say why the dashboard couldn't open. Another copy may be using the port, or an address in `listen` may not exist on the Pi. An address that isn't up yet (for example a hotspot) is retried every 30 s while the others work.
 
+### The dashboard stopped loading over Tailscale (for example after adding ACL tags)
+
+**Tagged devices and your Tailscale policy:** tagging the Pi in Tailscale (`tag:printers`, say) makes the tag its owner instead of you. Policies that only allow `autogroup:self`, like Tailscale's starter policy, then stop letting you reach it.
+- **To check:** `tailscale ping <pi>` from your computer works, but the page doesn't load.
+- **To fix:** in the Tailscale admin console, under **Access controls**, allow your account to reach the tag on the dashboard ports:
+
+  ```json
+  "tagOwners": { "tag:printers": ["autogroup:admin"] },
+  "grants": [
+    { "src": ["autogroup:member"], "dst": ["tag:printers"], "ip": ["8080", "8081", "22"] }
+  ]
+  ```
+
+  That's the dashboard (8080), pm-doctor (8081) and SSH (22). With the older `"acls"` style, the same rule is `{"action": "accept", "src": ["autogroup:member"], "dst": ["tag:printers:8080,8081,22"]}`.
+
+**A new Tailscale address:** signing the Pi in to Tailscale again (often needed to add tags) can give it a new `100.x.x.x` address.
+- **Since 1.9.22-beta.1,** the dashboard and pm-doctor notice that the address in `listen` is gone, and listen on the Pi's Tailscale address now.
+  - **Activity** says *Dashboard address changed* with the new address, and the status icon (top left) shows it.
+  - **To make it permanent,** put the new address in `listen` in `/etc/3d-printer-management/config.json`, then restart.
+- **Before 1.9.22-beta.1:** compare `tailscale ip -4` on the Pi with `listen` in `config.json`, fix `listen`, and restart: `sudo systemctl restart 3d-printer-management`.
+
 ### A printer shows OFFLINE
 
 - **Check the printer settings:** in `config.json`, `ip`, `serial` and `access_code` must match the printer's screen. Give printers a fixed address in your router.

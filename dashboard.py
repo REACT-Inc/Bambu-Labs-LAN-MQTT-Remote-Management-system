@@ -165,7 +165,8 @@ class Dashboard:
                              web.post('/api/printplan/{name}/clear',self.plan_clear)])
         self.app.on_startup.append(self.start_plans);self.app.on_shutdown.append(self.stop_plans)
         self.member_watch=member_watch.MemberWatch(core)   # Member updates by DM (main.py installs its Discord listeners)
-        self.app.add_routes([web.get('/api/memberwatch',self.member_watch_get),web.post('/api/memberwatch',self.member_watch_save)])
+        self.app.add_routes([web.get('/api/memberwatch',self.member_watch_get),web.post('/api/memberwatch',self.member_watch_save),
+                             web.post('/api/memberwatch/test',self.member_watch_test)])
         self.status.add_source(self.member_watch.status)
         self.app.on_startup.append(self.signin.start);self.app.on_shutdown.append(self.signin.stop)
         self.status.add_source(self.signin.status)
@@ -875,6 +876,11 @@ class Dashboard:
         name=request.match_info['name']
         self.print_plans.clear(name,actor(request))
         return web.json_response({'plan':None})
+
+    async def member_watch_test(self,request):
+        if not self.member_watch.settings['recipients']:raise ValueError('Add and save at least one Discord user ID first.')
+        results=await self.member_watch.test()
+        return web.json_response({'results':[{'user':str(u),'ok':e is None,'error':e} for u,e in results]})
 
     def permission_state(self):
         """Every top-level Discord command with its default and current permission level."""
