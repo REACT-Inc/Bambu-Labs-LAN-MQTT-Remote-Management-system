@@ -22,6 +22,7 @@ import hmac
 import html
 import http.server
 import io
+import ipaddress
 import json
 import os
 import re
@@ -38,7 +39,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-DOCTOR_VERSION = '1.0.0'
+DOCTOR_VERSION = '1.0.1'
 SERVICE = '3d-printer-management'
 APP_CONFIG = Path('/etc/3d-printer-management/config.json')
 DATA_DIR = Path('/var/lib/3d-printer-management')
@@ -518,13 +519,48 @@ def render(doctor, csrf):
     return ''.join(rows)
 
 
-def serve(doctor, addresses, port):
+TAILSCALE = ipaddress.ip_network('100.64.0.0/10')
+
+
+def is_tailscale(address):
+    try:
+        return ipaddress.ip_address(str(address)) in TAILSCALE
+    except ValueError:
+        return False
+
+
+def tailscale_ipv4(run=subprocess.run):
+    """This Pi's Tailscale IPv4 address now, or None. (The app has the same in tailscale_address.py; pm-doctor
+    imports nothing from the app, so it keeps working when the app is broken.)"""
+    try:
+        out = run(['tailscale', 'ip', '-4'], capture_output=True, text=True, timeout=5).stdout or ''
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return next((a for a in out.split() if is_tailscale(a)), None)
+
+
+def serve_missing(doctor, addresses, servers, port, tailscale=tailscale_ipv4):
+    """Each check: open the page on addresses that weren't there before (the network still starting), and on the
+    Pi's Tailscale address now if the one in "listen" is gone (signed in to Tailscale again, e.g. for ACL tags)."""
+    served = {s.server_address[0] for s in servers}
+    missing = [a for a in addresses if a not in served]
+    new = serve(doctor, missing, port, quiet=True) if missing else []
+    served |= {s.server_address[0] for s in new}
+    if any(is_tailscale(a) and a not in served for a in addresses):
+        now = tailscale()
+        if now and now not in served:
+            new += serve(doctor, [now], port, quiet=True)
+    return new
+
+
+def serve(doctor, addresses, port, quiet=False):
     servers = []
     for address in addresses:
         try:
             server = StatusServer((address, port), make_handler(doctor))
         except OSError as exc:
-            print(f'pm-doctor: status page not on {address}:{port} ({exc})', file=sys.stderr, flush=True)
+            if not quiet:
+                print(f'pm-doctor: status page not on {address}:{port} ({exc})', file=sys.stderr, flush=True)
             continue
         threading.Thread(target=server.serve_forever, daemon=True).start()
         servers.append(server)
@@ -575,10 +611,15 @@ def main(argv=None):
     if doctor.settings.get('status_page'):
         config = doctor.checks.config()
         addresses = list(dict.fromkeys(['127.0.0.1', *(config.get('listen') or [])]))
-        serve(doctor, addresses, int(doctor.settings.get('port') or 8081))
+        port = int(doctor.settings.get('port') or 8081)
+        servers = serve(doctor, addresses, port)
     interval = max(10, int(doctor.settings.get('interval') or 30))
     while True:
         try:
+            if doctor.settings.get('status_page'):
+                for server in serve_missing(doctor, addresses, servers, port):
+                    print(f'pm-doctor: status page now on {server.server_address[0]}:{port}', file=sys.stderr, flush=True)
+                    servers.append(server)
             doctor.tick()
         except Exception as exc:   # the doctor itself must never stop
             print(f'pm-doctor: check failed: {type(exc).__name__}: {exc}', file=sys.stderr, flush=True)
