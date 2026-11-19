@@ -2,7 +2,9 @@
 
 What changed in each version. Upgrade steps are in [docs/updates.md](docs/updates.md).
 
-## Unreleased
+## 1.9.22-beta.1
+
+Built on 1.9.21-beta.3: print plans (change speed, a temperature or the fan when a print reaches a percentage or a layer, from Discord or the dashboard), the dashboard follows a new Tailscale address instead of going out of reach, and member updates get a Send test DM button and two fixes.
 
 ### Added
 - **Print plans:** change a printer's speed, a temperature or the part fan by itself when its print reaches a percentage or a layer. For example, speed 277 % at 10 %, then back to normal at layer 60. See [Print plans](docs/printer-controls.md#print-plans-changes-at-a-percentage-or-layer).
