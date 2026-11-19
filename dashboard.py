@@ -37,6 +37,7 @@ from Updater.web_updates import BUSY as UPDATE_BUSY
 from Updater.version import VERSION
 from cloudflare_access import actor
 from access_web import SignIn
+from print_plans import PrintPlans
 from discord_Intergration import member_watch
 
 # Management: Discord and team tools, laptops, the server, settings, problem reports and installing updates. With
@@ -79,6 +80,7 @@ class Dashboard:
         self.started = time.time()   # this run of the app: the desktop app notices restarts (notification numbers start again)
         self.file_browser = Browser(core)
         self.controls = Controls(core,store)
+        self.print_plans = PrintPlans(core,store,self.controls)   # change speed etc. at a percentage or layer (/printplan)
         self.objects = ObjectSkip(core,store,self.controls)   # cancel single objects mid-print
         self.cameras = Cameras(core)
         core.live_cameras = self.cameras
@@ -159,6 +161,9 @@ class Dashboard:
             web.post('/api/password', self.change_password), web.post('/api/testnotification', self.test_notification),
         ])
         self.app.add_routes(self.signin.routes())
+        self.app.add_routes([web.post('/api/printplan/{name}',self.plan_add),web.post('/api/printplan/{name}/remove',self.plan_remove),
+                             web.post('/api/printplan/{name}/clear',self.plan_clear)])
+        self.app.on_startup.append(self.start_plans);self.app.on_shutdown.append(self.stop_plans)
         self.member_watch=member_watch.MemberWatch(core)   # Member updates by DM (main.py installs its Discord listeners)
         self.app.add_routes([web.get('/api/memberwatch',self.member_watch_get),web.post('/api/memberwatch',self.member_watch_save)])
         self.status.add_source(self.member_watch.status)
@@ -539,7 +544,7 @@ class Dashboard:
         printers=[]
         for name in self.core.names():
             state,error,data,connected=self.core.state_data(name)
-            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),condition=self.triage.condition(name,error,data),storage=self.storage(name,data,connected),connected=connected,data=data,sides=filament_sides.summary(data),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
+            printers.append(dict(ai=self.failure.state(name),plate_swap=self.engine.plate_swap.state(name),limits=limits(self.core,name),camera=self.cameras.state(name),has_camera=self.snapshots.has_camera(name),snapshot=self.snapshots.state(name),name=name,display_name=self.core.display_name(name) if hasattr(self.core,"display_name") else name,state=state,error=error,error_text=self.error_text(name,error,data),condition=self.triage.condition(name,error,data),storage=self.storage(name,data,connected),connected=connected,data=data,sides=filament_sides.summary(data),plan=self.print_plans.public(name),alerts=self.alerts.current(name),display_state=self.core.display_state(state,error,connected) if hasattr(self.core,'display_state') else state,last_print=self.core.last_print_note(state,error) if hasattr(self.core,'last_print_note') else '',last_seen=self.core.last_seen.get(name)))
         jobs=self.store.jobs()
         for j in jobs: j['has_file']=bool(j.pop('asset',None))   # the path stays on the server; the UI only needs to know (#57)
         manage=self.can_manage(request)
@@ -847,6 +852,29 @@ class Dashboard:
         self.store.event('Settings','Member updates '+('on' if s['enabled'] else 'off'),
                          f"{len(s['recipients'])} recipient(s) • watching: {', '.join(member_watch.LABELS[k] for k in s['watch']) or 'nothing'} • {actor(request)}")
         return web.json_response(self.member_watch_state())
+
+    # ---- print plans (print_plans.py) ----
+
+    async def start_plans(self,app):
+        self.plans_task=asyncio.create_task(self.print_plans.run())
+
+    async def stop_plans(self,app):
+        self.plans_task.cancel()
+
+    async def plan_add(self,request):
+        name=request.match_info['name'];data=await request.json()
+        plan,step=self.print_plans.add(name,data.get('at'),data.get('action'),data.get('value'),actor(request))
+        return web.json_response({'plan':self.print_plans.public(name),'step':step})
+
+    async def plan_remove(self,request):
+        name=request.match_info['name'];data=await request.json()
+        self.print_plans.remove(name,str(data.get('id','')),actor(request))
+        return web.json_response({'plan':self.print_plans.public(name)})
+
+    async def plan_clear(self,request):
+        name=request.match_info['name']
+        self.print_plans.clear(name,actor(request))
+        return web.json_response({'plan':None})
 
     def permission_state(self):
         """Every top-level Discord command with its default and current permission level."""

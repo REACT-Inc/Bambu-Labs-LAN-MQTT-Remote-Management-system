@@ -12,6 +12,7 @@ In demo mode, controls only change the simulated data.
 - [Temperatures](#temperatures)
 - [Chamber heating (H2D)](#chamber-heating-h2d)
 - [Print speed](#print-speed)
+- [Print plans: changes at a percentage or layer](#print-plans-changes-at-a-percentage-or-layer)
 - [Fans](#fans)
 - [Moving the axes](#moving-the-axes)
 - [Filament: material and colour per slot](#filament-material-and-colour-per-slot)
@@ -136,7 +137,42 @@ Like Bambu Studio and Bambu Handy, you can stop printing one or more objects on 
 
 ## Print speed
 
-`/speed mode:sport`, or the dashboard control *Print speed*. Profiles: **Silent**, **Standard**, **Sport**, **Ludicrous**.
+`/speed mode:sport`, or the dashboard control *Print speed*. Profiles: **Silent**, **Standard**, **Sport**, **Ludicrous** (Bambu's 50, 100, 124 and 166 %).
+
+## Print plans: changes at a percentage or layer
+
+A print plan changes the speed, a temperature or the part fan by itself when the print reaches a percentage or a layer. For example: speed 277 % at 10 %, then back to normal at layer 60.
+
+**In Discord:**
+```
+/printplan add name:H2D when:10% change:Speed to:277%
+/printplan add name:H2D when:layer 60 change:Speed to:normal
+/printplan show name:H2D
+/printplan remove name:H2D step:a1b2c3
+/printplan clear name:H2D
+```
+**In the dashboard:** open the printer's panel, then **Print plan** (under *Print speed*).
+
+| | |
+|---|---|
+| **When** | A percentage from 1 to 99 (`10%`), or a layer (`layer 60`, `L60`) |
+| **Speed** | `normal` (standard), `silent`, `sport` or `ludicrous`, or a percentage from 10 to 300 (`277%`) |
+| **Nozzle, bed, chamber** | °C, with the same limits as the temperature controls |
+| **Part fan** | 0–100 % |
+
+**Which print:**
+- **Made during a print,** a plan is for that print. **Made while the printer is idle,** it's for the next print it starts.
+- **When it ends:** the plan ends with its print (finished, failed or cancelled). Activity says how many changes it made.
+- **Restarts:** plans survive a restart of the app.
+
+**How steps run:**
+- **Once each, as the dashboard would make it:** the printer must be connected, and each change appears in the notifications (and in Discord's notification channel).
+- **Already passed:** a step for a point the print has already reached (at 10 % when it's at 40 %) is marked *already passed* and doesn't run. Use `/speed` to change it now.
+- **Reached together:** if several steps of one kind are reached at once (the Pi was off for a while), only the last one runs.
+
+**Custom percentages** (anything other than 50, 100, 124 and 166 %) are sent as the G-code speed override `M220 S<percent>`. Bambu's own start G-code uses it too, but how far past *Ludicrous* a printer really goes is up to its firmware. If yours ignores it, use a profile.
+
+**Who can use it:** `/printplan` follows the permission of each change's own command. A speed step needs `/speed`, nozzle and bed steps need `/temperature` (admins by default), a fan step needs `/fan`, and a chamber step needs `/chamber`. In the dashboard, view-only accounts can see a plan but not change it.
 
 ## Fans
 

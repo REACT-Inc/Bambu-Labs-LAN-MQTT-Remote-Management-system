@@ -1012,7 +1012,7 @@ def help_embed(admin=False):
     # wrap this callback or send their own extra help messages.
     groups = [
         ('📊 Printers & files', {'status','printer','filaments','file','help','adminhelp'}, 'Printer status, camera snapshots, filament and stored files.'),
-        ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move','home'}, 'Pause/resume/cancel, lights, temperatures, speed, fan, homing and axis jogging.'),
+        ('🎛️ Printer controls', {'pause','resume','stop','lighton','lightoff','temperature','chamber','speed','fan','fanall','move','home','printplan'}, 'Pause/resume/cancel, lights, temperatures, speed, fan, homing and axis jogging; /printplan changes them at a percentage or layer.'),
         ('📋 Print queues', {'queueadd','queue','queuestart','queueforce','queuemanage','reprint'}, 'View, add, start and manage jobs. Starts and changes ask for confirmation and are logged.'),
         ('🔄 Swapmod', {'plateswap'}, 'Turn Swapmod on or off, and swap the plate now with the swap print.'),
         ('⚙️ Administration', {'setnotificationchannel','setcommandschannel','publiccommands','rename','dm','archive','unarchive','diagnostics','reportissue'}, 'Channel settings, temporary public replies, printer names, DMs, archives, diagnostic reports and problem reports.'),

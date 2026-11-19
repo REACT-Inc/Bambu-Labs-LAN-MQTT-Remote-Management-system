@@ -9,6 +9,8 @@ import printer_models
 import filament_sides
 
 SPEEDS={'silent':1,'standard':2,'sport':3,'ludicrous':4}
+SPEED_PERCENTS={'silent':50,'standard':100,'sport':124,'ludicrous':166}   # what Bambu's profiles mean
+SPEED_PERCENT=(10,300)   # a custom speed percentage (M220)
 # Bambu generic filament presets: tray_info_idx and nozzle temperature range sent with ams_filament_setting.
 FILAMENTS={'PLA':('GFL99',190,230),'PETG':('GFG99',220,260),'ABS':('GFB99',240,270),'ASA':('GFB98',240,270),
            'TPU':('GFU99',200,250),'PC':('GFC99',260,290),'PA':('GFN99',260,290),'PVA':('GFS99',190,230)}
@@ -50,6 +52,11 @@ def prepare(core,name,kind,value,axis=None):
     if kind=='speed':
         if value not in SPEEDS:raise ValueError('Choose silent, standard, sport or ludicrous.')
         return 'print_speed',str(SPEEDS[value]),f'Print speed → {value}'
+    if kind=='speed_percent':
+        # Any percentage: the G-code speed override (M220; Bambu's own start G-code resets it with M220 S100). The four
+        # speed profiles above are what Bambu Studio sends; how far past them a printer goes is up to its firmware.
+        value=number(value,SPEED_PERCENT[0],SPEED_PERCENT[1],True)
+        return 'gcode_line',f'M220 S{value}\n',f'Print speed → {value} % (M220)'
     if kind=='chamber':
         top=printer_models.limits(core,name)['chamber']
         if not top:raise ValueError('Active chamber heating is only available on H2-series printers (H2D, H2S, H2C).')
@@ -197,7 +204,8 @@ class Controls:
                 side=param[0]['extruder_index']
                 for item in ((d.get('device') or {}).get('extruder') or {}).get('info') or []:
                     if item.get('id')==side:item['temp']=(int(value)<<16)|(int(item.get('temp') or 0)&0xFFFF)
-            elif kind=='speed':d['spd_lvl']=SPEEDS[value]
+            elif kind=='speed':d['spd_lvl']=SPEEDS[value];d['spd_mag']=SPEED_PERCENTS[value]
+            elif kind=='speed_percent':d['spd_mag']=int(value)
             elif kind=='chamber':d['ctt']=int(value)
             elif kind=='filament':
                 item=param[0];tray={'tray_type':item['tray_type'],'tray_color':item['tray_color'],'remain':100}

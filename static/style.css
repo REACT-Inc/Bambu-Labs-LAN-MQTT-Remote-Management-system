@@ -375,4 +375,5 @@ code{overflow-wrap:anywhere}
  .slicer-tools button{min-height:40px;padding:8px 12px}
 }
 .mw-kinds{border:1px solid var(--line);border-radius:10px;padding:6px 14px;margin:14px 0}.mw-kinds legend{color:#c6d4ca;padding:0 6px}.mw-kinds .checkbox{margin:8px 0}
+.plan-steps{list-style:none;padding:0;margin:8px 0;display:grid;gap:6px}.plan-step{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font-size:13px}.plan-step.done{opacity:.75}.plan-step.failed{border-color:#794d49}.plan-form{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:center}.plan-form input,.plan-form select{margin:0}body.view-only #planForm,body.view-only #planClear,body.view-only [data-plan-remove]{display:none}@media(max-width:720px){.plan-form{grid-template-columns:1fr 1fr}.plan-form button{grid-column:1/-1}}
 
