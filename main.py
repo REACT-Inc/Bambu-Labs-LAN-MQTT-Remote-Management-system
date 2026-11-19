@@ -14,6 +14,7 @@ from discord_Intergration.discord_queue import install
 from discord_Intergration.extra_discord import install as install_extras
 from discord_Intergration.controls_discord import install as install_controls
 from discord_Intergration.clear_errors_discord import install as install_clear_errors
+from discord_Intergration.print_plan_discord import install as install_print_plans
 from swapMod.plate_swap_discord import install as install_plate_swap
 from team import Team
 from discord_Intergration.team_discord import install as install_team
@@ -53,6 +54,7 @@ async def main():
     install_team(core,team)
     install_extras(core,store)
     install_controls(core,dashboard.controls)
+    install_print_plans(core,dashboard.print_plans)   # /printplan
     install_clear_errors(core,dashboard.alerts)
     install_plate_swap(core,engine)
     install_member_watch(core,dashboard.member_watch)   # Member updates by DM

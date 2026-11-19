@@ -5,6 +5,11 @@ What changed in each version. Upgrade steps are in [docs/updates.md](docs/update
 ## Unreleased
 
 ### Added
+- **Print plans:** change a printer's speed, a temperature or the part fan by itself when its print reaches a percentage or a layer. For example, speed 277 % at 10 %, then back to normal at layer 60. See [Print plans](docs/printer-controls.md#print-plans-changes-at-a-percentage-or-layer).
+  - **Where:** `/printplan add name when change to` (plus `show`, `remove` and `clear`) in Discord, or **Print plan** in the dashboard's printer panel.
+  - **Speed:** a profile (normal, silent, sport, ludicrous), or any percentage from 10 to 300, sent as the G-code speed override (M220).
+  - **Which print:** a plan is for the print running now, or for the next print if the printer is idle. It ends with that print, survives restarts, and says in Activity and the notifications what it changed.
+  - **Permissions:** each step follows its own command's permission (`/speed`, `/temperature`, `/fan`, `/chamber`).
 - **Member updates: Send test DM.** A button in **Settings & help → Member updates by DM** sends each recipient a test DM straight away, and says who can't receive DMs (and why), instead of waiting for someone to change something.
 
 ### Fixed

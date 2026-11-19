@@ -549,4 +549,21 @@ $('mwTest').onclick=async()=>{const b=$('mwTest');b.disabled=true;$('mwStatus').
  try{const r=await api('memberwatch/test',{});$('mwStatus').textContent=r.results.map(x=>x.ok?`✓ ${x.user}: sent`:`✕ ${x.user}: ${x.error}`).join(' · ');}
  catch(err){$('mwStatus').textContent=err.message;}finally{b.disabled=false;}};
 const tabWithMemberWatch=tab;tab=function(name){tabWithMemberWatch(name);if(name==='settings'&&state?.manage!==false&&!$('settings').hidden)loadMemberWatch();};
+// Print plans (print_plans.py): steps that change speed, a temperature or the fan at a percentage or layer.
+const PLAN_ICONS={waiting:'⏳',done:'✅',skipped:'⏭️',failed:'⚠️'};
+function renderPlan(){const p=state?.printers.find(x=>x.name===selectedPrinter);if(!p)return;const plan=p.plan;
+ $('planHead').textContent=!plan?'No plan for this printer.':plan.current?`For the print now running${plan.progress?` (at ${plan.progress.percent??'—'} %, layer ${plan.progress.layer??'—'})`:''}.`:'For the next print this printer starts.';
+ $('planSteps').innerHTML=(plan?.steps||[]).map(s=>`<li class="plan-step ${esc(s.state)}"><span>${PLAN_ICONS[s.state]||''} At <b>${s.at_kind==='percent'?esc(s.at)+' %':'layer '+esc(s.at)}</b>: ${esc(s.label)}${s.note&&s.state!=='done'?` <small class="muted">(${esc(s.note)})</small>`:''}</span>${s.state==='waiting'?`<button type="button" class="small-btn" data-plan-remove="${esc(s.id)}" aria-label="Remove this step">✕</button>`:''}</li>`).join('');
+ $('planClear').hidden=!plan;}
+const detailsWithPlan=renderDetails;renderDetails=function(){detailsWithPlan();renderPlan();};
+$('planAction').onchange=()=>{$('planValue').placeholder={speed:'277% or normal',nozzle:'220',bed:'60',fan:'0–100',chamber:'0 or 40–65'}[$('planAction').value];};
+$('planForm').onsubmit=async e=>{e.preventDefault();
+ try{const r=await api('printplan/'+encodeURIComponent(selectedPrinter),{at:$('planAt').value,action:$('planAction').value,value:$('planValue').value});
+  $('planStatus').textContent=r.step.state==='skipped'?'Added, but the print is already past that point, so it won\'t run.':r.step.kind==='speed_percent'?'Added. A custom percentage is sent as the G-code speed override (M220); the printer\'s firmware decides how fast it really goes.':'Added.';
+  $('planAt').value='';$('planValue').value='';await refresh();}
+ catch(err){$('planStatus').textContent=err.message;}};
+$('planSteps').addEventListener('click',async e=>{const b=e.target.closest('[data-plan-remove]');if(!b)return;b.disabled=true;
+ try{await api('printplan/'+encodeURIComponent(selectedPrinter)+'/remove',{id:b.dataset.planRemove});$('planStatus').textContent='Step removed.';await refresh();}
+ catch(err){$('planStatus').textContent=err.message;b.disabled=false;}});
+$('planClear').onclick=async()=>{try{await api('printplan/'+encodeURIComponent(selectedPrinter)+'/clear',{});$('planStatus').textContent='Plan cleared.';await refresh();}catch(err){$('planStatus').textContent=err.message;}};
 

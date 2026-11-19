@@ -78,6 +78,10 @@ Every command in this table shows a confirmation card first. Only the person who
 | `/lighton` | `name?` | Turn the chamber light on | |
 | `/lightoff` | `name?` | Turn the chamber light off | |
 | `/speed` | `mode` `name?` | Set the print speed profile | silent / standard / sport / ludicrous |
+| `/printplan add` | `name` `when` `change` `to` | At a percentage (`10%`) or a layer (`layer 60`), change the speed (`277%`, `normal`…), a temperature or the part fan | Each step also needs its own command's permission (`/speed`, `/temperature`, `/fan`, `/chamber`) |
+| `/printplan show` | `name` | Show a printer's print plan and each step's state | |
+| `/printplan remove` | `name` `step` | Remove one step (its code is in `/printplan show`) | |
+| `/printplan clear` | `name` | Remove the whole plan | A plan also ends by itself with its print |
 | `/fan` | `percent` `name?` `target?` | Set one fan on one printer (0–100 %) | |
 | `/fanall` | `percent` | Set every manually controllable fan on **every printer** (0 = off) | Reports the result per printer. An offline printer doesn't stop the others |
 | `/queuestart` | `name?` | Confirm the plate is clear and start the first queued job | |

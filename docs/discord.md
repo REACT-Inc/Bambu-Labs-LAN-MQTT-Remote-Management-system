@@ -87,6 +87,7 @@ Details: [Print queue](print-queue.md).
 | `/temperature target degrees name?` | A | `nozzle` (active), `left nozzle` / `right nozzle` (dual-nozzle printers), `bed` or `chamber` target in °C (0 = off) |
 | `/chamber degrees name?` | A | H2D chamber target: 0 = off or 40–65 °C |
 | `/speed mode name?` | E | `silent`, `standard`, `sport` or `ludicrous` |
+| `/printplan add name when change to` · `show` · `remove` · `clear` | E* | Change speed, a temperature or the fan when the print reaches a percentage or layer (`when:10% change:Speed to:277%`). *Each change also needs its own command's permission. See [Print plans](printer-controls.md#print-plans-changes-at-a-percentage-or-layer) |
 | `/fan percent name? target?` | E | One fan, 0–100 % (autocomplete lists the printer's fans) |
 | `/fanall percent` | E | All manually controllable fans on **every printer** (reports the result per printer) |
 | `/home name?` | A | Home all axes (idle printer only) |
